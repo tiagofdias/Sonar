@@ -21,9 +21,7 @@ services:
         value: O3aNgVA0cA7Twe47KA4F1ssH7JU
 
   # Frontend static site
-  - type: web
+  - type: static
     name: sonar-frontend
-    env: static
-    plan: starter
     buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
+    publishPath: frontend/dist
