@@ -1,11 +1,11 @@
 services:
-  # Backend API service
+  # Full-stack application (backend + frontend)
   - type: web
-    name: sonar-backend
+    name: sonar-app
     env: node
     plan: free
-    buildCommand: cd backend && npm install
-    startCommand: cd backend && npm start
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
@@ -19,9 +19,3 @@ services:
         value: 673249356813619
       - key: CLOUDINARY_API_SECRET
         value: O3aNgVA0cA7Twe47KA4F1ssH7JU
-
-  # Frontend static site
-  - type: static
-    name: sonar-frontend
-    buildCommand: cd frontend && npm install && npm run build
-    publishPath: frontend/dist
