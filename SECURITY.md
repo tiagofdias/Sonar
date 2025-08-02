@@ -2,7 +2,29 @@
 
 ## Environment Variables
 
-**NEVER commit `.env` files to version control.**
+**NEVER commit `.env` files or hardcode credentials in `render.yaml` to version control.**
+
+### Render Deployment
+
+In your `render.yaml`, use `sync: false` for sensitive environment variables:
+
+```yaml
+envVars:
+  - key: NODE_ENV
+    value: production
+  - key: MONGODB_URI
+    sync: false
+  - key: JWT_SECRET
+    sync: false
+  - key: CLOUDINARY_CLOUD_NAME
+    sync: false
+  - key: CLOUDINARY_API_KEY
+    sync: false
+  - key: CLOUDINARY_API_SECRET
+    sync: false
+```
+
+Then set the actual values in your Render dashboard under Environment Variables.
 
 ### Required Environment Variables
 
