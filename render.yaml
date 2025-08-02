@@ -1,20 +1,14 @@
 services:
-  # Backend service
+  # Backend API service
   - type: web
     name: sonar-backend
-    runtime: node
+    env: node
     plan: free
     buildCommand: cd backend && npm install
     startCommand: cd backend && npm start
-    env: node
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        fromService:
-          type: web
-          name: sonar-backend  
-          property: port
       - key: MONGODB_URI
         fromDatabase:
           name: sonar-database
@@ -28,9 +22,11 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
 
-  # Static site for frontend
-  - type: static
+  # Frontend static site
+  - type: web
     name: sonar-frontend
+    env: static
+    plan: free
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
     envVars:
