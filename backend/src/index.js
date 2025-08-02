@@ -49,10 +49,10 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Based on Render's directory structure: 
+  // Based on Render's directory structure:
   // cwd: /opt/render/project/src/backend
-  // We need: /opt/render/project/frontend/dist
-  const frontendPath = path.resolve(process.cwd(), "../../frontend/dist");
+  // Frontend build is at: /opt/render/project/src/frontend/dist
+  const frontendPath = path.resolve(process.cwd(), "../frontend/dist");
   
   console.log("Looking for frontend files at:", frontendPath);
   console.log("Current working directory:", process.cwd());

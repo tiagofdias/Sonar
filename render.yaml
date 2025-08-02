@@ -4,7 +4,13 @@ services:
     name: sonar-app
     env: node
     plan: free
-    buildCommand: npm run build
+    buildCommand: |
+      # Build both frontend and backend
+      npm run build
+      # Copy frontend build into backend for serving
+      cp -R frontend/dist backend/dist
+      # Install backend dependencies
+      npm install --prefix backend
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
