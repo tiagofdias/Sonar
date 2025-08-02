@@ -53,9 +53,9 @@ app.use("/api/messages", messageRoutes);
 if (process.env.NODE_ENV === "production") {
   // Serve the static frontend build - find the correct path based on Render's layout
   const candidates = [
-    path.resolve(__dirname, "../dist"),                    // backend/dist (copied approach)
-    path.resolve(__dirname, "../../frontend/dist"),        // from backend/src to frontend/dist  
-    path.resolve(process.cwd(), "../frontend/dist"),       // from src/backend to frontend/dist
+    path.resolve(__dirname, "../../dist"),                 // backend/src to backend/dist (copied approach)
+    path.resolve(__dirname, "../../../frontend/dist"),     // from backend/src to frontend/dist  
+    path.resolve(process.cwd(), "../../frontend/dist"),    // from src/backend to frontend/dist
     "/opt/render/project/frontend/dist",                   // Render absolute path
     "/opt/render/project/dist"                             // Root dist folder
   ];
