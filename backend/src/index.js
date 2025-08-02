@@ -49,45 +49,56 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Based on Render's directory structure: /opt/render/project/src/backend is cwd
-  // Frontend dist should be at: /opt/render/project/frontend/dist
-  const frontendPath = path.join(process.cwd(), "../../frontend/dist");
+  // Based on Render's directory structure: 
+  // cwd: /opt/render/project/src/backend
+  // We need: /opt/render/project/frontend/dist
+  const frontendPath = path.resolve(process.cwd(), "../../frontend/dist");
   
   console.log("Looking for frontend files at:", frontendPath);
   console.log("Current working directory:", process.cwd());
-  console.log("__dirname:", __dirname);
+  console.log("Resolved path:", path.resolve(process.cwd(), "../../frontend/dist"));
   
   if (fs.existsSync(frontendPath)) {
-    console.log("Found frontend files! Serving static files from:", frontendPath);
+    console.log("✅ Found frontend files! Serving static files from:", frontendPath);
     app.use(express.static(frontendPath));
 
     // Catch all handler: send back React's index.html file for any non-API routes
     app.get("*", (req, res) => {
       const indexPath = path.join(frontendPath, "index.html");
-      console.log("Serving index.html from:", indexPath);
       if (fs.existsSync(indexPath)) {
+        console.log("✅ Serving index.html from:", indexPath);
         res.sendFile(indexPath);
       } else {
-        console.log("index.html not found at:", indexPath);
+        console.log("❌ index.html not found at:", indexPath);
         res.status(404).send("index.html not found");
       }
     });
   } else {
-    console.log("Frontend build directory not found at:", frontendPath);
-    // Check what's actually in the project directory
-    const projectRoot = path.join(process.cwd(), "../..");
-    console.log("Project root contents:", fs.readdirSync(projectRoot));
-    if (fs.existsSync(path.join(projectRoot, "frontend"))) {
-      console.log("Frontend directory contents:", fs.readdirSync(path.join(projectRoot, "frontend")));
+    console.log("❌ Frontend build directory not found at:", frontendPath);
+    
+    // Debug: Check what exists in the project
+    const projectRoot = "/opt/render/project";
+    console.log("📁 Project root contents:");
+    try {
+      const rootContents = fs.readdirSync(projectRoot);
+      console.log(rootContents);
+      
+      if (rootContents.includes("frontend")) {
+        console.log("📁 Frontend directory contents:");
+        const frontendContents = fs.readdirSync(path.join(projectRoot, "frontend"));
+        console.log(frontendContents);
+      }
+    } catch (err) {
+      console.log("Error reading directories:", err.message);
     }
     
     app.get("*", (req, res) => {
       res.status(404).json({
         error: "Frontend build not found",
         expectedPath: frontendPath,
+        resolvedPath: path.resolve(process.cwd(), "../../frontend/dist"),
         cwd: process.cwd(),
-        __dirname: __dirname,
-        projectRoot: projectRoot
+        __dirname: __dirname
       });
     });
   }
