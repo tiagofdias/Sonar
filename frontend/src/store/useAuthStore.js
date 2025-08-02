@@ -8,9 +8,14 @@ const getSocketURL = () => {
     return "http://localhost:5001";
   }
   
-  // In production, use the backend URL from environment or current origin
+  // In production, use the backend URL from environment or construct from service name
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
-  return backendUrl || window.location.origin;
+  if (backendUrl) {
+    return backendUrl;
+  }
+  
+  // Default to the expected Render backend service URL
+  return "https://sonar-backend.onrender.com";
 };
 
 const BASE_URL = getSocketURL();
