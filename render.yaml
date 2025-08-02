@@ -10,17 +10,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: MONGODB_URI
-        fromDatabase:
-          name: sonar-database
-          property: connectionString
+        value: mongodb+srv://tiagodiascl:cbYZeh2iovHFwiwp@cluster0.at1qu.mongodb.net/realtalk_db?retryWrites=true&w=majority&appName=Cluster0
       - key: JWT_SECRET
-        generateValue: true
+        value: mysecretkey
       - key: CLOUDINARY_CLOUD_NAME
-        sync: false
+        value: dv38vvlpg
       - key: CLOUDINARY_API_KEY
-        sync: false
+        value: 673249356813619
       - key: CLOUDINARY_API_SECRET
-        sync: false
+        value: O3aNgVA0cA7Twe47KA4F1ssH7JU
 
   # Frontend static site
   - type: web
@@ -29,10 +27,3 @@ services:
     plan: free
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-
-# MongoDB database
-databases:
-  - name: sonar-database
-    databaseName: sonar
-    user: sonar_user
-    plan: free
