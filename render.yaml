@@ -4,34 +4,8 @@ services:
     name: sonar-app
     env: node
     plan: free
-    buildCommand: |
-      set -e
-      echo "🚀 Starting build process..."
-      
-      echo "📦 Installing frontend dependencies..."
-      cd frontend && npm install
-      
-      echo "🔨 Building frontend..."
-      npm run build
-      
-      echo "✅ Frontend build complete. Checking dist directory..."
-      if [ -d "dist" ]; then
-        echo "✅ dist directory exists"
-        ls -la dist/
-        echo "✅ Contents of dist/index.html:"
-        head -n 5 dist/index.html || echo "❌ index.html not found"
-      else
-        echo "❌ dist directory not found!"
-        echo "📁 Current directory contents:"
-        ls -la
-        exit 1
-      fi
-      
-      echo "📦 Installing backend dependencies..."
-      cd ../backend && npm install
-      
-      echo "✅ Build process complete!"
-    startCommand: cd backend && npm start
+    buildCommand: npm run build
+    startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
