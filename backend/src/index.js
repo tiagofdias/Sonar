@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 import { connectDB } from "./lib/db.js";
 
@@ -14,7 +15,8 @@ import { app, server } from "./lib/socket.js";
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
-const __dirname = path.resolve();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Get allowed origins based on environment
 const getAllowedOrigins = () => {
@@ -49,54 +51,45 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Based on Render's directory structure:
-  // cwd: /opt/render/project/src/backend
-  // Frontend build is at: /opt/render/project/src/frontend/dist
-  const frontendPath = path.resolve(process.cwd(), "../frontend/dist");
+  // Serve the static frontend build - find the correct path based on Render's layout
+  const candidates = [
+    path.resolve(__dirname, "../dist"),                    // backend/dist (copied approach)
+    path.resolve(__dirname, "../../frontend/dist"),        // from backend/src to frontend/dist  
+    path.resolve(process.cwd(), "../frontend/dist"),       // from src/backend to frontend/dist
+    "/opt/render/project/frontend/dist",                   // Render absolute path
+    "/opt/render/project/dist"                             // Root dist folder
+  ];
   
-  console.log("Looking for frontend files at:", frontendPath);
+  let frontendPath = null;
+  console.log("🔍 Searching for frontend build...");
   console.log("Current working directory:", process.cwd());
-  console.log("Resolved path:", path.resolve(process.cwd(), "../../frontend/dist"));
+  console.log("__dirname:", __dirname);
   
-  if (fs.existsSync(frontendPath)) {
-    console.log("✅ Found frontend files! Serving static files from:", frontendPath);
+  for (const candidate of candidates) {
+    console.log("Checking:", candidate);
+    if (fs.existsSync(candidate)) {
+      frontendPath = candidate;
+      console.log("✅ Found frontend build at:", frontendPath);
+      break;
+    }
+  }
+  
+  if (frontendPath) {
     app.use(express.static(frontendPath));
+    console.log("✅ Serving static files from:", frontendPath);
 
     // Catch all handler: send back React's index.html file for any non-API routes
     app.get("*", (req, res) => {
       const indexPath = path.join(frontendPath, "index.html");
-      if (fs.existsSync(indexPath)) {
-        console.log("✅ Serving index.html from:", indexPath);
-        res.sendFile(indexPath);
-      } else {
-        console.log("❌ index.html not found at:", indexPath);
-        res.status(404).send("index.html not found");
-      }
+      res.sendFile(indexPath);
     });
   } else {
-    console.log("❌ Frontend build directory not found at:", frontendPath);
-    
-    // Debug: Check what exists in the project
-    const projectRoot = "/opt/render/project";
-    console.log("📁 Project root contents:");
-    try {
-      const rootContents = fs.readdirSync(projectRoot);
-      console.log(rootContents);
-      
-      if (rootContents.includes("frontend")) {
-        console.log("📁 Frontend directory contents:");
-        const frontendContents = fs.readdirSync(path.join(projectRoot, "frontend"));
-        console.log(frontendContents);
-      }
-    } catch (err) {
-      console.log("Error reading directories:", err.message);
-    }
+    console.log("❌ No frontend build found in any candidate paths");
     
     app.get("*", (req, res) => {
       res.status(404).json({
         error: "Frontend build not found",
-        expectedPath: frontendPath,
-        resolvedPath: path.resolve(process.cwd(), "../../frontend/dist"),
+        candidates: candidates,
         cwd: process.cwd(),
         __dirname: __dirname
       });
