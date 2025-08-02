@@ -49,18 +49,55 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Serve static files from the React app build directory
-  const frontendPath = path.join(__dirname, "../../frontend/dist");
-  console.log("Serving static files from:", frontendPath);
+  // Try multiple possible paths for the frontend build
+  const possiblePaths = [
+    path.join(__dirname, "../../frontend/dist"),
+    path.join(__dirname, "../../../frontend/dist"), 
+    path.join(__dirname, "../../dist"),
+    path.join(process.cwd(), "frontend/dist"),
+    path.join(process.cwd(), "dist")
+  ];
   
-  app.use(express.static(frontendPath));
+  let frontendPath = null;
+  const fs = require('fs');
+  
+  // Find the correct path
+  for (const testPath of possiblePaths) {
+    if (fs.existsSync(testPath)) {
+      frontendPath = testPath;
+      console.log("Found frontend files at:", frontendPath);
+      break;
+    } else {
+      console.log("Path does not exist:", testPath);
+    }
+  }
+  
+  if (frontendPath) {
+    console.log("Serving static files from:", frontendPath);
+    app.use(express.static(frontendPath));
 
-  // Catch all handler: send back React's index.html file for any non-API routes
-  app.get("*", (req, res) => {
-    const indexPath = path.join(frontendPath, "index.html");
-    console.log("Serving index.html from:", indexPath);
-    res.sendFile(indexPath);
-  });
+    // Catch all handler: send back React's index.html file for any non-API routes
+    app.get("*", (req, res) => {
+      const indexPath = path.join(frontendPath, "index.html");
+      console.log("Serving index.html from:", indexPath);
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        console.log("index.html not found at:", indexPath);
+        res.status(404).send("Frontend files not found");
+      }
+    });
+  } else {
+    console.log("No frontend build directory found! Checked paths:", possiblePaths);
+    app.get("*", (req, res) => {
+      res.status(404).json({
+        error: "Frontend build not found",
+        checkedPaths: possiblePaths,
+        cwd: process.cwd(),
+        __dirname: __dirname
+      });
+    });
+  }
 } else {
   // Development route
   app.get("/", (req, res) => {

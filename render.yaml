@@ -5,8 +5,14 @@ services:
     env: node
     plan: free
     buildCommand: |
+      echo "Building frontend..."
       cd frontend && npm install && npm run build
+      echo "Frontend build complete. Contents of dist:"
+      ls -la dist/ || echo "dist directory not found"
+      echo "Installing backend dependencies..."
       cd ../backend && npm install
+      echo "Build process complete. Current directory structure:"
+      cd .. && find . -name "dist" -type d
     startCommand: cd backend && npm start
     envVars:
       - key: NODE_ENV
