@@ -1,0 +1,48 @@
+services:
+  # Backend service
+  - type: web
+    name: sonar-backend
+    runtime: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    env: node
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        fromService:
+          type: web
+          name: sonar-backend  
+          property: port
+      - key: MONGODB_URI
+        fromDatabase:
+          name: sonar-database
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  # Static site for frontend
+  - type: static
+    name: sonar-frontend
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        fromService:
+          type: web
+          name: sonar-backend
+          property: url
+
+# MongoDB database
+databases:
+  - name: sonar-database
+    databaseName: sonar
+    user: sonar_user
+    plan: free
