@@ -49,30 +49,16 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Try multiple possible paths for the frontend build
-  const possiblePaths = [
-    path.join(__dirname, "../../frontend/dist"),
-    path.join(__dirname, "../../../frontend/dist"), 
-    path.join(__dirname, "../../dist"),
-    path.join(process.cwd(), "frontend/dist"),
-    path.join(process.cwd(), "dist")
-  ];
+  // Based on Render's directory structure: /opt/render/project/src/backend is cwd
+  // Frontend dist should be at: /opt/render/project/frontend/dist
+  const frontendPath = path.join(process.cwd(), "../../frontend/dist");
   
-  let frontendPath = null;
+  console.log("Looking for frontend files at:", frontendPath);
+  console.log("Current working directory:", process.cwd());
+  console.log("__dirname:", __dirname);
   
-  // Find the correct path
-  for (const testPath of possiblePaths) {
-    if (fs.existsSync(testPath)) {
-      frontendPath = testPath;
-      console.log("Found frontend files at:", frontendPath);
-      break;
-    } else {
-      console.log("Path does not exist:", testPath);
-    }
-  }
-  
-  if (frontendPath) {
-    console.log("Serving static files from:", frontendPath);
+  if (fs.existsSync(frontendPath)) {
+    console.log("Found frontend files! Serving static files from:", frontendPath);
     app.use(express.static(frontendPath));
 
     // Catch all handler: send back React's index.html file for any non-API routes
@@ -83,17 +69,25 @@ if (process.env.NODE_ENV === "production") {
         res.sendFile(indexPath);
       } else {
         console.log("index.html not found at:", indexPath);
-        res.status(404).send("Frontend files not found");
+        res.status(404).send("index.html not found");
       }
     });
   } else {
-    console.log("No frontend build directory found! Checked paths:", possiblePaths);
+    console.log("Frontend build directory not found at:", frontendPath);
+    // Check what's actually in the project directory
+    const projectRoot = path.join(process.cwd(), "../..");
+    console.log("Project root contents:", fs.readdirSync(projectRoot));
+    if (fs.existsSync(path.join(projectRoot, "frontend"))) {
+      console.log("Frontend directory contents:", fs.readdirSync(path.join(projectRoot, "frontend")));
+    }
+    
     app.get("*", (req, res) => {
       res.status(404).json({
         error: "Frontend build not found",
-        checkedPaths: possiblePaths,
+        expectedPath: frontendPath,
         cwd: process.cwd(),
-        __dirname: __dirname
+        __dirname: __dirname,
+        projectRoot: projectRoot
       });
     });
   }
