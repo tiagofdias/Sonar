@@ -36,14 +36,35 @@ app.use(
   })
 );
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "OK", 
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../../frontend/dist")));
+  // Serve static files from the React app build directory
+  const frontendPath = path.join(__dirname, "../../frontend/dist");
+  console.log("Serving static files from:", frontendPath);
+  
+  app.use(express.static(frontendPath));
 
+  // Catch all handler: send back React's index.html file for any non-API routes
   app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../../frontend", "dist", "index.html"));
+    const indexPath = path.join(frontendPath, "index.html");
+    console.log("Serving index.html from:", indexPath);
+    res.sendFile(indexPath);
+  });
+} else {
+  // Development route
+  app.get("/", (req, res) => {
+    res.json({ message: "API is running in development mode" });
   });
 }
 
