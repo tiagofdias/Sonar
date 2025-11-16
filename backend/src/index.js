@@ -40,8 +40,8 @@ app.use(
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  res.json({ 
-    status: "OK", 
+  res.json({
+    status: "OK",
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString()
   });
@@ -51,44 +51,48 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  // Serve the static frontend build - find the correct path based on Render's layout
+  // Serve the static frontend build
+  // Priority order for finding the frontend build
   const candidates = [
-    path.resolve(__dirname, "../../dist"),                 // backend/src to backend/dist (copied approach)
-    path.resolve(__dirname, "../../../frontend/dist"),     // from backend/src to frontend/dist  
-    path.resolve(process.cwd(), "../../frontend/dist"),    // from src/backend to frontend/dist
-    "/opt/render/project/frontend/dist",                   // Render absolute path
-    "/opt/render/project/dist"                             // Root dist folder
+    path.resolve(__dirname, "../dist"),                    // backend/src to backend/dist (primary for Render)
+    path.resolve(__dirname, "../../dist"),                 // fallback: project root dist
+    path.resolve(__dirname, "../../../frontend/dist"),     // fallback: from backend/src to frontend/dist
   ];
-  
+
   let frontendPath = null;
-  console.log("🔍 Searching for frontend build...");
+  console.log(" Searching for frontend build...");
   console.log("Current working directory:", process.cwd());
   console.log("__dirname:", __dirname);
-  
+
   for (const candidate of candidates) {
     console.log("Checking:", candidate);
     if (fs.existsSync(candidate)) {
-      frontendPath = candidate;
-      console.log("✅ Found frontend build at:", frontendPath);
-      break;
+      const indexFile = path.join(candidate, "index.html");
+      if (fs.existsSync(indexFile)) {
+        frontendPath = candidate;
+        console.log(" Found frontend build at:", frontendPath);
+        break;
+      }
     }
   }
-  
+
   if (frontendPath) {
     app.use(express.static(frontendPath));
-    console.log("✅ Serving static files from:", frontendPath);
+    console.log(" Serving static files from:", frontendPath);
 
-    // Catch all handler: send back React's index.html file for any non-API routes
+    // Catch all handler: send back React\'s index.html file for any non-API routes
     app.get("*", (req, res) => {
       const indexPath = path.join(frontendPath, "index.html");
       res.sendFile(indexPath);
     });
   } else {
-    console.log("❌ No frontend build found in any candidate paths");
-    
+    console.log(" No frontend build found in any candidate paths");
+    console.log("Searched paths:", candidates);
+
     app.get("*", (req, res) => {
       res.status(404).json({
         error: "Frontend build not found",
+        message: "Please ensure the frontend is built and copied to the correct location",
         candidates: candidates,
         cwd: process.cwd(),
         __dirname: __dirname
