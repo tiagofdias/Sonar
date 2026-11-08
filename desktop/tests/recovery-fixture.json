@@ -1,0 +1,13 @@
+{
+  "accountId": "0123456789abcdef01234567",
+  "recoveryKey": "0CA2-ADJ7-B1MQ-N2WW-NPZC-ZR7H",
+  "pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgVbigiOOF3upUB14ZATn17eNKaGL6aVOyFKrzBtsumIuhRANCAARg+gFPwPlrXGHEljk/46R1KjYyT6xJ4E62GFQCruJyb5twS/cO6TUS3O29gO9WN7wWI4+DvTVTwn5ldB+qOTvT",
+  "proof": "ipQUCZK-YMfpgldq_y3UH0tfXAAymdz09eMU3E25TrA",
+  "verifier": "a7a2517d2a8cd62331cfdf0e466e903fbab06c5001874e7e05517feadf814311",
+  "backup": {
+    "version": 2,
+    "publicKey": "BGD6AU/A+WtcYcSWOT/jpHUqNjJPrEngTrYYVAKu4nJvm3BL9w7pNRLc7b2A71Y3vBYjj4O9NVPCfmV0H6o5O9M=",
+    "iv": "QEFCQ0RFRkdISUpL",
+    "ciphertext": "Q89ryF65RQyNhyAj8sKqEd8Nowt18adJDnMCyBwntgjScXzP4a64JsPJ4g+4i+9K6FOVrwPPH8gljQFCrWwtRem5K719bULp5wfCi90/htW5FTLGeHmwXpCKTkwQ+01eZevasohY+sQ1kxCpxLGePDCdlhDETCxbfzj8H4zMrScqElWyYVA/7bBqYjnJFhVME+1OVBlhzNXJLg=="
+  }
+}

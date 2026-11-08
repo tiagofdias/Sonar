@@ -5,15 +5,28 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test src/models/message.test.js src/routes/community.test.js src/routes/auth.test.js src/routes/keyBackup.test.js src/routes/passkey.test.js src/routes/history.test.js src/routes/voice.test.js src/routes/voiceRooms.test.js src/routes/matrixDevice.test.js src/middleware/authRateLimit.test.js src/middleware/sharedRateLimit.test.js src/lib/socketSession.test.js src/lib/matrixKeys.test.js src/lib/matrixVerification.test.js src/lib/matrixSessionBinding.test.js src/lib/matrixEnrollment.test.js src/lib/matrixRotation.test.js src/lib/retentionIndexes.test.js",
+    "dev:local": "node scripts/dev-local.mjs",
+    "test:retention-indexes": "node --test src/lib/retentionIndexes.test.js",
+    "test:matrix-attachment": "node scripts/test-matrix-attachment.mjs",
+    "test:native-live": "node scripts/test-native-live.mjs",
+    "test:browser": "node scripts/test-passkey-browser.mjs",
+    "test:matrix-store-browser": "node scripts/test-matrix-store-browser.mjs",
+    "test:matrix-register-browser": "node scripts/test-matrix-register-browser.mjs",
+    "test:matrix-register-native": "node scripts/test-matrix-register-native.mjs",
+    "test:matrix-pairing-native-browser": "node scripts/test-matrix-pairing-native-browser.mjs",
+    "test:matrix-contact-native-browser": "node scripts/test-matrix-contact-native-browser.mjs",
+    "test:native-web-voice": "node scripts/test-native-web-voice.mjs",
+    "test:matrix-native-web": "node scripts/test-matrix-native-web.mjs"
   },
   "keywords": [],
   "author": "",
   "type": "module",
   "license": "ISC",
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.3",
     "bcryptjs": "^2.4.3",
-    "cloudinary": "^2.5.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -23,6 +36,11 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7"
+    "@matrix-org/matrix-sdk-crypto-wasm": "^19.0.0",
+    "fake-indexeddb": "^6.2.7",
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^3.1.7",
+    "playwright": "^1.64.1",
+    "socket.io-client": "^4.8.4"
   }
 }

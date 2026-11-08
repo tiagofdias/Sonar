@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useAuthStore } from "../store/useAuthStore";
-import AuthImagePattern from "../components/AuthImagePattern";
 import { Link } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Lock, Mail, MessageSquare } from "lucide-react";
 
@@ -32,7 +31,7 @@ const LoginPage = () => {
                 <MessageSquare className="w-6 h-6 text-primary" />
               </div>
               <h1 className="text-2xl font-bold mt-2">
-                Talk all day, Sonar's the way!
+                Talk all day, Sonar&apos;s the way!
               </h1>
               <p className="text-base-content/60">Sign in to your account</p>
             </div>

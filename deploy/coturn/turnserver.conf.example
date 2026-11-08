@@ -1,0 +1,30 @@
+# TEMPLATE ONLY. Copy outside the repository and set the realm and secret.
+# Never start an Internet-facing relay with example credentials.
+listening-port=3478
+min-port=49160
+max-port=49200
+use-auth-secret
+# realm=turn.your-domain.example
+# static-auth-secret=REPLACE_WITH_A_UNIQUE_RANDOM_SECRET
+# If behind 1:1 NAT, add external-ip=PUBLIC_IPV4/PRIVATE_IPV4.
+
+# Limit allocation count and aggregate throughput. Adjust to available capacity.
+total-quota=100
+bps-capacity=1000000
+no-cli
+no-multicast-peers
+no-tcp-relay
+
+# Block IPv4 private, loopback, link-local and carrier-grade NAT peers.
+# Add every other internal or sensitive subnet reachable from this host.
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+
+# Configure certificates and TLS/DTLS listeners according to the installed
+# coturn version. Without TLS, TURN credentials can be observed on the path.
+# IPv6 requires separately reviewed peer restrictions and firewall rules.

@@ -1,0 +1,15 @@
+import { webcrypto } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+const crypto = webcrypto;
+const alice = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+const bob = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"]);
+const b64 = value => Buffer.from(value).toString("base64");
+const key = await crypto.subtle.deriveKey({ name: "ECDH", public: bob.publicKey }, alice.privateKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+const iv = crypto.getRandomValues(new Uint8Array(12));
+const context = "sonar:v1:alice:bob:channel:channel-one";
+const text = "Interoperability test message";
+const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(context) }, key, new TextEncoder().encode(text));
+const alicePublicRaw = await crypto.subtle.exportKey("raw", alice.publicKey);
+const digest = Buffer.from(await crypto.subtle.digest("SHA-256", alicePublicRaw)).toString("hex").match(/.{1,4}/g).join(" ");
+const data = { aliceFingerprint: digest, alicePrivate: b64(await crypto.subtle.exportKey("pkcs8", alice.privateKey)), alicePublic: b64(alicePublicRaw), bobPrivate: b64(await crypto.subtle.exportKey("pkcs8", bob.privateKey)), bobPublic: b64(await crypto.subtle.exportKey("raw", bob.publicKey)), iv: b64(iv), ciphertext: b64(ciphertext), context, text };
+await writeFile(new URL("../tests/webcrypto-fixture.json", import.meta.url), JSON.stringify(data, null, 2) + "\n");

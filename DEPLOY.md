@@ -1,140 +1,44 @@
-# Sonar Chat App - Render Deployment Guide
+# Deploying Sonar for free
 
-This is a full-stack real-time chat application built with React, Express.js, Socket.IO, and MongoDB.
+Sonar needs no paid service. This guide uses two free tiers: a Render free web service (runs the backend and serves the web app) and a MongoDB Atlas free M0 cluster (the database). Free-tier quotas and availability are set by those providers and can change. Never add a payment method or enable automatic upgrades; if a free limit is reached, the service stops instead of billing you.
 
-## 🚀 Deploy to Render with Blueprint
+You can also run everything on a computer you already own; see "Run locally" in [README.md](README.md).
 
-This project is configured to deploy on Render using their Blueprint feature, which will automatically set up both your backend API and frontend static site.
+## 1. Database: MongoDB Atlas M0 (free)
 
-### Prerequisites
+1. Create an account at <https://www.mongodb.com/cloud/atlas> and create a **free M0 cluster**. It is a replica set, which Sonar needs for channel transactions.
+2. Under **Database Access**, create a database user with a strong generated password.
+3. Under **Network Access**, allow the hosting provider's addresses (Render free services have no fixed IP, so `0.0.0.0/0` is the usual choice; the strong database password then matters).
+4. Copy the connection string, e.g. `mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/sonar?retryWrites=true&w=majority`.
 
-1. A [Render](https://render.com) account
-2. A GitHub repository with this code
-3. Cloudinary account for image uploads (optional)
+The database user needs permission to create indexes: Sonar creates its message-expiry indexes at startup.
 
-### Deployment Steps
+## 2. App: Render free web service
 
-1. **Fork/Clone this repository** to your GitHub account
+1. Push this repository to GitHub.
+2. In Render choose **New → Blueprint** and select the repository. `render.yaml` creates one free web service.
+3. Set the environment variables Render asks for:
 
-2. **Connect to Render**:
-   - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New" → "Blueprint"
-   - Connect your GitHub repository
-   - Select this repository
+| Variable | Value |
+|----------|-------|
+| `MONGODB_URI` | The Atlas connection string from step 1 |
+| `JWT_SECRET` | A random secret of at least 32 characters: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `FRONTEND_URL` | The service's public address, e.g. `https://sonar-app.onrender.com` (used for CORS, Socket.IO and passkeys) |
 
-3. **Configure Environment Variables**:
-   
-   The blueprint will automatically create the following services:
-   - `sonar-backend` - Express.js API server
-   - `sonar-frontend` - React static site
-   - `sonar-database` - MongoDB database
+4. Deploy, then open the service address and create an account.
 
-   You'll need to set these environment variables in Render:
+Render's free web services sleep after a period of inactivity, so the first request after a pause can take up to a minute.
 
-   **For the Backend Service:**
-   - `CLOUDINARY_CLOUD_NAME` - Your Cloudinary cloud name (optional)
-   - `CLOUDINARY_API_KEY` - Your Cloudinary API key (optional)
-   - `CLOUDINARY_API_SECRET` - Your Cloudinary API secret (optional)
+## 3. Desktop app
 
-   **Note:** The following are automatically configured by the blueprint:
-   - `NODE_ENV=production`
-   - `PORT` - Auto-assigned by Render
-   - `MONGODB_URI` - Auto-connected to the database
-   - `JWT_SECRET` - Auto-generated secure secret
+Build it with `powershell -NoProfile -File desktop/scripts/package-windows.ps1` (see README), run it, choose **Server** on the sign-in screen and enter the same `https://` address. Web and desktop share accounts and conversations.
 
-4. **Deploy**:
-   - Click "Apply" to deploy your blueprint
-   - Render will automatically build and deploy both services
-   - The frontend will be automatically configured to connect to the backend
+## Voice calls across the internet (optional)
 
-5. **Access Your App**:
-   - Your backend API will be available at: `https://sonar-backend-xxx.onrender.com`
-   - Your frontend will be available at: `https://sonar-frontend-xxx.onrender.com`
+Calls between people on the same network work without extra services. To connect people behind strict NATs, run an operator-controlled TURN server (coturn) on hardware you control or a free VM. See [deploy/coturn](deploy/coturn/README.md) and set `TURN_URLS` and `TURN_SHARED_SECRET`. No relay is provisioned by default, and none is required for messaging.
 
-### Features
+## Troubleshooting
 
-- ✅ Real-time messaging with Socket.IO
-- ✅ User authentication with JWT
-- ✅ Image sharing with Cloudinary
-- ✅ Responsive UI with Tailwind CSS and DaisyUI
-- ✅ Online user status
-- ✅ Message history
-- ✅ Profile management
-
-### Local Development
-
-1. **Clone the repository**:
-   ```bash
-   git clone <your-repo-url>
-   cd sonar-chat-app
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**:
-   - Copy `backend/.env.example` to `backend/.env`
-   - Copy `frontend/.env.example` to `frontend/.env`
-   - Fill in your environment variables
-
-4. **Start development servers**:
-   ```bash
-   npm run dev
-   ```
-
-   This will start:
-   - Backend on `http://localhost:5001`
-   - Frontend on `http://localhost:5173`
-
-### Project Structure
-
-```
-sonar-chat-app/
-├── render.yaml              # Render Blueprint configuration
-├── package.json             # Root package.json with scripts
-├── backend/                 # Express.js API
-│   ├── src/
-│   │   ├── index.js        # Main server file
-│   │   ├── controllers/    # Route controllers
-│   │   ├── middleware/     # Custom middleware
-│   │   ├── models/         # MongoDB models
-│   │   ├── routes/         # API routes
-│   │   └── lib/           # Utilities and configurations
-│   └── package.json
-└── frontend/               # React application
-    ├── src/
-    │   ├── components/     # React components
-    │   ├── pages/         # Page components
-    │   ├── store/         # Zustand state management
-    │   └── lib/           # Frontend utilities
-    └── package.json
-```
-
-### Troubleshooting
-
-**If deployment fails:**
-
-1. Check the build logs in Render dashboard
-2. Ensure all required environment variables are set
-3. Verify your `render.yaml` configuration
-4. Check that your repository is properly connected
-
-**Common issues:**
-
-- **CORS errors**: The app is configured to handle cross-origin requests between services
-- **Database connection**: MongoDB is automatically provisioned and connected
-- **Environment variables**: JWT_SECRET is auto-generated for security
-
-### Support
-
-If you encounter any issues:
-
-1. Check Render's documentation: https://render.com/docs
-2. Review the deployment logs in your Render dashboard
-3. Ensure your environment variables are properly configured
-
----
-
-**Note**: The free tier on Render may experience cold starts. For production use, consider upgrading to a paid plan for better performance.
+- **"Origin not allowed" on sign-in:** set `FRONTEND_URL` to the exact public address. Current versions also accept the service's own `https://` address behind Render's proxy.
+- **"MongoDB connected" never appears:** check the Atlas network access list and the password in `MONGODB_URI`.
+- **Startup stops at an index error:** the database user lacks index permissions; see the README's retention notes.

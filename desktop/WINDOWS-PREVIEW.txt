@@ -1,0 +1,11 @@
+Sonar Desktop
+
+The native Windows client for Sonar. It has the same design and features as the
+web app and opens the same conversations: sign in with the same account.
+
+On the sign-in screen choose "Server" to enter your Sonar address (https://...).
+HTTP is only allowed for a server on this computer. Your message key is unlocked
+with your password and then protected for this Windows user (DPAPI) in
+%LOCALAPPDATA%\Sonar. Uninstalling does not erase that folder.
+
+This build is unsigned and has not had an independent security review.

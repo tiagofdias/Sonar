@@ -1,0 +1,11 @@
+{
+  "aliceFingerprint": "c475 6811 2658 b3cd 23e4 a546 cf52 be3b d879 c055 98ea 7002 cb36 f399 20a1 2643",
+  "alicePrivate": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgVbigiOOF3upUB14ZATn17eNKaGL6aVOyFKrzBtsumIuhRANCAARg+gFPwPlrXGHEljk/46R1KjYyT6xJ4E62GFQCruJyb5twS/cO6TUS3O29gO9WN7wWI4+DvTVTwn5ldB+qOTvT",
+  "alicePublic": "BGD6AU/A+WtcYcSWOT/jpHUqNjJPrEngTrYYVAKu4nJvm3BL9w7pNRLc7b2A71Y3vBYjj4O9NVPCfmV0H6o5O9M=",
+  "bobPrivate": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgI3xvyCLG333NHULUD7ujWIpuevDXDmF4fOX1zNMisRqhRANCAAQZDgjUwq3gYhyNJyuHkw8ddQ3QCN94hnNTqOHNnVv07EMkxihT7LiVqgu7dtqJncADDo6FABwkkRR/NxNJJny3",
+  "bobPublic": "BBkOCNTCreBiHI0nK4eTDx11DdAI33iGc1Oo4c2dW/TsQyTGKFPsuJWqC7t22omdwAMOjoUAHCSRFH83E0kmfLc=",
+  "iv": "V0mkhF0e5v9leZQo",
+  "ciphertext": "0dxfnWTN0ofUEEFpPuxHJkH4pHTpvrSrfhsG0bQBzpOwaNEb92yCQusyfD5b",
+  "context": "sonar:v1:alice:bob:channel:channel-one",
+  "text": "Interoperability test message"
+}

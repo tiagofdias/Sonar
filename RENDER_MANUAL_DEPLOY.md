@@ -7,7 +7,6 @@ This guide walks you through deploying the Sonar Chat App on Render manually (wi
 1. A [Render](https://render.com) account
 2. Your code pushed to a GitHub repository
 3. A MongoDB database (MongoDB Atlas recommended)
-4. Cloudinary account (optional, for image uploads)
 
 ---
 
@@ -59,14 +58,7 @@ Click on **"Environment"** tab and add these variables:
 | `PORT` | `10000` | Render will auto-assign, but 10000 is default |
 | `MONGODB_URI` | `your_mongodb_connection_string` | Get this from MongoDB Atlas |
 | `JWT_SECRET` | `generate_a_random_secure_string` | Use a strong random string (min 32 chars) |
-
-### Optional Variables (for image uploads)
-
-| Key | Value |
-|-----|-------|
-| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name |
-| `CLOUDINARY_API_KEY` | Your Cloudinary API key |
-| `CLOUDINARY_API_SECRET` | Your Cloudinary API secret |
+| `FRONTEND_URL` | `https://your-service.onrender.com` | The exact public address of this service |
 
 **💡 To generate a secure JWT_SECRET:**
 ```bash
@@ -147,11 +139,7 @@ NODE_ENV=production
 PORT=10000
 MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/sonar_db?retryWrites=true&w=majority
 JWT_SECRET=your_secure_random_string_here
-
-# Optional (for Cloudinary image uploads)
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
+FRONTEND_URL=https://your-service.onrender.com
 ```
 
 ---

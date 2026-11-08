@@ -15,9 +15,7 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
+      # The exact public address of this service, e.g. https://sonar-app.onrender.com
+      # (used for CORS, Socket.IO and passkeys).
+      - key: FRONTEND_URL
         sync: false

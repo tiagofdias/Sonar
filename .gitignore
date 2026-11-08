@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 
 .env
+backend/.local/
+
+
+# Native desktop build artifacts
+desktop/target/
+desktop/.tools/
+desktop/dist/

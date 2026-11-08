@@ -1,0 +1,13 @@
+{
+  "password": "correct horse battery staple ✓",
+  "accountId": "0123456789abcdef01234567",
+  "pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgVbigiOOF3upUB14ZATn17eNKaGL6aVOyFKrzBtsumIuhRANCAARg+gFPwPlrXGHEljk/46R1KjYyT6xJ4E62GFQCruJyb5twS/cO6TUS3O29gO9WN7wWI4+DvTVTwn5ldB+qOTvT",
+  "backup": {
+    "version": 1,
+    "publicKey": "BGD6AU/A+WtcYcSWOT/jpHUqNjJPrEngTrYYVAKu4nJvm3BL9w7pNRLc7b2A71Y3vBYjj4O9NVPCfmV0H6o5O9M=",
+    "salt": "AQIDBAUGBwgJCgsMDQ4PEA==",
+    "iv": "oKGio6Slpqeoqaqr",
+    "ciphertext": "+aZafLlZqFsO5HKLL9xdxWzUf1vbrMZALJ16faryLENyOB5juPLeq5D54Dr0Cw5EZHuwjyeUR+25PANX3VjPad/YbgPPvqpRFGCM/xUPF4E1Rbzthq5ySBA5ZQ8SA7R1GC/wTW/hE42t2CYSjIOy3nnwkvHlG4Gq9jutBoyJGlfxcxNgA2JnL/b5r6QYswsQmRfb6lLHvW3i3g==",
+    "iterations": 600000
+  }
+}
