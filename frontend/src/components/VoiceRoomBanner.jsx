@@ -1,3 +1,5 @@
+import { useMicActivity } from "../lib/useMicActivity";
+import ScreenStage, { ScreenShareButton } from "./ScreenStage";
 import {
   Headphones,
   HeadphoneOff,
@@ -9,11 +11,15 @@ import {
 } from "lucide-react";
 export default function VoiceRoomBanner({ voiceRoom }) {
   const room = voiceRoom?.room;
+  const speaking = useMicActivity(voiceRoom?.micStream, Boolean(room && !voiceRoom.muted && !voiceRoom.deafened));
   if (!room) return null;
   const connected = Object.values(voiceRoom.connections).filter(
     (value) => value === "connected",
   ).length;
+  const nameOf = (id) => room.participants?.find((person) => person.userId === id)?.fullName || "Member";
   return (
+    <>
+    <ScreenStage screen={voiceRoom.screen} nameOf={nameOf} deafened={voiceRoom.deafened} />
     <section
       className="call-banner room-call-banner"
       aria-label="Community voice room"
@@ -40,7 +46,7 @@ export default function VoiceRoomBanner({ voiceRoom }) {
         </button>
       )}
       <button
-        className={`icon-button ${voiceRoom.muted ? "accent" : ""}`}
+        className={`icon-button ${voiceRoom.muted ? "accent" : ""} ${speaking ? "mic-speaking" : ""}`}
         aria-label={
           voiceRoom.muted ? "Unmute room microphone" : "Mute room microphone"
         }
@@ -59,6 +65,7 @@ export default function VoiceRoomBanner({ voiceRoom }) {
           <Headphones size={18} />
         )}
       </button>
+      <ScreenShareButton screen={voiceRoom.screen} />
       <button
         className="end-call"
         aria-label="Leave voice room"
@@ -68,5 +75,6 @@ export default function VoiceRoomBanner({ voiceRoom }) {
         <LogOut size={18} />
       </button>
     </section>
+    </>
   );
 }

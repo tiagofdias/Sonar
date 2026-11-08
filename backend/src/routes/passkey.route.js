@@ -312,6 +312,7 @@ router.post(
     res.json({
       _id: user._id,
       fullName: user.fullName,
+      username: user.username,
       email: user.email,
       profilePic: user.profilePic,
       encryptionKey: user.encryptionKey,

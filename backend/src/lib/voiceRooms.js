@@ -1,3 +1,4 @@
+import { validScreenSignal } from "./calls.js";
 import { randomUUID } from "node:crypto";
 import Community from "../models/community.model.js";
 import User from "../models/user.model.js";
@@ -237,7 +238,7 @@ export function installVoiceRooms(io) {
           voiceRoomUsers.get(socket.userId)?.sessionId !== sessionId
         )
           return reply({ error: "Participant left the room" });
-        const valid =
+        const valid = signal.type?.startsWith?.("screen-") ? validScreenSignal(signal) :
           signal.type === "ice"
             ? typeof signal.candidate?.candidate === "string"
             : ["offer", "answer"].includes(signal.type) &&

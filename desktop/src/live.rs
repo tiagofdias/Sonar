@@ -37,6 +37,8 @@ impl std::fmt::Debug for CallCandidate {
 #[derive(Clone, Debug)]
 pub enum Event {
     Connected(CallHandle), Disconnected, Revoked, Online(Vec<String>), MatrixChanged, Incoming(IncomingCall), Answer(CallAnswer), Candidate(CallCandidate), CallEnded(String),
+    /// Screen-share signaling inside the active call; opaque to this layer.
+    Screen { from: String, id: String, signal: serde_json::Value },
     /// Encrypted message records and membership notices. Payloads are parsed
     /// and validated by the receiver; the socket never carries plaintext.
     Data(&'static str, serde_json::Value),
@@ -45,6 +47,14 @@ pub enum Event {
 fn valid_id(value: &str) -> bool { value.len() == 24 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) }
 fn valid_call_id(value: &str) -> bool {
     value.len() == 36 && value.bytes().enumerate().all(|(index, byte)| if [8, 13, 18, 23].contains(&index) { byte == b'-' } else { byte.is_ascii_hexdigit() })
+}
+fn screen_signal(payload: &Payload) -> Option<(String, String, serde_json::Value)> {
+    let Payload::Text(values) = payload else { return None; };
+    let data = values.first()?;
+    let signal = data.get("signal")?;
+    if !signal.get("type")?.as_str()?.starts_with("screen-") { return None; }
+    let (from, id) = (data.get("from")?.as_str()?, signal.get("callId")?.as_str()?);
+    (valid_id(from) && valid_call_id(id)).then(|| (from.to_owned(), id.to_owned(), signal.clone()))
 }
 fn incoming(payload: Payload) -> Option<IncomingCall> {
     let Payload::Text(values) = payload else { return None; };
@@ -202,7 +212,8 @@ pub fn events(auth: &Auth) -> impl Stream<Item = (u64, Event)> + 'static {
             .on("call:signal", move |payload, _| {
                 let mut sender = incoming_sender.clone();
                 async move {
-                    if let Some(call) = incoming(payload.clone()) { let _ = sender.send(Event::Incoming(call)).await; }
+                    if let Some((from, id, signal)) = screen_signal(&payload) { let _ = sender.send(Event::Screen { from, id, signal }).await; }
+                    else if let Some(call) = incoming(payload.clone()) { let _ = sender.send(Event::Incoming(call)).await; }
                     else if let Some(answer) = answer(payload.clone()) { let _ = sender.send(Event::Answer(answer)).await; }
                     else if let Some(candidate) = candidate(payload) { let _ = sender.send(Event::Candidate(candidate)).await; }
                 }.boxed()

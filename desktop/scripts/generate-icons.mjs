@@ -7,7 +7,7 @@ import { dirname, resolve } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const source = resolve(root, "frontend/node_modules/lucide-react/dist/esm/icons");
 const target = resolve(root, "desktop/assets/icons");
-const names = ["message-circle", "users", "shield-check", "chevron-down", "chevron-left", "arrow-up-right", "search", "lock-keyhole", "log-out", "phone", "phone-off", "phone-incoming", "pin", "ellipsis", "timer", "headphones", "headphone-off", "check", "reply", "trash-2", "send", "x", "smile-plus", "mic", "mic-off", "plus", "hash", "volume-2", "key-round", "user-round", "copy", "monitor", "lock", "lock-open", "arrow-left", "audio-lines", "rotate-ccw", "circle-check", "circle-x", "server", "refresh-cw", "user-minus", "ban", "crown", "shield", "pencil", "speaker", "play", "square", "eye", "eye-off", "info"];
+const names = ["message-circle", "users", "shield-check", "chevron-down", "chevron-left", "arrow-up-right", "search", "lock-keyhole", "log-out", "phone", "phone-off", "phone-incoming", "phone-missed", "screen-share", "screen-share-off", "maximize", "minimize", "pin", "ellipsis", "timer", "headphones", "headphone-off", "check", "reply", "trash-2", "send", "x", "smile-plus", "mic", "mic-off", "plus", "hash", "volume-2", "key-round", "user-round", "copy", "download", "monitor", "lock", "lock-open", "arrow-left", "audio-lines", "rotate-ccw", "circle-check", "circle-x", "server", "refresh-cw", "user-minus", "ban", "crown", "shield", "pencil", "speaker", "play", "square", "eye", "eye-off", "info"];
 mkdirSync(target, { recursive: true });
 const escape = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 for (const name of names) {

@@ -49,6 +49,10 @@ This uses standard primitives but is a custom, unaudited protocol. Static keys p
 
 Reference: [Web Crypto specification](https://www.w3.org/TR/webcrypto/).
 
+### Community invite cards
+
+Invite links stay end-to-end encrypted inside messages. To draw a card, the receiving app sends the token to `POST /api/communities/invite-preview`, which returns the community name, member count and the caller's membership. The server therefore learns that this account viewed that invite, as it would on joining.
+
 ## Retention
 
 Unpinned messages expire seven days after creation. History and pin operations filter expired records immediately. MongoDB TTL deletes expired records asynchronously. Pins set expiry to null; unpinning starts a fresh seven-day period. Either participant can change pin state. The UI checks expiry on its 30-second refresh interval; suspended clients may retain decrypted content until resuming.
@@ -72,6 +76,22 @@ The speaker test synthesizes a short WAV chime locally and plays it through the 
 TURN reference: [coturn authentication configuration](https://github.com/coturn/coturn/wiki/turnserver).
 
 Reference: [WebRTC security architecture](https://www.rfc-editor.org/rfc/rfc8827.html).
+
+The green microphone indicator is computed locally from the captured audio level (RMS above 0.01, held 300 ms, off while muted or deafened). The level is never stored or sent.
+
+### Noise suppression
+
+Both apps clean the microphone with RNNoise, on the sender's device, before it is encoded. The desktop app uses the `nnnoiseless` crate. The web app runs a WebAssembly build in an AudioWorklet from `frontend/public/rnnoise`, copied from `@shiguredo/rnnoise-wasm` (Apache-2.0). The browser's own filter is turned off so the two do not stack, and is used only if RNNoise cannot start.
+
+### Screen sharing
+
+Each viewer gets their own WebRTC peer connection, separate from the voice connection and DTLS-SRTP encrypted like voice. The server only relays `screen-*` signaling inside an answered call or a joined room.
+
+The desktop app captures a monitor or one window with Windows Graphics Capture, scales and converts on the GPU, and encodes H.264 with the card's hardware encoder through Media Foundation, so frames never reach system RAM. One encoder serves all viewers. PCs without a hardware encoder use the H.264 software encoder built into Windows, limited to 1080p. If encoding falls behind, sharing steps down a resolution. No codec is bundled.
+
+Sound uses Windows per-process loopback: one app and its child processes when sharing a window, or everything except Sonar when sharing a monitor. It is sent as mono Opus.
+
+Browsers prefer AV1, then fall back to what the viewer supports; a desktop viewer accepts H.264 only, decoded by Windows. A browser decides which sound it can share. Resolutions are 1080p, 1440p and 4K at up to 30 fps, never above the source.
 
 ## Community voice rooms
 
@@ -115,6 +135,9 @@ Only the owner may delete a channel or community. MongoDB transactions remove th
 Communities store moderator account IDs alongside membership. Owners alone grant and revoke the role, and moderators may remove ordinary members only; owner and moderator targets are protected. Membership and role conditions are rechecked atomically on removal, preventing a demoted or departed moderator from using a stale authorization snapshot. Role changes increment the membership revision so in-flight sends refresh their recipient state. Leaving, removal, and ownership transfer remove obsolete moderator assignments. Owners and moderators may ban members within the same hierarchy; an atomic update removes membership, adds the banned account, invalidates the invite, and increments the revision. Invite joins atomically exclude banned accounts. Only owners can list or remove bans; unbanning also revokes the active invite and does not restore membership. The ban list is capped at 500 accounts and excluded from ordinary community responses. Account bans do not prevent alternate accounts. Private channels are not implemented. Roles and membership are visible metadata.
 
 ## Native desktop
+
+The desktop app draws with Iced's GPU renderer on DX12 and falls back to software on PCs without a suitable GPU. At 2154x1343 a scroll frame took 282 ms in software and 6 ms on the GPU, at the cost of about 85 MB more memory (128 MB against 45 MB).
+
 
 `desktop/` is a native Rust client built with Iced (software rendering via tiny-skia; no browser engine, WebView, Tauri or Electron). It reproduces the web interface screen for screen: the same layout, colour tokens and text sizes matching `frontend/src/index.css`, the bundled Poppins font, and the web's Lucide icons (generated from `frontend/node_modules/lucide-react` by `desktop/scripts/generate-icons.mjs`). It speaks the same protocol as the browser, so a desktop user and a web user share one account, one key and the same conversations.
 

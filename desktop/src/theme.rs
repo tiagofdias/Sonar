@@ -138,6 +138,14 @@ pub fn reaction(selected: bool) -> ButtonStyle {
     if selected { btn(Some(rgb(0x3d3050)), Some(rgb(0x3d3050)), rgb(0xe6d9f2), rgb(0xe6d9f2), Some(rgb(0xb99cde)), 8.0) } else { btn(Some(rgb(0x28232f)), Some(rgb(0x312a3a)), rgb(0xe6d9f2), rgb(0xe6d9f2), Some(rgb(0x494153)), 8.0) }
 }
 pub fn load_older() -> ButtonStyle { btn(Some(rgb(0x2b2433)), Some(rgb(0x382b43)), rgb(0xbca0d3), rgb(0xd9bdec), Some(rgb(0x4a3a59)), 8.0) }
+pub fn volume_slider() -> impl Fn(&Theme, iced::widget::slider::Status) -> iced::widget::slider::Style {
+    use iced::widget::slider::{Handle, HandleShape, Rail, Style};
+    |_, _| Style {
+        rail: Rail { backgrounds: (rgb(0xbba1e8).into(), rgb(0x44404c).into()), width: 4.0, border: border(Color::TRANSPARENT, 0.0, 2.0) },
+        handle: Handle { shape: HandleShape::Circle { radius: 6.0 }, background: rgb(0xbba1e8).into(), border_width: 0.0, border_color: Color::TRANSPARENT },
+    }
+}
+pub fn mic_speaking() -> ButtonStyle { btn(Some(rgb(0x2c4634)), Some(rgb(0x2c4634)), rgb(0x7fdc9a), rgb(0x7fdc9a), Some(rgb(0x5fc784)), 7.0) }
 pub fn send_button() -> ButtonStyle { btn(Some(rgb(0xb69bdc)), Some(rgb(0xc5aee6)), rgb(0x21182e), rgb(0x21182e), None, 8.0) }
 pub fn end_call() -> ButtonStyle { btn(Some(rgb(0x9c4b54)), Some(rgb(0xad5560)), Color::WHITE, Color::WHITE, None, 8.0) }
 pub fn community_invite() -> ButtonStyle { btn(Some(rgb(0x30283e)), Some(rgb(0x382e48)), rgb(0xcbb2ea), rgb(0xcbb2ea), Some(rgb(0x493855)), 7.0) }
@@ -219,11 +227,11 @@ macro_rules! icons {
 icons! {
     MessageCircle => "message-circle", Users => "users", ShieldCheck => "shield-check", ChevronDown => "chevron-down",
     ChevronLeft => "chevron-left", ArrowUpRight => "arrow-up-right", Search => "search", LockKeyhole => "lock-keyhole",
-    LogOut => "log-out", Phone => "phone", PhoneOff => "phone-off", PhoneIncoming => "phone-incoming", Pin => "pin",
+    LogOut => "log-out", Phone => "phone", PhoneOff => "phone-off", PhoneIncoming => "phone-incoming", PhoneMissed => "phone-missed", ScreenShare => "screen-share", ScreenShareOff => "screen-share-off", Maximize => "maximize", Minimize => "minimize", Pin => "pin",
     Ellipsis => "ellipsis", Timer => "timer", Headphones => "headphones", HeadphoneOff => "headphone-off", Check => "check",
     Reply => "reply", Trash => "trash-2", Send => "send", X => "x", SmilePlus => "smile-plus", Mic => "mic",
     MicOff => "mic-off", Plus => "plus", Hash => "hash", Volume => "volume-2", KeyRound => "key-round",
-    UserRound => "user-round", Copy => "copy", Monitor => "monitor", Lock => "lock", LockOpen => "lock-open",
+    UserRound => "user-round", Copy => "copy", Download => "download", Monitor => "monitor", Lock => "lock", LockOpen => "lock-open",
     ArrowLeft => "arrow-left", AudioLines => "audio-lines", RotateCcw => "rotate-ccw", CircleCheck => "circle-check",
     CircleX => "circle-x", Server => "server", Refresh => "refresh-cw", UserMinus => "user-minus", Ban => "ban",
     Crown => "crown", Shield => "shield", Pencil => "pencil", Speaker => "speaker", Play => "play", Square => "square",

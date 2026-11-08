@@ -17,6 +17,8 @@ pub struct Settings {
     pub input: Option<String>,
     pub output: Option<String>,
     pub relay_only: bool,
+    /// Stored inverted so that it defaults to on for existing settings files.
+    pub noise_suppression_off: bool,
 }
 pub fn load_settings() -> Settings {
     std::fs::read(root().join("settings.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()

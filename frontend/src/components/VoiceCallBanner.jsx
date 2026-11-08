@@ -1,3 +1,5 @@
+import { useMicActivity } from "../lib/useMicActivity";
+import ScreenStage, { ScreenShareButton } from "./ScreenStage";
 import { useEffect, useState } from "react";
 import {
   AudioLines,
@@ -9,6 +11,7 @@ import {
   PhoneOff,
 } from "lucide-react";
 export default function VoiceCallBanner({ voice, users = [] }) {
+  const speaking = useMicActivity(voice?.micStream, Boolean(voice?.call && voice.call.status !== "incoming" && !voice.muted && !voice.deafened));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!voice?.call?.startedAt) return;
@@ -21,7 +24,10 @@ export default function VoiceCallBanner({ voice, users = [] }) {
       ? Math.max(0, Math.floor((now - call.startedAt) / 1000))
       : 0;
   const duration = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  const peerName = users.find((user) => user._id === call.peer)?.fullName || call.name || "Your contact";
   return (
+    <>
+    <ScreenStage screen={voice.screen} nameOf={() => peerName} deafened={voice.deafened} />
     <section className="call-banner" aria-label="Voice call">
       <AudioLines size={23} />
       <div>
@@ -59,7 +65,7 @@ export default function VoiceCallBanner({ voice, users = [] }) {
       ) : (
         <>
           <button
-            className={`icon-button ${voice.muted ? "accent" : ""}`}
+            className={`icon-button ${voice.muted ? "accent" : ""} ${speaking ? "mic-speaking" : ""}`}
             aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"}
             title={voice.muted ? "Unmute microphone" : "Mute microphone"}
             onClick={voice.toggleMute}
@@ -78,6 +84,7 @@ export default function VoiceCallBanner({ voice, users = [] }) {
               <Headphones size={18} />
             )}
           </button>
+          {(call.status === "connected" || call.status === "reconnecting") && <ScreenShareButton screen={voice.screen} />}
         </>
       )}
       <button
@@ -89,5 +96,6 @@ export default function VoiceCallBanner({ voice, users = [] }) {
         <PhoneOff size={18} />
       </button>
     </section>
+    </>
   );
 }

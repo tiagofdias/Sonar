@@ -19,7 +19,7 @@ export default function AuthPage({ signup = false, recover = false }) {
     isLoggingIn,
     isSigningUp,
   } = useAuthStore();
-  const [data, setData] = useState({ fullName: "", email: "", password: "", recoveryKey: "", confirmation: "" });
+  const [data, setData] = useState({ fullName: "", username: "", email: "", password: "", recoveryKey: "", confirmation: "" });
   const [recovering, setRecovering] = useState(false);
   const navigate = useNavigate();
   const resetPassword = async () => {
@@ -48,7 +48,9 @@ export default function AuthPage({ signup = false, recover = false }) {
             ? signup || recover
               ? "new-password"
               : "current-password"
-            : name === "email"
+            : name === "username"
+              ? "username"
+              : name === "email"
               ? "email"
               : "name"
         }
@@ -111,6 +113,7 @@ export default function AuthPage({ signup = false, recover = false }) {
             }}
           >
             {signup && field("fullName", "Display name")}
+            {signup && field("username", "Username")}
             {field("email", "Email address", "email")}
             {recover && field("recoveryKey", "Recovery key")}
             {field("password", recover ? "New password" : "Password", "password")}

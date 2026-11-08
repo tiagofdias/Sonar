@@ -22,6 +22,7 @@ import toast from "react-hot-toast";
 import { useAuthStore } from "../store/useAuthStore";
 import { useCommunityStore } from "../store/useCommunityStore";
 import { useUnreadStore } from "../store/useUnreadStore";
+import MessageText from "./MessageText";
 import { useConversationDraft } from "../store/useDraftStore";
 import VoiceCallBanner from "./VoiceCallBanner";
 import ReactionBar from "./ReactionBar";
@@ -652,7 +653,7 @@ export default function CommunityWorkspace({
                             )}
                           </div>
                           {message.replyTo && <div className="reply-reference">Replying to: {visible.find(item => item._id === message.replyTo && !item.unreadable)?.text || "Original message unavailable"}</div>}
-                          <p>{message.text}</p>
+                          <MessageText text={message.text} />
                           {!pins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => store.send("", null, reaction)} />}
                         </div>
                         <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>

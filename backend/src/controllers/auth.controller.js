@@ -3,9 +3,11 @@ import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import { io } from "../lib/socket.js";
 import { parseKeyBackup } from "../lib/keyBackup.js";
+import { availableUsername, normalizeUsername, USERNAME_RULES } from "../lib/usernames.js";
 const publicUser = (user) => ({
   _id: user._id,
   fullName: user.fullName,
+  username: user.username,
   email: user.email,
   profilePic: user.profilePic,
   encryptionKey: user.encryptionKey,
@@ -22,7 +24,7 @@ const revokeSockets = (userId) => {
 };
 
 export const signup = async (req, res) => {
-  const { fullName, email, password } = req.body;
+  const { fullName, email, password, username: requested } = req.body;
   try {
     if (
       typeof fullName !== "string" ||
@@ -49,11 +51,21 @@ export const signup = async (req, res) => {
 
     if (user) return res.status(400).json({ message: "Email already exists" });
 
+    let username;
+    if (requested) {
+      username = normalizeUsername(requested);
+      if (!username) return res.status(400).json({ message: USERNAME_RULES });
+      if (await User.exists({ username })) return res.status(400).json({ message: "That username is taken" });
+    } else {
+      username = await availableUsername(fullName || email);
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newUser = new User({
       fullName: fullName.trim(),
+      username,
       email,
       password: hashedPassword,
     });
@@ -68,6 +80,7 @@ export const signup = async (req, res) => {
       res.status(400).json({ message: "Invalid user data" });
     }
   } catch (error) {
+    if (error.code === 11000) return res.status(400).json({ message: "That email or username is already taken" });
     console.log("Error in signup controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
@@ -119,19 +132,22 @@ export const logout = async (req, res) => {
 };
 
 export const updateProfile = async (req, res) => {
-  const { fullName } = req.body;
+  const { fullName, username: requested } = req.body;
   if (typeof fullName !== "string" || !fullName.trim() || fullName.length > 80)
     return res
       .status(400)
       .json({ message: "Display name must be between 1 and 80 characters" });
+  const username = requested === undefined ? undefined : normalizeUsername(requested);
+  if (username === null) return res.status(400).json({ message: USERNAME_RULES });
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { fullName: fullName.trim() },
+      { fullName: fullName.trim(), ...(username ? { username } : {}) },
       { new: true },
     ).select("-password");
     res.json(publicUser(user));
-  } catch {
+  } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ message: "That username is taken" });
     res.status(500).json({ message: "Could not update profile" });
   }
 };

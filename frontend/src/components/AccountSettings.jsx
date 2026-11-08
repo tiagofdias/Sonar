@@ -26,6 +26,7 @@ export default function AccountSettings() {
   const { authUser, updateProfile, logout, isUpdatingProfile } = useAuthStore();
   const [tab, setTab] = useState("profile"),
     [name, setName] = useState(authUser.fullName),
+    [username, setUsername] = useState(authUser.username || ""),
     [passwords, setPasswords] = useState({
       currentPassword: "",
       newPassword: "",
@@ -113,9 +114,10 @@ export default function AccountSettings() {
     document.addEventListener("keydown", keydown);
     return () => document.removeEventListener("keydown", keydown);
   }, [busy]);
+  const handle = username.trim().replace(/^@/, "").toLowerCase();
   const saveName = async (event) => {
     event.preventDefault();
-    if (name.trim() && !busy) await updateProfile({ fullName: name.trim() });
+    if (name.trim() && !busy) await updateProfile({ fullName: name.trim(), username: handle });
   };
   const changePassword = async (event) => {
     event.preventDefault();
@@ -185,6 +187,7 @@ export default function AccountSettings() {
               .toUpperCase()}
           </div>
           <strong className="settings-user-name">{authUser.fullName}</strong>
+          {authUser.username && <span className="settings-user-handle">@{authUser.username}</span>}
           <span className="settings-user-email">{authUser.email}</span>
           <nav aria-label="Account settings">
             {[
@@ -241,6 +244,17 @@ export default function AccountSettings() {
                   />
                 </label>
                 <label className="dialog-field">
+                  Username
+                  <input
+                    autoComplete="username"
+                    required
+                    maxLength={25}
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                  />
+                  <small>People can find you with this. Letters, numbers, dots and underscores.</small>
+                </label>
+                <label className="dialog-field">
                   Email address
                   <input type="email" readOnly value={authUser.email} />
                   <small>Email changes are not available yet.</small>
@@ -248,7 +262,7 @@ export default function AccountSettings() {
                 <button
                   className="primary"
                   disabled={
-                    busy || !name.trim() || name.trim() === authUser.fullName
+                    busy || !name.trim() || !handle || (name.trim() === authUser.fullName && handle === authUser.username)
                   }
                 >
                   {isUpdatingProfile ? "Saving..." : "Save changes"}

@@ -9,6 +9,8 @@ pub struct Account {
     #[serde(rename = "fullName")]
     pub full_name: String,
     #[serde(default)]
+    pub username: String,
+    #[serde(default)]
     pub email: String,
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
@@ -20,6 +22,8 @@ pub struct Person {
     pub id: String,
     #[serde(rename = "fullName")]
     pub name: String,
+    #[serde(default)]
+    pub username: String,
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
 }
@@ -182,6 +186,23 @@ where F: FnOnce(isize, String, Vec<u8>) -> Result<serde_json::Value, String> + S
 #[derive(Clone, Copy)]
 pub enum MemberAction { Remove, Ban, Promote, Demote }
 fn valid_id(value: &str) -> bool { value.len() == 24 && value.bytes().all(|c| c.is_ascii_hexdigit()) }
+/// What an invite card shows; see POST /api/communities/invite-preview.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InvitePreview { pub available: bool, pub name: String, pub member_count: usize, pub full: bool, pub member: bool, pub id: Option<String> }
+
+/// Finds a community invite link in a chat message. The flag is true when the
+/// message is nothing but the link, so the card can replace it completely.
+pub fn find_invite(message: &str) -> Option<(String, bool)> {
+    for (at, _) in message.match_indices("invite=") {
+        if at == 0 || !matches!(message.as_bytes()[at - 1], b'?' | b'&') { continue; }
+        let rest = &message[at + 7..];
+        let length = rest.bytes().take_while(u8::is_ascii_hexdigit).count();
+        if length == 48 { return Some((rest[..48].to_ascii_lowercase(), !message.trim().contains(char::is_whitespace))); }
+    }
+    None
+}
+
 fn invite_token(value: &str) -> Result<String, String> {
     let value = value.trim();
     let token = if value.len() == 48 && value.bytes().all(|c| c.is_ascii_hexdigit()) {
@@ -1427,6 +1448,17 @@ mod tests {
         session.logout().await.unwrap();
         server.join().unwrap();
     }
+    #[test]
+    fn finds_invite_links_in_chat_messages() {
+        let token = "ab".repeat(24);
+        assert_eq!(super::find_invite(&format!("http://localhost:5173/?invite={token}")), Some((token.clone(), true)));
+        assert_eq!(super::find_invite(&format!("come join https://sonar.example/?a=1&invite={}", token.to_uppercase())), Some((token.clone(), false)));
+        assert_eq!(super::find_invite("just a message"), None);
+        assert_eq!(super::find_invite(&format!("https://sonar.example/?invite={token}ff")), None);
+        assert_eq!(super::find_invite(&format!("https://sonar.example/?invite={}", &token[2..])), None);
+        assert_eq!(super::find_invite(&format!("https://sonar.example/?notinvite={token}")), None);
+    }
+
     #[test]
     fn invite_parser_accepts_codes_and_rejects_ambiguous_links() {
         let token = "ab".repeat(24);

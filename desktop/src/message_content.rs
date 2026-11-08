@@ -5,11 +5,14 @@ use serde::Deserialize;
 
 const REPLY: &str = "sonar-reply-v1:";
 const REACTION: &str = "sonar-reaction-v1:";
+const CALL: &str = "sonar-call-v1:";
+pub const MISSED_CALL_TEXT: &str = "Missed voice call";
 
 #[derive(Debug, PartialEq)]
 pub enum Content {
     Text { text: String, reply_to: Option<String> },
     Reaction { target: String, emoji: String, action: String },
+    MissedCall,
 }
 
 #[derive(Deserialize)]
@@ -22,12 +25,15 @@ fn valid_id(id: &str) -> bool {
 pub fn encode_text(text: &str, reply_to: Option<&str>) -> Result<String, &'static str> {
     if text.encode_utf16().count() > 4000 { return Err("message too long"); }
     if reply_to.is_some_and(|id| !valid_id(id)) { return Err("invalid reply target"); }
-    if reply_to.is_some() || text.starts_with(REPLY) || text.starts_with(REACTION) {
+    if reply_to.is_some() || text.starts_with(REPLY) || text.starts_with(REACTION) || text.starts_with(CALL) {
         let mut data = serde_json::json!({ "text": text });
         if let Some(id) = reply_to { data["replyTo"] = id.into(); }
         Ok(format!("{REPLY}{data}"))
     } else { Ok(text.to_owned()) }
 }
+
+/// A call that rang and was never answered, sent by the caller's app.
+pub fn encode_missed_call() -> String { format!("{CALL}{}", serde_json::json!({ "event": "missed" })) }
 
 pub fn encode_reaction(target: &str, emoji: &str, action: &str) -> Result<String, &'static str> {
     if !valid_id(target) || !["\u{1f44d}", "\u{2764}\u{fe0f}", "\u{1f602}", "\u{1f389}"].contains(&emoji) || !["add", "remove"].contains(&action) {
@@ -37,7 +43,9 @@ pub fn encode_reaction(target: &str, emoji: &str, action: &str) -> Result<String
 }
 
 pub fn decode(value: &str) -> Content {
-    if let Some(payload) = value.strip_prefix(REACTION) {
+    if let Some(payload) = value.strip_prefix(CALL) {
+        if serde_json::from_str::<serde_json::Value>(payload).is_ok_and(|data| data.get("event").and_then(|e| e.as_str()) == Some("missed")) { return Content::MissedCall; }
+    } else if let Some(payload) = value.strip_prefix(REACTION) {
         if let Ok(reaction) = serde_json::from_str::<Reaction>(payload) {
             if valid_id(&reaction.target)
                 && ["\u{1f44d}", "\u{2764}\u{fe0f}", "\u{1f602}", "\u{1f389}"].contains(&reaction.emoji.as_str())
@@ -74,6 +82,13 @@ mod tests {
         }
         let oversized = format!("sonar-reply-v1:{{\"text\":\"{}\"}}", "\u{1f44d}".repeat(2001));
         assert_eq!(decode(&oversized), Content::Text { text: oversized.clone(), reply_to: None });
+    }
+    #[test]
+    fn missed_calls_round_trip_and_cannot_be_typed_as_plain_text() {
+        assert_eq!(decode(&encode_missed_call()), Content::MissedCall);
+        for invalid in ["sonar-call-v1:{", "sonar-call-v1:{\"event\":\"other\"}"] { assert_eq!(decode(invalid), Content::Text { text: invalid.into(), reply_to: None }); }
+        let typed = encode_missed_call();
+        assert_eq!(decode(&encode_text(&typed, None).unwrap()), Content::Text { text: typed.clone(), reply_to: None });
     }
     #[test]
     fn encodes_replies_reactions_and_reserved_prefixes() {

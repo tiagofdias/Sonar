@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "./axios";
 import {
@@ -6,8 +6,12 @@ import {
   useVoiceSettingsStore,
 } from "../store/useVoiceSettingsStore";
 import { applyAudioOutput } from "./audioOutput";
+import { useScreenShare } from "./useScreenShare";
+import { denoisedStream } from "./noiseSuppression";
 import { refreshVoiceConfiguration } from "./voiceConfigRefresh";
 export function useVoiceRoom(socket) {
+  const screenRef = useRef(null);
+  const cleaned = useRef(null);
   const [room, setRoom] = useState(null),
     [rooms, setRooms] = useState({}),
     [connections, setConnections] = useState({}),
@@ -62,6 +66,8 @@ export function useVoiceRoom(socket) {
       track.stop();
     });
     media.current = null;
+    cleaned.current?.close();
+    cleaned.current = null;
     stopConfigRefresh.current?.();
     stopConfigRefresh.current = null;
     config.current = null;
@@ -116,9 +122,8 @@ export function useVoiceRoom(socket) {
         ready: false,
       };
     peers.current.set(peer.userId, peer);
-    media.current
-      .getTracks()
-      .forEach((track) => pc.addTrack(track, media.current));
+    const outgoing = cleaned.current?.stream || media.current;
+    outgoing.getTracks().forEach((track) => pc.addTrack(track, outgoing));
     setConnections((value) => ({ ...value, [peer.userId]: "connecting" }));
     pc.onicecandidate = (event) => {
       if (!event.candidate || peers.current.get(peer.userId) !== peer) return;
@@ -166,6 +171,7 @@ export function useVoiceRoom(socket) {
         person.userId === event.from && person.sessionId === event.sessionId,
     );
     if (!participant) return;
+    if (event.signal.type?.startsWith("screen-")) return screenRef.current.handle(event.from, event.signal);
     try {
       const peer = makePeer(participant),
         signal = event.signal;
@@ -234,6 +240,12 @@ export function useVoiceRoom(socket) {
         return;
       }
       media.current = stream;
+      const clean = await denoisedStream(stream);
+      if (current.current?.intent !== intent || media.current !== stream) {
+        clean.close();
+        return;
+      }
+      cleaned.current = clean;
       stream.getAudioTracks().forEach((track) => {
         track.enabled = !mute.current && !deaf.current;
         track.onended = () => {
@@ -446,6 +458,15 @@ export function useVoiceRoom(socket) {
       }),
     [],
   );
+  const micStream = useCallback(() => media.current, []);
+  const screen = useScreenShare({
+    send: (to, payload) => {
+      const participant = current.current?.participants?.find((person) => person.userId === to);
+      return participant ? send(participant, payload) : Promise.resolve();
+    },
+    targets: room?.status === "joined" ? (room.participants || []).filter((person) => person.sessionId !== room.sessionId).map((person) => person.userId) : [],
+  });
+  screenRef.current = screen;
   return {
     room,
     rooms,
@@ -460,5 +481,7 @@ export function useVoiceRoom(socket) {
     toggleDeafen,
     playbackBlocked,
     resumeAudio,
+    micStream,
+    screen,
   };
 }

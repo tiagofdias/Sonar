@@ -31,7 +31,7 @@ export const getUsersForSidebar = async (req, res) => {
   try {
     res.json(
       await User.find({ _id: { $ne: req.user._id } }).select(
-        "fullName profilePic encryptionKey",
+        "fullName username profilePic encryptionKey",
       ),
     );
   } catch {

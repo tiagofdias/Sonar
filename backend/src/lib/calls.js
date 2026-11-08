@@ -1,5 +1,12 @@
 // Transient signaling state only. No audio or call history is stored.
 import { directCallUsers, voiceRoomUsers } from "./voiceActivity.js";
+export function validScreenSignal(signal) {
+  if (signal.type === "screen-stop") return true;
+  if (signal.type === "screen-ice")
+    return ["sharer", "viewer"].includes(signal.role) && typeof signal.candidate?.candidate === "string";
+  const kind = { "screen-offer": "offer", "screen-answer": "answer" }[signal.type];
+  return Boolean(kind) && signal.sdp?.type === kind && typeof signal.sdp.sdp === "string";
+}
 export function installCalls(io) {
   const calls = new Map(),
     active = directCallUsers;
@@ -76,6 +83,17 @@ export function installCalls(io) {
         (!call.calleeSocket || socket.id === call.calleeSocket) &&
         to === call.caller;
       if (!caller && !callee) return reply({ error: "Call is unavailable" });
+      // Screen sharing runs on its own peer connection, inside an answered call.
+      if (signal.type?.startsWith?.("screen-")) {
+        if (!call.calleeSocket || !validScreenSignal(signal))
+          return reply({ error: "Invalid screen signal" });
+        io.to(caller ? call.calleeSocket : call.callerSocket).emit("call:signal", {
+          from: socket.userId,
+          signal,
+        });
+        reply({ ok: true });
+        return;
+      }
       if (signal.type === "hangup") {
         finish(call, "ended");
         reply({ ok: true });

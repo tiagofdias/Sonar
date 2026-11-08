@@ -54,6 +54,12 @@ The **Your speakers** card selects call output, adjusts output volume, and plays
 
 Local two-browser calls have been verified with simulated microphones, inbound audio packets, mute/deafen, and capture cleanup. This does not verify physical audio devices or arbitrary internet networks. For internet connectivity, run an operator-controlled TURN service (for example coturn with `use-auth-secret`), set comma-separated `TURN_URLS`, and set the same `TURN_SHARED_SECRET` in the backend. Optional `STUN_URLS` can point to operator-controlled STUN. `/api/voice/config` issues anonymous one-hour TURN credentials and active calls refresh their ICE configuration before expiry; the shared secret stays server-side. The old VITE_ICE_SERVERS setting is no longer used. Set `VOICE_RELAY_ONLY=true` to require relay connections for all calls, or enable it per browser in Voice settings when TURN is available. No relay service is bundled or provisioned by this update.
 
+Incoming calls ring with an original tone of low water drops and slow waves, `frontend/public/sounds/ringtone.wav`, on the speakers chosen in Voice settings. Web and desktop play that same file; `node desktop/scripts/generate-ringtone.mjs` recreates it. Rebuild the desktop app after changing it.
+
+A call that rings and is never answered, including a declined one, appears in the conversation for both people. The caller's app sends it as an ordinary encrypted message.
+
+In a call or voice room you can share a screen or a single app at 1080p, 1440p or 4K. The desktop app shares that app's sound only, and encodes on the graphics card when it can.
+
 ## Checks
 
 - `npm test --prefix frontend`: keys, encryption round trips, tampering, IVs, and contact key changes.
@@ -81,6 +87,10 @@ No relay is provisioned by these instructions. Existing voice connections do not
 Login and signup have per-IP limits (30 and 10 attempts respectively in 15 minutes, counting successful attempts). Passkey login challenges and verification each have separate limits, and password confirmation is limited per account. By default these limits are process-local and reset on restart. Set `MONGO_SHARED_AUTH_LIMITS=true` on every backend instance to use atomic MongoDB counters with an expiry index; instances must use the same database and `JWT_SECRET`, and have synchronized clocks. Database/index failures return 503 rather than falling back to weaker local limits. A broad passkey request limit remains process-local. MongoDB retains hashed limiter keys until its asynchronous TTL cleanup runs; distributed abuse can still consume database capacity.
 
 Express ignores forwarded client IPs by default, so users behind a proxy may share one limit. If applicable, set `TRUST_PROXY_CIDRS` to a comma-separated list of specific proxy addresses or CIDRs controlled by the operator, and ensure those proxies overwrite forwarded headers. An incorrect trust configuration can let clients spoof addresses. Leave it unset for direct connections. Fixed windows can permit bursts at their boundaries; these limits are one layer of abuse protection, not a complete defense.
+
+### Usernames
+
+Every account has a unique `@username` (3 to 24 letters, numbers, dots or underscores). People choose one at sign-up and can change it in Your profile; the People panel finds members by username or name. Accounts created before usernames existed get one automatically when the server starts.
 
 ### Community management
 

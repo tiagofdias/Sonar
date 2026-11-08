@@ -4,7 +4,7 @@ import { axiosInstance as api } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 import { encrypt, decrypt } from "../lib/crypto";
 import { mergeHistory, withoutExpired } from "../lib/history";
-import { encodeMessage, encodeReaction } from "../lib/messageContent";
+import { encodeMessage, encodeMissedCall, encodeReaction, MISSED_CALL_TEXT } from "../lib/messageContent";
 import { useUnreadStore } from "./useUnreadStore";
 import { refreshedContact } from "../lib/contacts";
 import { candidatePosition, newer, readPosition, rememberPosition } from "../lib/offlineUnread";
@@ -196,6 +196,18 @@ export const useChatStore = create((set, get) => ({
       fail(e);
       return false;
     }
+  },
+  // Best effort and silent: a failure here must not disturb the end of a call.
+  sendMissedCall: async (peerId) => {
+    try {
+      const peer = get().users.find((user) => user._id === peerId);
+      const me = useAuthStore.getState().authUser?._id;
+      if (!peer?.encryptionKey || !me) return;
+      const envelope = await encrypt(me, peer, encodeMissedCall());
+      const { data } = await api.post(`/messages/send/${peer._id}`, envelope);
+      if (!get().pinnedOnly && get().selectedUser?._id === peer._id && !get().messages.some((m) => m._id === data._id))
+        set({ messages: visibleMessages(mergeHistory(get().messages, [{ ...data, text: MISSED_CALL_TEXT, call: "missed" }])) });
+    } catch { /* The call has already ended. */ }
   },
   deleteMessage: async (message) => {
     try {

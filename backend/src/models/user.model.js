@@ -29,6 +29,8 @@ const userSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    // Unique public handle; see lib/usernames.js.
+    username: { type: String, unique: true, sparse: true },
     fullName: {
       type: String,
       required: true,

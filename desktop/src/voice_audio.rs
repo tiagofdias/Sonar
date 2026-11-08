@@ -9,6 +9,27 @@ use zeroize::{Zeroize, Zeroizing};
 type Frame = (u64, Zeroizing<Vec<f32>>);
 /// Diagnostics: loudest captured sample, in millionths of full scale.
 pub static CAPTURE_PEAK: AtomicU64 = AtomicU64::new(0);
+/// Loudness of the latest captured frame (RMS, millionths of full scale);
+/// drives the "your mic is picking up sound" indicator.
+pub static MIC_LEVEL: AtomicU64 = AtomicU64::new(0);
+/// Mirrors the Voice setting, so changing it applies during a call.
+pub static NOISE_SUPPRESSION: AtomicBool = AtomicBool::new(true);
+
+/// RNNoise, a small neural network trained to keep speech and remove the rest.
+pub struct Denoiser { state: Box<nnnoiseless::DenoiseState<'static>> }
+impl Denoiser {
+    pub fn new() -> Self { Self { state: nnnoiseless::DenoiseState::new() } }
+    /// Cleans samples in place. Each 480-sample block is one RNNoise frame.
+    pub fn process(&mut self, samples: &mut [f32]) {
+        let (mut input, mut output) = ([0f32; 480], [0f32; 480]);
+        for block in samples.chunks_exact_mut(480) {
+            for (to, from) in input.iter_mut().zip(block.iter()) { *to = from * 32768.0; }
+            self.state.process_frame(&mut output, &input);
+            for (to, from) in block.iter_mut().zip(output.iter()) { *to = (from / 32768.0).clamp(-1.0, 1.0); }
+        }
+    }
+}
+impl Default for Denoiser { fn default() -> Self { Self::new() } }
 type Packet = (u64, Zeroizing<Vec<u8>>);
 
 pub struct VoiceAudio {
@@ -54,9 +75,11 @@ impl VoiceAudio {
             if input_stream.play().is_err() || output_stream.play().is_err() { let _ = ready_tx.send(Err("Could not start your audio devices.".into())); return; }
             if ready_tx.send(Ok(())).is_err() { return; }
             let mut encoder = encoder;
+            let mut denoiser = Denoiser::new();
             while !worker_stop.load(Ordering::Acquire) && !worker_failed.load(Ordering::Acquire) {
                 match capture_rx.recv_timeout(Duration::from_millis(50)) {
-                    Ok((epoch, frame)) if !worker_muted.load(Ordering::Acquire) && epoch == worker_capture_epoch.load(Ordering::Acquire) => {
+                    Ok((epoch, mut frame)) if !worker_muted.load(Ordering::Acquire) && epoch == worker_capture_epoch.load(Ordering::Acquire) => {
+                        if NOISE_SUPPRESSION.load(Ordering::Relaxed) { denoiser.process(&mut frame); }
                         match encoder.encode(&frame) {
                             Ok(packet) => { let _ = packet_tx.try_send((epoch, packet)); }
                             Err(_) => { worker_failed.store(true, Ordering::Release); }
@@ -141,9 +164,50 @@ impl VoiceAudio {
 impl Drop for VoiceAudio {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        MIC_LEVEL.store(0, Ordering::Relaxed);
         if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }
 }
+
+/// Output-only playback of the sound in a shared screen.
+pub struct ScreenPlayback { mixer: Arc<Mixer>, deafened: Arc<AtomicBool>, stop: Arc<AtomicBool>, volumes: Mutex<HashMap<u64, f32>> }
+impl ScreenPlayback {
+    pub fn open(output: Option<String>) -> Result<Self, String> {
+        let (mixer, deafened, stop) = (Arc::new(Mixer::default()), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        #[cfg(debug_assertions)]
+        if std::env::var_os("SONAR_DEV_SILENT_AUDIO").is_some() { return Ok(Self { mixer, deafened, stop, volumes: Mutex::default() }); }
+        let (thread_mixer, thread_deafened, thread_stop) = (mixer.clone(), deafened.clone(), stop.clone());
+        thread::spawn(move || {
+            let Ok(device) = select_device(false, output) else { return };
+            let Ok(supported) = select_config(&device, false) else { return };
+            let format = supported.sample_format();
+            let config: StreamConfig = supported.into();
+            let channels = usize::from(config.channels);
+            let mut renderer = PlaybackRenderer::new(thread_mixer, thread_deafened, Arc::new(AtomicU64::new(0)));
+            let stream = match format {
+                SampleFormat::F32 => device.build_output_stream(&config, move |data: &mut [f32], _| renderer.fill(data, channels, |v| v), |_| {}, None),
+                SampleFormat::I16 => device.build_output_stream(&config, move |data: &mut [i16], _| renderer.fill(data, channels, |v| (v * i16::MAX as f32) as i16), |_| {}, None),
+                SampleFormat::U16 => device.build_output_stream(&config, move |data: &mut [u16], _| renderer.fill(data, channels, |v| ((v * 0.5 + 0.5) * u16::MAX as f32) as u16), |_| {}, None),
+                _ => return,
+            };
+            let Ok(stream) = stream else { return };
+            if stream.play().is_err() { return; }
+            while !thread_stop.load(Ordering::Acquire) { thread::sleep(Duration::from_millis(100)); }
+        });
+        Ok(Self { mixer, deafened, stop, volumes: Mutex::default() })
+    }
+    pub fn play(&self, source: u64, frame: &[f32]) {
+        let volume = self.volumes.lock().ok().and_then(|v| v.get(&source).copied()).unwrap_or(1.0);
+        if volume >= 1.0 { self.mixer.push(source, 0, frame); return; }
+        let quieter: Vec<f32> = frame.iter().map(|sample| sample * volume).collect();
+        self.mixer.push(source, 0, &quieter);
+    }
+    /// One viewer's volume for one stream; nobody else is affected.
+    pub fn set_volume(&self, source: u64, volume: f32) { if let Ok(mut volumes) = self.volumes.lock() { volumes.insert(source, volume.clamp(0.0, 1.0)); } }
+    pub fn remove(&self, source: u64) { self.mixer.remove(source); }
+    pub fn set_deafened(&self, value: bool) { self.deafened.store(value, Ordering::Release); }
+}
+impl Drop for ScreenPlayback { fn drop(&mut self) { self.stop.store(true, Ordering::Release); } }
 
 fn select_device(input: bool, selected: Option<String>) -> Result<cpal::Device, String> {
     let host = cpal::default_host();
@@ -197,13 +261,15 @@ impl CaptureAccumulator {
     fn push(&mut self, samples: impl Iterator<Item = f32>) {
         for sample in samples {
             let epoch = self.current.load(Ordering::Acquire);
-            if epoch != self.epoch || self.muted.load(Ordering::Acquire) { self.frame.zeroize(); self.sum = 0.0; self.count = 0; self.epoch = epoch; if self.muted.load(Ordering::Acquire) { continue; } }
+            if epoch != self.epoch || self.muted.load(Ordering::Acquire) { self.frame.zeroize(); self.sum = 0.0; self.count = 0; self.epoch = epoch; if self.muted.load(Ordering::Acquire) { MIC_LEVEL.store(0, Ordering::Relaxed); continue; } }
             let value = if sample.is_finite() { sample.clamp(-1.0, 1.0) } else { 0.0 };
             CAPTURE_PEAK.fetch_max((value.abs() * 1_000_000.0) as u64, Ordering::Relaxed);
             self.sum += value;
             self.count += 1;
             if self.count == self.channels { self.frame.push((self.sum / self.channels as f32).clamp(-1.0, 1.0)); self.sum = 0.0; self.count = 0; }
             if self.frame.len() == FRAME_SAMPLES {
+                let energy: f32 = self.frame.iter().map(|v| v * v).sum::<f32>() / FRAME_SAMPLES as f32;
+                MIC_LEVEL.store((energy.sqrt() * 1_000_000.0) as u64, Ordering::Relaxed);
                 let frame = std::mem::replace(&mut self.frame, Zeroizing::new(Vec::with_capacity(FRAME_SAMPLES)));
                 let _ = self.tx.try_send((self.epoch, frame));
             }
@@ -251,8 +317,10 @@ mod tests {
         let mut capture = CaptureAccumulator::new(2, tx, muted.clone(), epoch.clone());
         capture.push(std::iter::repeat_n(0.5, FRAME_SAMPLES * 2));
         let (generation, frame) = rx.try_recv().unwrap(); assert_eq!(generation, 0); assert!(frame.iter().all(|v| *v == 0.5));
+        assert!(MIC_LEVEL.load(Ordering::Relaxed) > 400_000, "a loud frame registers as sound");
         capture.push(std::iter::repeat_n(0.8, 100)); muted.store(true, Ordering::Release); epoch.fetch_add(1, Ordering::AcqRel);
         capture.push(std::iter::repeat_n(1.0, FRAME_SAMPLES * 2)); assert!(rx.try_recv().is_err());
+        assert_eq!(MIC_LEVEL.load(Ordering::Relaxed), 0, "a muted mic shows no sound");
         muted.store(false, Ordering::Release); epoch.fetch_add(1, Ordering::AcqRel);
         capture.push(std::iter::repeat_n(0.2, FRAME_SAMPLES * 2));
         let (generation, frame) = rx.try_recv().unwrap(); assert_eq!(generation, 2); assert!(frame.iter().all(|v| *v == 0.2));

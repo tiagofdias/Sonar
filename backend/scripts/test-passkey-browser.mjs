@@ -416,6 +416,21 @@ try {
     });
   await audioReceived(page);
   await audioReceived(otherPage);
+  // A raw microphone label here would mean RNNoise silently fell back.
+  const sentLabels = await page.evaluate(() => window.__sonarTestConnections.filter((c) => c.connectionState === "connected").flatMap((c) => c.getSenders().map((s) => s.track?.label || "")));
+  assert.ok(sentLabels.length && sentLabels.every((label) => !/fake/i.test(label)), `noise suppression not active: ${sentLabels}`);
+  await page.locator(".call-banner .mic-speaking").waitFor({ timeout: 15000 });
+  const watchesScreen = (target) => target.waitForFunction(() => {
+    const video = document.querySelector(".screen-tile video");
+    return video && video.videoWidth > 0 && video.currentTime > 0.3;
+  }, null, { timeout: 25000 });
+  await page.getByRole("button", { name: "Share your screen", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Share at 1080p", exact: true }).click();
+  await watchesScreen(otherPage);
+  await otherPage.locator(".screen-volume input").fill("0.25");
+  assert.equal(await otherPage.evaluate(() => document.querySelector(".screen-tile video").volume), 0.25);
+  await page.getByRole("button", { name: "Stop sharing your screen", exact: true }).click();
+  await otherPage.locator(".screen-tile").waitFor({ state: "detached", timeout: 8000 });
   await page.getByTitle("Your account", { exact: true }).click();
   await page
     .getByRole("button", { name: "Voice & audio", exact: true })
@@ -705,6 +720,7 @@ try {
   const recoveryPage = await recoveryContext.newPage();
   await recoveryPage.goto(`${frontend}/signup`);
   await recoveryPage.getByLabel("Display name", { exact: true }).fill("Forgetful member");
+  await recoveryPage.getByLabel("Username", { exact: true }).fill("forgetful.member");
   await recoveryPage.getByLabel("Email address", { exact: true }).fill("forgetful@example.invalid");
   await recoveryPage.getByLabel("Password", { exact: true }).fill("OriginalPass1");
   await recoveryPage.getByRole("button", { name: "Create your account" }).click();
@@ -849,6 +865,9 @@ try {
       return received >= 2;
     });
   }
+  // waitForFunction does not await an async check, so everyone is confirmed here.
+  for (const target of [page, ...roomBrowsers.map((item) => item.page)])
+    await target.waitForFunction(() => window.__sonarTestConnections.filter((pc) => pc.connectionState === "connected").length >= 2, null, { timeout: 30000 });
   await page.getByRole("button", { name: "Lock voice room lounge", exact: true }).click();
   await page.getByRole("button", { name: "Unlock voice room lounge", exact: true }).waitFor();
   page.once("dialog", dialog => dialog.accept());
@@ -873,6 +892,15 @@ try {
   await page
     .getByRole("button", { name: "Unmute room microphone", exact: true })
     .click();
+  await page.getByRole("button", { name: "Share your screen", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Share at 1080p", exact: true }).click();
+  for (const member of roomBrowsers) await member.page.waitForFunction(() => {
+    const video = document.querySelector(".screen-tile video");
+    return video && video.videoWidth > 0 && video.currentTime > 0.3;
+  }, null, { timeout: 25000 });
+  await page.getByRole("button", { name: "Stop sharing your screen", exact: true }).click();
+  for (const member of roomBrowsers) await member.page.locator(".screen-tile").waitFor({ state: "detached", timeout: 8000 });
+  console.log("PASS: screen sharing reaches every room member and stops cleanly.");
   await roomBrowsers[0].page
     .getByRole("button", { name: "Deafen room", exact: true })
     .click();

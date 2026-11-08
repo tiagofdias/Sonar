@@ -4,7 +4,7 @@ use crate::theme::{self as t, Icon, rgb, rgba};
 use crate::{App, CallStatus, Confirm, Dialog, Mode, Msg, Panel, Screen, Tab, ToastKind, UnlockReason};
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::text::LineHeight;
-use iced::widget::{button, center, column, container, hover, mouse_area, opaque, pick_list, row, scrollable, space, stack, text, text_editor, text_input, Column, Row};
+use iced::widget::{tooltip, button, center, column, container, hover, mouse_area, opaque, pick_list, row, scrollable, space, stack, text, text_editor, text_input, Column, Row};
 use iced::{Color, Element, Length, Padding};
 
 pub const SYSTEM_DEFAULT: &str = "System default";
@@ -18,7 +18,10 @@ pub fn view(app: &App) -> E<'_> {
         Screen::Unlock => unlock(app),
         Screen::Main => workspace(app),
     } };
-    crate::wheel::browser_speed(stack![page, toasts(app)].into())
+    let mut layers = iced::widget::Stack::new().width(FILL).height(FILL).push(page);
+    if let Some(stage) = screen_stage(app) { layers = layers.push(stage); }
+    if let Some(picker) = &app.screen_picker { layers = layers.push(screen_picker(picker)); }
+    crate::wheel::browser_speed(layers.push(toasts(app)).into())
 }
 
 // ----- Shared pieces --------------------------------------------------------
@@ -79,6 +82,11 @@ fn danger<'a>(label: impl Into<String>, on: Option<Msg>) -> E<'a> {
     let label: String = label.into();
     button(text(label).size(15).color(Color::WHITE).font(t::semibold())).padding([13, 18]).style(t::danger()).on_press_maybe(on).into()
 }
+/// The microphone toggle; green while the mic is picking up sound.
+fn mic_btn<'a>(muted: bool, speaking: bool, on: Msg) -> E<'a> {
+    if !speaking || muted { return icon_btn(if muted { Icon::MicOff } else { Icon::Mic }, 18.0, Some(on), muted); }
+    button(container(t::icon(Icon::Mic, 18.0, rgb(0x7fdc9a))).center_x(30).center_y(32)).padding(0).width(30).height(32).style(t::mic_speaking()).on_press(on).into()
+}
 fn lead_icon<'a>(icon: Icon, label: impl text::IntoFragment<'a>, color: Color, icon_size: f32, size: f32, gap: f32) -> Row<'a, Msg> {
     row![t::icon(icon, icon_size, color), text(label).size(size).color(color).font(t::REGULAR)].spacing(gap).align_y(Vertical::Center)
 }
@@ -117,6 +125,65 @@ fn modal_title<'a>(value: impl text::IntoFragment<'a>) -> E<'a> {
 
 fn boot<'a>() -> E<'a> {
     center(column![t::sonar_mark(1.0), text("Opening your private space...").size(16).color(rgb(0xac9abd))].spacing(25).align_x(Horizontal::Center)).into()
+}
+
+fn screen_button<'a>(app: &'a App) -> E<'a> {
+    let sharing = app.screen_sharing.is_some();
+    icon_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
+}
+
+fn screen_volume<'a>(app: &'a App, id: &'a str) -> E<'a> {
+    let volume = app.screen_volumes.get(id).copied().unwrap_or(1.0);
+    let id = id.to_owned();
+    row![t::icon(Icon::Volume, 15.0, rgb(0x9b91a4)), iced::widget::slider(0.0..=1.0, volume, move |value| Msg::ScreenVolume(id.clone(), value)).step(0.01f32).width(110).style(t::volume_slider())].spacing(7).align_y(Vertical::Center).into()
+}
+
+/// Screens other people are sharing. Mirrors ScreenStage.jsx.
+fn screen_stage(app: &App) -> Option<E<'_>> {
+    use iced::widget::image;
+    if app.screen_views.is_empty() { return None; }
+    if let Some((id, (handle, _, _))) = app.screen_expanded.as_ref().and_then(|id| app.screen_views.get_key_value(id)) {
+        let header = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb9b7c3)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
+        return Some(opaque(container(column![container(header).padding([6, 10]), image(handle.clone()).width(FILL).height(FILL)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000)))));
+    }
+    let mut tiles = Column::new().spacing(10);
+    for (id, (handle, width, height)) in &app.screen_views {
+        let aspect = *height as f32 / (*width).max(1) as f32;
+        let caption = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb9b7c3)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
+        tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x15161a), rgb(0x37313e), 8.0)));
+    }
+    Some(container(container(opaque(tiles)).width(520)).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom).padding(18).into())
+}
+
+fn screen_picker<'a>(picker: &'a crate::ScreenPicker) -> E<'a> {
+    let chosen = picker.sources.get(picker.selected);
+    let section = |label: &'static str| -> E<'a> { container(text(t::tracked(label)).size(11).color(rgb(0x8c8496))).padding(Padding { top: 16.0, bottom: 8.0, ..Padding::ZERO }).into() };
+    let mut screens = Column::new().spacing(4);
+    let mut apps = Column::new().spacing(4);
+    for (index, source) in picker.sources.iter().enumerate() {
+        let selected = index == picker.selected;
+        let line = button(row![t::icon(if source.monitor { Icon::ScreenShare } else { Icon::AudioLines }, 15.0, rgb(0xc1b0d0)), text(source.label.clone()).size(14).color(if selected { rgb(0xe6d9f2) } else { rgb(0xb9b7c3) }).wrapping(text::Wrapping::None).width(FILL)].spacing(10).align_y(Vertical::Center)).width(FILL).padding([8, 10]).style(if selected { t::community_invite() } else { t::secondary() }).on_press(Msg::ScreenSelect(index));
+        if source.monitor { screens = screens.push(line); } else { apps = apps.push(line); }
+    }
+    let list = column![section("YOUR SCREENS"), screens, section("APPS"), apps];
+    let mut sizes = Row::new().spacing(8);
+    for height in [1080u32, 1440, 2160] {
+        let allowed = height == 1080 || (picker.hardware && chosen.is_some_and(|s| s.height >= height));
+        let name = match height { 1080 => "1080p", 1440 => "1440p", _ => "4K" };
+        sizes = sizes.push(button(text(name).size(14)).padding([8, 16]).style(if picker.height == height { t::primary() } else { t::secondary() }).on_press_maybe(allowed.then_some(Msg::ScreenHeight(height))));
+    }
+    let sound = if chosen.is_some_and(|s| s.monitor) { "Shares all PC sound except Sonar." } else { "Shares only this app's sound." };
+    let encoder = if picker.hardware { "Encoded on your graphics card." } else { "No graphics-card encoder was found, so sharing is limited to 1080p." };
+    let content = column![
+        modal_header(Icon::ScreenShare, 24.0, Msg::ScreenClosePicker),
+        modal_title("Share your screen"),
+        container(scroll_area(list)).max_height(300),
+        section("RESOLUTION"),
+        sizes,
+        container(text(format!("{sound} {encoder}")).size(13).color(rgb(0x99919f))).padding(Padding { top: 12.0, bottom: 16.0, ..Padding::ZERO }),
+        primary("Start sharing", Some(Icon::ScreenShare), chosen.map(|_| Msg::ScreenStart)),
+    ];
+    modal(container(content).padding(34).into(), 520.0, Some(Msg::ScreenClosePicker))
 }
 
 fn toasts(app: &App) -> E<'_> {
@@ -161,7 +228,10 @@ fn auth(app: &App) -> E<'_> {
         if field == 2 { input.on_submit(Msg::Submit).into() } else { input.into() }
     };
     let mut fields = Column::new().spacing(20);
-    if form.signup { fields = fields.push(column![label("Display name"), entry(&form.name, 0, false)].spacing(9)); }
+    if form.signup {
+        fields = fields.push(column![label("Display name"), entry(&form.name, 0, false)].spacing(9));
+        fields = fields.push(column![label("Username"), entry(&form.username, 6, false)].spacing(9));
+    }
     fields = fields.push(column![label("Email address"), entry(&form.email, 1, false)].spacing(9));
     if form.recover {
         fields = fields.push(column![label("Recovery key"), text_input("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", &form.recovery_key).on_input(|v| Msg::AuthField(4, v)).padding(12).size(16).style(t::auth_input())].spacing(9));
@@ -266,14 +336,14 @@ fn recovery_view<'a>(app: &'a App, key: &'a str) -> E<'a> {
     let check = iced::widget::checkbox(saved).label("I saved my recovery key somewhere safe").on_toggle(Msg::RecoverySaved).size(14).text_size(14).spacing(9)
         .style(move |_, _| iced::widget::checkbox::Style { background: (if saved { rgb(0xb69bdc) } else { rgb(0x1d1b22) }).into(), icon_color: rgb(0x21182e), border: t::border(if saved { rgb(0xb69bdc) } else { rgb(0x4b3d55) }, 1.0, 3.0), text_color: Some(rgb(0xb8a4c7)) });
     #[cfg(windows)]
-    let save_file: E = button(container(lead_icon(Icon::Copy, "Save as file", rgb(0xc1b0d0), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::SaveRecoveryFile).into();
+    let save_file: E = button(container(lead_icon(Icon::Download, "Save as file", rgb(0xc1b0d0), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::SaveRecoveryFile).into();
     #[cfg(not(windows))]
     let save_file: E = space().into();
     let card = column![
         t::icon(Icon::KeyRound, 30.0, t::ACCENT),
         container(text("Save your recovery key.").size(28).font(t::bold()).color(t::TEXT)).padding(Padding { top: 22.0, bottom: 10.0, ..Padding::ZERO }),
         body("It unlocks your messages on a new device and resets your password if you forget it. Only you have it: Sonar cannot show it again or recover it for you.", 15.0, rgb(0x99919f), 1.8),
-        container(container(text(key).size(16).font(t::REGULAR).color(rgb(0xefe4fb))).padding([18, 14]).width(FILL).center_x(FILL)
+        container(container(text(key).size(15).font(t::REGULAR).color(rgb(0xefe4fb))).padding([18, 14]).width(FILL).center_x(FILL)
             .style(t::panel(rgb(0x1b191f), rgb(0x4d3e58), 10.0))).padding(Padding { top: 26.0, bottom: 14.0, ..Padding::ZERO }),
         row![
             button(container(lead_icon(Icon::Copy, "Copy", rgb(0xc1b0d0), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::CopyRecovery),
@@ -411,7 +481,7 @@ fn sidebar(app: &App) -> E<'_> {
             let query = app.query.to_lowercase();
             let mut list = Column::new().spacing(5);
             if !app.people_loaded { list = list.push(text("Loading people...").size(15).color(t::MUTED)); }
-            for (index, person) in app.people.iter().filter(|p| p.name.to_lowercase().contains(&query)).enumerate() {
+            for (index, person) in app.people.iter().filter(|p| matches_person(p, &query)).enumerate() {
                 let online = app.online.contains(&person.id);
                 let mut trailing: Vec<E> = Vec::new();
                 if app.unread_direct.contains(&person.id) { trailing.push(t::dot(t::UNREAD, 8.0)); }
@@ -506,7 +576,13 @@ fn conversation(app: &App) -> E<'_> {
                 ].spacing(12).align_y(Vertical::Center).into(),
                 vec![
                     container(encrypted_badge()).padding(Padding { right: 8.0, ..Padding::ZERO }).into(),
-                    icon_btn(Icon::Phone, 19.0, (online && app.call.is_none() && app.incoming.is_none() && app.live_connected).then_some(Msg::StartCall), false),
+                    {
+                        let phone = icon_btn(Icon::Phone, 19.0, (online && app.call.is_none() && app.incoming.is_none() && app.live_connected).then_some(Msg::StartCall), false);
+                        if online { phone } else {
+                            let first = peer.name.split_whitespace().next().unwrap_or_default();
+                            tooltip(phone, container(text(format!("{first} is offline. Calls need both people online.")).size(13).color(rgb(0xddd4ee))).padding([6, 10]).style(t::panel(rgb(0x24262b), rgb(0x44404c), 6.0)), tooltip::Position::Bottom).into()
+                        }
+                    },
                     icon_btn(Icon::Pin, 19.0, Some(Msg::TogglePins), app.thread.pins),
                     icon_btn(Icon::Ellipsis, 21.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false),
                 ])
@@ -618,8 +694,9 @@ fn call_banner(app: &App) -> Option<E<'_>> {
                 text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0x9aaa96)),
             ].spacing(4).width(FILL),
             container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xa2baa0), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x303e30), rgb(0x485946), 5.0)),
-            icon_btn(if room.muted { Icon::MicOff } else { Icon::Mic }, 18.0, Some(Msg::RoomMute), room.muted),
+            mic_btn(room.muted, app.mic_active && !room.deafened, Msg::RoomMute),
             icon_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
+            screen_button(app),
             button(t::icon(Icon::LogOut, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::LeaveRoom),
         ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x26322d), rgb(0x405a4b), 9.0)))
             .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into());
@@ -630,8 +707,9 @@ fn call_banner(app: &App) -> Option<E<'_>> {
             t::icon(Icon::AudioLines, 23.0, rgb(0xbfd1bb)),
             column![text(title).size(15).font(t::semibold()).color(rgb(0xbfd1bb)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0x9aaa96))].spacing(4).width(FILL),
             pill(call.spec.relay_only),
-            icon_btn(if call.muted { Icon::MicOff } else { Icon::Mic }, 18.0, Some(Msg::Mute), call.muted),
+            mic_btn(call.muted, app.mic_active && !call.deafened, Msg::Mute),
             icon_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
+            if call.status == CallStatus::Connected { screen_button(app) } else { space().width(0).into() },
             end_call(Msg::Hangup),
         ].spacing(14).align_y(Vertical::Center).into()
     } else { return None };
@@ -656,6 +734,31 @@ fn date_divider<'a>(label: &str) -> E<'a> {
     container(row![t::rule(t::LINE_CHAT, true), text(t::tracked(label)).size(11).color(rgb(0x787482)), t::rule(t::LINE_CHAT, true)].spacing(15).align_y(Vertical::Center)).padding(Padding { top: 8.0, bottom: 24.0, ..Padding::ZERO }).into()
 }
 fn notice<'a>(value: &'a str) -> E<'a> { container(text(value).size(15).color(rgb(0x817887))).padding(24).into() }
+
+fn invite_card<'a>(app: &'a App, token: String) -> E<'a> {
+    let (mut title, mut detail) = ("Checking invite...".to_string(), "Community invite".to_string());
+    let mut join = None;
+    match app.invite_previews.get(&token).and_then(Option::as_ref) {
+        None => {}
+        Some(Err(_)) => { title = "Could not load this invite".into(); detail = "Check your connection and reopen the conversation.".into(); }
+        Some(Ok(preview)) if !preview.available => { title = "Invite expired".into(); detail = "Ask for a new invite link.".into(); }
+        Some(Ok(preview)) => {
+            let members = format!("{} {}", preview.member_count, if preview.member_count == 1 { "member" } else { "members" });
+            title = preview.name.clone();
+            detail = if preview.member { format!("{members} · You're a member") } else if preview.full { format!("{members} · Community full") } else { format!("{members} · Invite only") };
+            if preview.member {
+                join = Some(action("Open", None, t::secondary(), rgb(0xc1b0d0), (!app.busy).then(|| Msg::DialogDone(Ok(preview.id.clone()))), [8.0, 14.0], 14.0));
+            } else if !preview.full {
+                join = Some(action(if app.busy { "Joining..." } else { "Join" }, Some(Icon::ArrowUpRight), t::primary(), rgb(0x251c31), (!app.busy).then(|| Msg::JoinInvite(token.clone())), [8.0, 14.0], 14.0));
+            }
+        }
+    }
+    let mut card = Row::new().spacing(13).align_y(Vertical::Center)
+        .push(container(t::icon(Icon::Users, 19.0, rgb(0xcbb2ea))).center_x(40).center_y(40).style(t::panel(rgb(0x30283e), rgb(0x30283e), 8.0)))
+        .push(column![text(title).size(16).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::WordOrGlyph), text(detail).size(13).color(rgb(0x928599))].spacing(2).width(FILL));
+    if let Some(join) = join { card = card.push(join); }
+    container(container(card).padding(14).max_width(440).style(t::panel(rgb(0x24242b), rgb(0x37313e), 8.0))).padding(Padding { top: 4.0, ..Padding::ZERO }).into()
+}
 
 fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
     let reactions = crate::chat::reactions(&app.thread.messages, app.now);
@@ -685,7 +788,16 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
             let quoted = visible.iter().find(|m| &m.id == target && !m.unreadable).map(|m| m.text.clone()).unwrap_or_else(|| "Original message unavailable".into());
             content = content.push(container(row![container(space()).width(2).height(18).style(t::fill(rgb(0x9675bb))), text(format!("Replying to: {quoted}")).size(14).color(rgb(0xb8a7cb)).wrapping(text::Wrapping::None)].spacing(8).align_y(Vertical::Center)).padding(Padding { top: 3.0, bottom: 5.0, ..Padding::ZERO }));
         }
-        content = content.push(body(message.text.as_str(), 16.0, if message.unreadable { rgb(0x8d8098) } else { rgb(0xb9b7c3) }, 1.8).wrapping(text::Wrapping::WordOrGlyph));
+        if message.missed_call {
+            let mine = message.sender == me;
+            let label = if mine { "You called. No answer.".to_string() } else { format!("Missed call from {}", sender_name.split_whitespace().next().unwrap_or_default()) };
+            content = content.push(container(row![t::icon(Icon::PhoneMissed, 16.0, if mine { rgb(0x9b91a4) } else { rgb(0xe8909f) }), text(label).size(16).color(rgb(0xb9b7c3))].spacing(9).align_y(Vertical::Center)).padding(Padding { top: 2.0, ..Padding::ZERO }));
+        }
+        let invite = if message.unreadable || message.missed_call { None } else { crate::api::find_invite(&message.text) };
+        if !message.missed_call && !invite.as_ref().is_some_and(|(_, only)| *only) {
+            content = content.push(body(message.text.as_str(), 16.0, if message.unreadable { rgb(0x8d8098) } else { rgb(0xb9b7c3) }, 1.8).wrapping(text::Wrapping::WordOrGlyph));
+        }
+        if let Some((token, _)) = invite { content = content.push(invite_card(app, token)); }
         if !app.thread.pins {
             let counts = reactions.get(&message.id);
             let open = app.picker.as_deref() == Some(&message.id);
@@ -757,13 +869,13 @@ fn direct_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
         container(tile(&peer.name, rgb(0x40354e), rgb(0xdbc5f4), Some(rgb(0x594566)), 69.0, 23.0, 24.0, None)).padding(Padding { bottom: 18.0, ..Padding::ZERO }),
         container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("This is your space with {first}.") }).size(24).font(t::bold()).color(rgb(0xededf2))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
         body(if app.thread.pins { "Pinned messages stay until you unpin them." } else { "Say something. Make a plan. Stay a while." }, 15.0, rgb(0x878693), 1.7),
-        container(lead_icon(Icon::LockKeyhole, if changed { "Contact key changed. Verify it in conversation details before sending." } else if peer.encryption_key.is_some() { "Encrypted on your device before sending" } else { "Waiting for this person to set up encryption" }, if changed { rgb(0xe3b8a8) } else { rgb(0xac9bbd) }, 12.0, 12.0, 6.0)).padding(Padding { top: 17.0, ..Padding::ZERO }),
+        container(lead_icon(Icon::LockKeyhole, if changed { "Contact key changed. Verify it in conversation details before sending.".to_string() } else if peer.encryption_key.is_some() { "Encrypted on your device before sending".to_string() } else { format!("{first} hasn't set up encryption yet. They need to sign in to Sonar once before you can message them.") }, if changed { rgb(0xe3b8a8) } else { rgb(0xac9bbd) }, 12.0, 12.0, 6.0)).padding(Padding { top: 17.0, ..Padding::ZERO }),
     ];
     let mut list = Column::new().push(container(start).padding(Padding { top: 45.0, bottom: 27.0, ..Padding::ZERO })).push(date_divider(if app.thread.pins { "PINNED MESSAGES" } else { "YOUR CONVERSATION" }));
     for item in message_list(app, me, false) { list = list.push(item); }
     let scroll = scroll_area(container(list).padding(Padding { left: 33.0, right: 33.0, bottom: 20.0, top: 0.0 })).id("thread").anchor_bottom().height(FILL);
     let enabled = peer.encryption_key.is_some() && !changed;
-    column![scroll, composer(app, format!("Message {first}..."), enabled, "Only your devices hold the message keys".into())].into()
+    column![scroll, composer(app, if peer.encryption_key.is_some() { format!("Message {first}...") } else { format!("{first} needs to sign in to Sonar first") }, enabled, "Only your devices hold the message keys".into())].into()
 }
 
 fn community_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
@@ -824,6 +936,11 @@ fn members_panel(app: &App) -> E<'_> {
     container(scroll_area(list)).width(250).height(FILL).padding([12, 10]).style(t::fill(rgb(0x1b1c21))).into()
 }
 
+fn matches_person(person: &crate::api::Person, query: &str) -> bool {
+    let query = query.trim().trim_start_matches('@').to_lowercase();
+    person.name.to_lowercase().contains(&query) || person.username.contains(&query)
+}
+
 // ----- Overlays ---------------------------------------------------------------
 
 fn privacy_item<'a>(icon: Icon, title: &'a str, note: &'a str) -> E<'a> {
@@ -835,12 +952,15 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
     let content: E = match panel {
         Panel::People => {
             let mut people = Column::new().spacing(6).padding(Padding { top: 20.0, ..Padding::ZERO });
-            for (index, person) in app.people.iter().enumerate() {
-                people = people.push(person_row(&person.name, if app.online.contains(&person.id) { "Around now" } else { "Offline" }, index, app.online.contains(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x9999a6))], Some(Msg::OpenPeer(Some(person.id.clone())))));
+            let found: Vec<_> = app.people.iter().filter(|p| matches_person(p, &app.people_query)).collect();
+            if !app.people.is_empty() && found.is_empty() { people = people.push(body("No one matches that username.", 15.0, rgb(0x9b91a4), 1.8)); }
+            for (index, person) in found.into_iter().enumerate() {
+                people = people.push(person_row(&person.name, &format!("@{}", person.username), index, app.online.contains(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x9999a6))], Some(Msg::OpenPeer(Some(person.id.clone())))));
             }
             if app.people.is_empty() { people = people.push(body("No other members yet. Share this app's address with a friend.", 15.0, rgb(0x9b91a4), 1.8)); }
             column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Your people, a little closer."),
                 body("Choose someone to start an encrypted conversation. New members appear here after signing up.", 15.0, rgb(0x99919f), 1.8),
+                container(container(row![t::icon(Icon::Search, 15.0, rgb(0x676977)), text_input("Find by username or name", &app.people_query).on_input(Msg::PeopleQuery).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x15161a), rgb(0x2a2b32), 6.0))).padding(Padding { top: 20.0, ..Padding::ZERO }),
                 scroll_area(people).height(Length::Shrink)].into()
         }
         Panel::Privacy => {
@@ -1048,6 +1168,7 @@ fn settings_view(app: &App) -> E<'_> {
         container(text("Make it yours.").size(23).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 9.0, bottom: 24.0, ..Padding::ZERO }),
         tile(&session.account.full_name, rgb(0x4a3959), rgb(0xd9b9ee), Some(rgb(0x6a4b7d)), 65.0, 22.0, 24.0, None),
         container(text(session.account.full_name.clone()).size(16).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 12.0, ..Padding::ZERO }),
+        container(text(format!("@{}", session.account.username)).size(13).color(rgb(0xc3a5ec))).padding(Padding { top: 5.0, ..Padding::ZERO }),
         container(text(session.account.email.clone()).size(13).color(rgb(0x8c7c97))).padding(Padding { top: 7.0, bottom: 24.0, ..Padding::ZERO }),
         nav,
         container(button(row![t::icon(Icon::LogOut, 16.0, rgb(0xbb91a2)), text("Sign out everywhere").size(13).color(rgb(0xbb91a2))].spacing(11).align_y(Vertical::Center)).width(FILL).padding([12, 10]).style(t::nav_row(false)).on_press_maybe((!app.busy).then_some(Msg::SignOut))).padding(Padding { top: 30.0, ..Padding::ZERO }),
@@ -1061,9 +1182,11 @@ fn settings_view(app: &App) -> E<'_> {
     let content: Column<Msg> = match app.tab {
         Tab::Profile => heading("A FAMILIAR FACE", "Your profile", "The name your people see in conversations and communities.")
             .push(container(field("Display name", dialog_input("", &app.profile_name, Msg::ProfileName, false), 10.0, 13.0, rgb(0xb7a5c5))).padding([22, 0]))
+            .push(field("Username", dialog_input("", &app.profile_username, Msg::ProfileUsername, false), 10.0, 13.0, rgb(0xb7a5c5)))
+            .push(container(text("People can find you with this. Letters, numbers, dots and underscores.").size(12).color(rgb(0x887691))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
             .push(field("Email address", text_input("", &session.account.email).padding(13).size(15).style(t::input(rgb(0x211d26), rgb(0x4d3e58), rgb(0x4d3e58), 7.0)).into(), 10.0, 13.0, rgb(0xb7a5c5)))
             .push(container(text("Email changes are not available yet.").size(12).color(rgb(0x887691))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
-            .push(primary(if app.busy { "Saving..." } else { "Save changes" }, Some(Icon::Check), (!app.busy && !app.profile_name.trim().is_empty() && app.profile_name.trim() != session.account.full_name).then_some(Msg::SaveProfile)))
+            .push(primary(if app.busy { "Saving..." } else { "Save changes" }, Some(Icon::Check), (!app.busy && !app.profile_name.trim().is_empty() && !app.profile_username.is_empty() && (app.profile_name.trim() != session.account.full_name || app.profile_username != session.account.username)).then_some(Msg::SaveProfile)))
             .push(v_space(28.0))
             .push(honest_note(Icon::UserRound, "Your display name and email are account information visible to the service. Message content is encrypted separately on your device.")),
         Tab::Security => {
@@ -1204,6 +1327,7 @@ fn settings_view(app: &App) -> E<'_> {
                 ].into()))
                 .push(v_space(24.0))
                 .push(security_card(Icon::Speaker, card_title("Your speakers"), "Choose where calls play.", column![
+                    checkbox_row("Noise suppression", !app.settings.noise_suppression_off, Msg::NoiseSuppression),
                     field("Speakers", pick_list(outputs, output, Msg::SelectOutput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xb7a5c5)),
                     container(button(row![t::icon(Icon::Play, 14.0, rgb(0xc1b0d0)), text(if app.testing { "Playing..." } else { "Play test sound" }).size(13).color(rgb(0xc1b0d0))].spacing(10).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestSpeakers))).padding(Padding { top: 18.0, ..Padding::ZERO }),
                 ].into()))

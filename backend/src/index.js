@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 
 import { connectDB } from "./lib/db.js";
 import { ensureMessageRetentionIndexes } from "./lib/retentionIndexes.js";
+import { ensureUsernames } from "./lib/usernames.js";
 import mongoose from "mongoose";
 
 import authRoutes from "./routes/auth.route.js";
@@ -152,6 +153,7 @@ try {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) throw new Error("JWT_SECRET must contain at least 32 characters");
   await connectDB();
   await ensureMessageRetentionIndexes({ matrix: process.env.SONAR_MATRIX_EXPERIMENTAL === "true" });
+  await ensureUsernames();
   server.listen(PORT, () => console.log(`Sonar listening on port ${PORT}`));
 } catch (error) {
   console.error(error.message);

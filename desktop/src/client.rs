@@ -1,7 +1,7 @@
 //! REST calls used by the desktop interface. Errors carry the server's own
 //! message where it provides one, so the desktop shows exactly what the web
 //! client shows. Plaintext is never sent: messages leave as AES-GCM envelopes.
-use crate::api::{Account, Community, CreatedInvite, MessageEnvelope, MessagePage, Passkey, Person, Session, Sessions};
+use crate::api::{Account, Community, CreatedInvite, InvitePreview, MessageEnvelope, MessagePage, Passkey, Person, Session, Sessions};
 use crate::key_backup::Backup;
 use reqwest::{header, redirect::Policy, Client, Method, Response};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -50,9 +50,9 @@ pub async fn login(server: String, email: String, password: Zeroizing<String>) -
     authenticate(&server, "api/auth/login", json!({ "email": email.trim(), "password": &*password }), "Invalid credentials").await
 }
 
-pub async fn signup(server: String, name: String, email: String, password: Zeroizing<String>) -> Result<Session, String> {
+pub async fn signup(server: String, name: String, username: String, email: String, password: Zeroizing<String>) -> Result<Session, String> {
     if password.chars().count() < 10 || password.len() > 72 { return Err("Password must be at least 10 characters and at most 72 UTF-8 bytes".into()); }
-    authenticate(&server, "api/auth/signup", json!({ "fullName": name.trim(), "email": email.trim(), "password": &*password }), "Could not create your account").await
+    authenticate(&server, "api/auth/signup", json!({ "fullName": name.trim(), "username": username.trim(), "email": email.trim(), "password": &*password }), "Could not create your account").await
 }
 
 /// Forgotten password: proves the recovery key and sets a new password.
@@ -115,8 +115,8 @@ impl Session {
         if let Some(backup) = key_backup { body["keyBackup"] = serde_json::to_value(backup).map_err(|_| "Invalid key")?; }
         self.send(Method::PUT, "api/auth/password", Some(body), "Could not change password").await.map(|_| ())
     }
-    pub async fn update_name(&self, name: &str) -> Result<Account, String> {
-        self.call(Method::PUT, "api/auth/update-profile", Some(json!({ "fullName": name.trim() })), "Could not update profile").await
+    pub async fn update_profile_details(&self, name: &str, username: &str) -> Result<Account, String> {
+        self.call(Method::PUT, "api/auth/update-profile", Some(json!({ "fullName": name.trim(), "username": username })), "Could not update profile").await
     }
     pub async fn sessions_list(&self) -> Result<Sessions, String> { self.call(Method::GET, "api/auth/sessions", None, "Could not load sessions").await }
     pub async fn end_session(&self, id: &str) -> Result<bool, String> {
@@ -150,6 +150,7 @@ impl Session {
     pub async fn communities(&self) -> Result<Vec<Community>, String> { self.call(Method::GET, "api/communities", None, "Could not load communities").await }
     pub async fn community(&self, id: &str) -> Result<Community, String> { self.call(Method::GET, &format!("api/communities/{}", check_id(id)?), None, "Community unavailable").await }
     pub async fn new_community(&self, name: &str) -> Result<Community, String> { self.call(Method::POST, "api/communities", Some(json!({ "name": name.trim() })), "Could not create community").await }
+    pub async fn invite_preview(&self, token: &str) -> Result<InvitePreview, String> { self.call(Method::POST, "api/communities/invite-preview", Some(json!({ "token": token })), "Could not load this invite").await }
     pub async fn join(&self, token: &str) -> Result<Community, String> { self.call(Method::POST, "api/communities/join", Some(json!({ "token": token })), "Could not join community").await }
     pub async fn new_channel(&self, community: &str, name: &str, kind: &str) -> Result<Community, String> {
         self.call(Method::POST, &format!("api/communities/{}/channels", check_id(community)?), Some(json!({ "name": name.trim(), "type": kind })), "Could not create channel").await

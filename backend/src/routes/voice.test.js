@@ -230,3 +230,14 @@ test("authenticated direct-call signaling scopes call IDs, busy state, and clean
     await database.stop();
   }
 });
+
+test("screen-share signals are validated before relay", async () => {
+  const { validScreenSignal } = await import("../lib/calls.js");
+  assert.equal(validScreenSignal({ type: "screen-stop" }), true);
+  assert.equal(validScreenSignal({ type: "screen-offer", sdp: { type: "offer", sdp: "v=0" } }), true);
+  assert.equal(validScreenSignal({ type: "screen-offer", sdp: { type: "answer", sdp: "v=0" } }), false);
+  assert.equal(validScreenSignal({ type: "screen-answer", sdp: { type: "answer", sdp: "v=0" } }), true);
+  assert.equal(validScreenSignal({ type: "screen-ice", role: "viewer", candidate: { candidate: "x" } }), true);
+  assert.equal(validScreenSignal({ type: "screen-ice", role: "other", candidate: { candidate: "x" } }), false);
+  assert.equal(validScreenSignal({ type: "screen-unknown" }), false);
+});

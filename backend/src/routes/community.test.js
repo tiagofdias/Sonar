@@ -92,10 +92,22 @@ test("community authorization, invitation, encrypted history and retention", asy
             .status,
           404,
         );
+        const before = await request(friend, "/invite-preview", "POST", { token });
+        assert.equal(before.data.available, true);
+        assert.equal(before.data.name, community.name);
+        assert.equal(before.data.memberCount, 1);
+        assert.equal(before.data.member, false);
+        assert.equal(before.data.id, undefined);
+        assert.equal((await request(friend, "/invite-preview", "POST", { token: "0".repeat(48) })).data.available, false);
+        assert.equal((await request(friend, "/invite-preview", "POST", { token: "nope" })).data.available, false);
         assert.equal(
           (await request(friend, "/join", "POST", { token })).status,
           200,
         );
+        const after = await request(friend, "/invite-preview", "POST", { token });
+        assert.equal(after.data.member, true);
+        assert.equal(after.data.memberCount, 2);
+        assert.equal(after.data.id, String(community._id));
         assert.equal(
           (await request(friend, "/join", "POST", { token })).status,
           200,

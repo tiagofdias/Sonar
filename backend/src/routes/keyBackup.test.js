@@ -7,6 +7,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import { app, server } from "../lib/socket.js";
 import authRoutes from "./auth.route.js";
 import User from "../models/user.model.js";
+import { ensureUsernames } from "../lib/usernames.js";
 import {
   createBackedUpIdentity,
   createRecoverableIdentity,
@@ -89,6 +90,22 @@ test("encrypted key backups bind to the account key and follow password changes"
       assert.equal(result.status, 200);
       assert.equal(result.body.encryptionKey, rotated.publicKey);
       assert.deepEqual((await request("/key-backup", "GET", undefined, cookie)).body.backup, rotated.backup);
+    });
+    await t.test("usernames are unique, validated and editable", async () => {
+      const a = await request("/signup", "POST", { fullName: "Ana Lopes", username: "@Ana.Lopes", email: "ana@example.invalid", password: "ana-password-1" });
+      assert.equal(a.status, 201);
+      assert.equal(a.body.username, "ana.lopes");
+      assert.equal((await request("/signup", "POST", { fullName: "Other", username: "ana.lopes", email: "other@example.invalid", password: "other-password-1" })).status, 400);
+      assert.equal((await request("/signup", "POST", { fullName: "Bad", username: "no spaces", email: "bad@example.invalid", password: "bad-password-12" })).status, 400);
+      const auto = await request("/signup", "POST", { fullName: "Ána Lopes", email: "auto@example.invalid", password: "auto-password-1" });
+      assert.equal(auto.body.username, "analopes");
+      assert.equal((await request("/update-profile", "PUT", { fullName: "Ana", username: "analopes" }, a.cookie)).status, 409);
+      const renamed = await request("/update-profile", "PUT", { fullName: "Ana", username: "ana_new" }, a.cookie);
+      assert.equal(renamed.body.username, "ana_new");
+      assert.equal((await request("/check", "GET", undefined, a.cookie)).body.username, "ana_new");
+      await User.updateOne({ email: "auto@example.invalid" }, { $unset: { username: 1 } });
+      await ensureUsernames();
+      assert.equal((await User.findOne({ email: "auto@example.invalid" })).username, "analopes");
     });
     await t.test("recovery keys replace password backups and reset a forgotten password", async () => {
       const email = "recovery@example.invalid";

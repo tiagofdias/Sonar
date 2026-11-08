@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "./axios";
 import { applyAudioOutput } from "./audioOutput";
+import { useScreenShare } from "./useScreenShare";
+import { denoisedStream } from "./noiseSuppression";
+import { useChatStore } from "../store/useChatStore";
 import { refreshVoiceConfiguration } from "./voiceConfigRefresh";
 import {
   audioConstraints,
@@ -15,7 +18,34 @@ const mediaError = (error) =>
       : error.name === "OverconstrainedError"
         ? "The selected microphone is unavailable. Choose another in Voice settings."
         : error.message;
+// Loops the ringtone on the chosen speakers until the call is answered or ends.
+function useRingtone(ringing) {
+  useEffect(() => {
+    if (!ringing) return undefined;
+    const player = new Audio("/sounds/ringtone.wav");
+    player.loop = true;
+    const play = () => player.play().catch(() => {});
+    // Browsers block sound on a page nobody has touched yet: retry on first input.
+    const retry = () => { play(); stopRetry(); };
+    const stopRetry = () => ["pointerdown", "keydown"].forEach((name) => window.removeEventListener(name, retry));
+    applyAudioOutput(player, useVoiceSettingsStore.getState()).catch(() => {}).finally(() => {
+      if (player.dataset.stopped) return;
+      player.play().catch(() => ["pointerdown", "keydown"].forEach((name) => window.addEventListener(name, retry)));
+    });
+    return () => {
+      player.dataset.stopped = "1";
+      stopRetry();
+      player.pause();
+      player.removeAttribute("src");
+      player.load();
+    };
+  }, [ringing]);
+}
 export function useVoiceCall(socket) {
+  // Reached the other person, and whether they picked up: decides "missed call".
+  const rang = useRef(false), answered = useRef(false);
+  const screenRef = useRef(null);
+  const cleaned = useRef(null);
   const [call, setCall] = useState(null),
     [muted, setMuted] = useState(false),
     [deafened, setDeafened] = useState(false),
@@ -57,6 +87,11 @@ export function useVoiceCall(socket) {
         );
     });
   const cleanup = () => {
+    const finished = state.current;
+    if (finished?.status === "calling" && rang.current && !answered.current)
+      useChatStore.getState().sendMissedCall(finished.peer);
+    rang.current = false;
+    answered.current = false;
     update(null);
     ready.current = false;
     pending.current = [];
@@ -75,6 +110,8 @@ export function useVoiceCall(socket) {
       track.stop();
     });
     stream.current = null;
+    cleaned.current?.close();
+    cleaned.current = null;
     if (audio.current) {
       audio.current.pause();
       audio.current.srcObject = null;
@@ -150,7 +187,13 @@ export function useVoiceCall(socket) {
           iceTransportPolicy: relayOnly || fresh.relayOnly ? "relay" : "all" });
       },
     );
-    media.getTracks().forEach((track) => connection.addTrack(track, media));
+    const clean = await denoisedStream(media);
+    if (!valid(current.id) || pc.current !== connection) {
+      clean.close();
+      throw new Error("Call ended");
+    }
+    cleaned.current = clean;
+    clean.stream.getTracks().forEach((track) => connection.addTrack(track, clean.stream));
     update({ ...state.current, relayOnly });
     connection.onicecandidate = (event) => {
       if (!valid(current.id) || !event.candidate) return;
@@ -216,7 +259,7 @@ export function useVoiceCall(socket) {
         },
         true,
       );
-      if (valid(current.id)) flushLocal(current);
+      if (valid(current.id)) { rang.current = true; flushLocal(current); }
     } catch (error) {
       if (valid(current.id)) {
         toast.error(mediaError(error));
@@ -267,10 +310,12 @@ export function useVoiceCall(socket) {
           return;
         }
         if (!valid(payload.callId) || state.current.peer !== from) return;
+        if (payload.type?.startsWith("screen-")) return screenRef.current.handle(from, payload);
         if (
           payload.type === "answer" &&
           pc.current?.signalingState === "have-local-offer"
         ) {
+          answered.current = true;
           const connection = pc.current;
           await connection.setRemoteDescription(payload.sdp);
           for (const candidate of pending.current.splice(0))
@@ -354,6 +399,13 @@ export function useVoiceCall(socket) {
         "Check your selected speakers and allow audio playback in your browser.",
       ),
     );
+  useRingtone(call?.status === "incoming");
+  const screen = useScreenShare({
+    send: (to, payload) => signal(to, { ...payload, callId: state.current?.id }),
+    targets: call?.status === "connected" || call?.status === "reconnecting" ? [call.peer] : [],
+  });
+  screenRef.current = screen;
+  const micStream = useCallback(() => stream.current, []);
   return {
     call,
     start,
@@ -365,5 +417,7 @@ export function useVoiceCall(socket) {
     toggleDeafen,
     playbackBlocked,
     resumeAudio,
+    micStream,
+    screen,
   };
 }

@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 pub enum Command { Answer(String), Candidate(RTCIceCandidateInit), Mute(bool), Deafen(bool), Hangup }
 
 #[derive(Clone, Debug)]
-pub enum Update { Ready(Controls), Connecting, Connected, Ended(Option<String>) }
+pub enum Update { Ready(Controls), Ringing, Connecting, Connected, Ended(Option<String>) }
 
 #[derive(Clone)]
 pub struct Controls(mpsc::UnboundedSender<Command>);
@@ -80,6 +80,7 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
         Role::Outgoing => {
             let offer = crate::voice_session::prepare_outgoing(&spec.session, spec.relay_only, bind).await?;
             if let Err(error) = spec.socket.offer(&spec.peer, &spec.id, &offer.offer_sdp).await { offer.cancel().await; return Err(error); }
+            let _ = output.send(Update::Ringing).await;
             // Wait up to a minute for the callee to answer (the server also times out).
             let deadline = Instant::now() + Duration::from_secs(65);
             let answer = loop {

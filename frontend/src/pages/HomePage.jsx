@@ -30,6 +30,8 @@ import VoiceRoomBanner from "../components/VoiceRoomBanner";
 import { fingerprint, contactKeyStatus, acceptVerifiedContactKey } from "../lib/crypto";
 import VoiceCallBanner from "../components/VoiceCallBanner";
 import ReactionBar from "../components/ReactionBar";
+import MessageText from "../components/MessageText";
+import CallNotice from "../components/CallNotice";
 import { reactionSummary } from "../lib/reactions";
 import CommunityWorkspace from "../components/CommunityWorkspace";
 import ExperimentalContactVerification from "../components/ExperimentalContactVerification";
@@ -51,6 +53,10 @@ function Avatar({ user, online, large }) {
     </span>
   );
 }
+const matches = (user, text) => {
+  const value = text.trim().replace(/^@/, "").toLowerCase();
+  return user.fullName.toLowerCase().includes(value) || (user.username || "").includes(value);
+};
 export default function HomePage() {
   const [communityMode, setCommunityMode] = useState(
     () =>
@@ -77,6 +83,7 @@ export default function HomePage() {
     loadOlder,
   } = useChatStore();
   const [query, setQuery] = useState(""),
+    [peopleQuery, setPeopleQuery] = useState(""),
     [sending, setSending] = useState(false),
     [panel, setPanel] = useState(null),
     [onlyPins, setOnlyPins] = useState(false),
@@ -292,7 +299,7 @@ export default function HomePage() {
             <button
               title="Find people"
               className="icon-button"
-              onClick={() => setPanel("people")}
+              onClick={() => { setPeopleQuery(""); setPanel("people"); }}
             >
               <Search size={15} />
             </button>
@@ -313,7 +320,7 @@ export default function HomePage() {
             )}
             {users
               .filter((u) =>
-                u.fullName.toLowerCase().includes(query.toLowerCase()),
+                matches(u, query),
               )
               .map((user) => (
                 <button
@@ -407,7 +414,7 @@ export default function HomePage() {
             {peer && (
               <>
                 <button
-                  title="Start voice call"
+                  title={onlineUsers.includes(peer._id) ? "Start voice call" : `${peer.fullName.split(" ")[0]} is offline. Calls need both people online.`}
                   className="icon-button"
                   disabled={
                     !onlineUsers.includes(peer._id) ||
@@ -501,7 +508,7 @@ export default function HomePage() {
                   <LockKeyhole size={12} />
                   {peer.encryptionKey
                     ? "Encrypted on your device before sending"
-                    : "Waiting for this person to set up encryption"}
+                    : `${peer.fullName.split(" ")[0]} hasn't set up encryption yet. They need to sign in to Sonar once before you can message them.`}
                 </span>
               </div>
               <div className="date-divider">
@@ -562,7 +569,7 @@ export default function HomePage() {
                           )}
                         </div>
                         {message.replyTo && <div className="reply-reference">Replying to: {visible.find(item => item._id === message.replyTo && !item.unreadable)?.text || "Original message unavailable"}</div>}
-                        <p>{message.text}</p>
+                        {message.call === "missed" ? <CallNotice mine={sender._id === authUser._id} name={sender.fullName} /> : <MessageText text={message.text} onOpenCommunity={() => setCommunityMode(true)} />}
                         {!onlyPins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => sendMessage({ reaction })} />}
                       </div>
                       <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>
@@ -597,7 +604,7 @@ export default function HomePage() {
                 aria-label="Message"
                 rows={1}
                 maxLength={4000}
-                placeholder={`Message ${peer.fullName.split(" ")[0]}...`}
+                placeholder={peer.encryptionKey ? `Message ${peer.fullName.split(" ")[0]}...` : `${peer.fullName.split(" ")[0]} needs to sign in to Sonar first`}
                 value={text}
                 disabled={!peer.encryptionKey}
                 onChange={(e) => setText(e.target.value)}
@@ -657,8 +664,17 @@ export default function HomePage() {
                   Choose someone to start an encrypted conversation. New members
                   appear here after signing up.
                 </p>
+                <label className="search-box modal-search">
+                  <Search size={15} />
+                  <input
+                    aria-label="Find people by username"
+                    placeholder="Find by username or name"
+                    value={peopleQuery}
+                    onChange={(e) => setPeopleQuery(e.target.value)}
+                  />
+                </label>
                 <div className="modal-people">
-                  {users.map((user) => (
+                  {users.filter((user) => matches(user, peopleQuery)).map((user) => (
                     <button
                       className="person"
                       key={user._id}
@@ -671,10 +687,14 @@ export default function HomePage() {
                         user={user}
                         online={onlineUsers.includes(user._id)}
                       />
-                      <strong>{user.fullName}</strong>
+                      <span>
+                        <strong>{user.fullName}</strong>
+                        {user.username && <small>@{user.username}</small>}
+                      </span>
                       <ArrowUpRight size={17} />
                     </button>
                   ))}
+                  {users.length > 0 && !users.some((user) => matches(user, peopleQuery)) && <p>No one matches that username.</p>}
                   {!users.length && (
                     <p>
                       No other members yet. Share this app&apos;s address with a

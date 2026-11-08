@@ -139,6 +139,30 @@ router.post(
     res.json(community);
   }),
 );
+// What an invite card shows. The token is the secret, so it goes in the body
+// and only someone who already holds it learns the community's name.
+router.post(
+  "/invite-preview",
+  safe(async (req, res) => {
+    if (typeof req.body.token !== "string" || !/^[a-f0-9]{48}$/.test(req.body.token))
+      return res.json({ available: false });
+    const community = await Community.findOne({
+      inviteHash: hash(req.body.token),
+      inviteExpiresAt: { $gt: new Date() },
+      banned: { $ne: req.user._id },
+    }).select("name members");
+    if (!community) return res.json({ available: false });
+    const member = community.members.some((m) => String(m) === String(req.user._id));
+    res.json({
+      available: true,
+      name: community.name,
+      memberCount: community.members.length,
+      full: community.members.length >= 32,
+      member,
+      ...(member ? { id: community._id } : {}),
+    });
+  }),
+);
 router.use(
   "/:communityId",
   safe(async (req, res, next) => {

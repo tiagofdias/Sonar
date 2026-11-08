@@ -34,6 +34,10 @@ mod store;
 mod theme;
 mod ui;
 mod wheel;
+mod screen;
+mod screen_audio;
+mod screen_decode;
+mod screen_media;
 #[allow(dead_code)]
 mod voice_audio;
 #[allow(dead_code)]
@@ -43,7 +47,7 @@ mod voice_session;
 #[allow(dead_code)]
 mod voice_transport;
 
-use api::{Community, CreatedInvite, Passkey, Person, Session, Sessions};
+use api::{Community, CreatedInvite, InvitePreview, Passkey, Person, Session, Sessions};
 use iced::widget::text_editor;
 use iced::{Subscription, Task};
 use p256::SecretKey;
@@ -51,8 +55,49 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
+/// Windows uses the large icon on the taskbar and Iced only sets the small one,
+/// so hand it the .exe's own icon once the window exists.
+#[cfg(windows)]
+fn set_taskbar_icon() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetSystemMetrics, GetWindowThreadProcessId, IsWindowVisible, LoadImageW, SendMessageW, ICON_BIG, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON, WM_SETICON};
+    static DONE: AtomicBool = AtomicBool::new(false);
+    unsafe extern "system" fn visit(window: HWND, _: LPARAM) -> BOOL {
+        let mut owner = 0;
+        unsafe {
+            GetWindowThreadProcessId(window, &mut owner);
+            if owner != GetCurrentProcessId() || IsWindowVisible(window) == 0 { return 1; }
+            let size = GetSystemMetrics(SM_CXICON);
+            // Resource 1 is the icon from assets/sonar.rc.
+            let icon = LoadImageW(GetModuleHandleW(std::ptr::null()), 1 as _, IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+            if !icon.is_null() { SendMessageW(window, WM_SETICON, ICON_BIG as _, icon as _); DONE.store(true, Ordering::Relaxed); }
+        }
+        1
+    }
+    if !DONE.load(Ordering::Relaxed) { unsafe { EnumWindows(Some(visit), 0); } }
+}
+
+/// The window and taskbar icon. The .exe carries the same artwork for Explorer.
+fn app_icon() -> Option<iced::window::Icon> {
+    let decoder = png::Decoder::new(&include_bytes!("../assets/sonar-icon.png")[..]);
+    let mut reader = decoder.read_info().ok()?;
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut pixels).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight { return None; }
+    pixels.truncate(info.buffer_size());
+    iced::window::icon::from_rgba(pixels, info.width, info.height).ok()
+}
+
 fn main() -> iced::Result {
-    iced::application(App::boot, App::update, ui::view)
+    // Software drawing took 282 ms per frame at 2154x1343; the GPU takes 6 ms.
+    // DX12 used the least memory of the GPU backends. Iced falls back to
+    // software drawing by itself on a PC where this cannot start.
+    if std::env::var_os("WGPU_BACKEND").is_none() { std::env::set_var("WGPU_BACKEND", "dx12"); }
+    iced::application(App::boot, App::step, ui::view)
         .title("Sonar")
         .theme(|_: &App| iced::Theme::Dark)
         .style(|_, _| iced::theme::Style { background_color: theme::PAGE, text_color: theme::TEXT })
@@ -63,8 +108,9 @@ fn main() -> iced::Result {
         .font(include_bytes!("../assets/fonts/Poppins-BoldItalic.ttf").as_slice())
         .default_font(theme::REGULAR)
         .window(iced::window::Settings {
-            size: iced::Size::new(1280.0, 820.0),
+            size: if cfg!(debug_assertions) { std::env::var("SONAR_DEV_SIZE").ok().and_then(|v| { let (w, h) = v.split_once('x')?; Some(iced::Size::new(w.parse().ok()?, h.parse().ok()?)) }).unwrap_or(iced::Size::new(1280.0, 820.0)) } else { iced::Size::new(1280.0, 820.0) },
             min_size: Some(iced::Size::new(980.0, 620.0)),
+            icon: app_icon(),
             // Development builds can run scripted visual checks off-screen.
             position: if cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_OFFSCREEN").is_some() { iced::window::Position::Specific(iced::Point::new(-4000.0, -4000.0)) } else { iced::window::Position::Default },
             ..Default::default()
@@ -96,6 +142,8 @@ pub enum CallStatus { Calling, Connecting, Connected }
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Participant { pub user_id: String, #[serde(default)] pub name: String, pub session_id: String, #[serde(default)] pub muted: bool, #[serde(default)] pub deafened: bool }
+#[derive(Clone, Debug)]
+pub struct ScreenPicker { pub sources: Vec<screen::Shareable>, pub selected: usize, pub height: u32, pub hardware: bool }
 #[derive(Clone)]
 pub struct RoomState {
     pub spec: Option<room::Spec>,
@@ -117,7 +165,7 @@ pub struct CallState {
     pub status: CallStatus,
     pub muted: bool,
     pub deafened: bool,
-    pub started: Option<std::time::Instant>,
+    pub started: Option<std::time::Instant>, pub rang: bool,
 }
 
 /// The active conversation: a direct contact or a community channel.
@@ -133,7 +181,7 @@ pub struct Thread {
 }
 
 #[derive(Default)]
-pub struct AuthForm { pub recover: bool, pub recovery_key: String, pub confirm: String, pub signup: bool, pub name: String, pub email: String, pub password: String, pub server: String, pub server_open: bool, pub busy: bool }
+pub struct AuthForm { pub username: String, pub recover: bool, pub recovery_key: String, pub confirm: String, pub signup: bool, pub name: String, pub email: String, pub password: String, pub server: String, pub server_open: bool, pub busy: bool }
 
 pub struct App {
     pub screen: Screen,
@@ -185,6 +233,18 @@ pub struct App {
     pub dialog_voice: bool,
     pub dialog_channel: Option<String>,
     pub invite: Option<CreatedInvite>,
+    /// Invite cards by token; None while loading, Err when the lookup failed.
+    pub invite_previews: HashMap<String, Option<Result<InvitePreview, String>>>,
+    invite_scan: (usize, String),
+    pub screen_controls: Option<screen::Controls>,
+    pub screen_sharing: Option<String>,
+    pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
+    pub screen_expanded: Option<String>,
+    pub screen_volumes: HashMap<String, f32>,
+    pub screen_picker: Option<ScreenPicker>,
+    screen_targets: Vec<screen::Target>,
+    screen_deafened: bool,
+    ringtone: Option<audio::Ringtone>,
     pub bans: Option<Vec<Person>>,
     pub confirm: Option<Confirm>,
     pub busy: bool,
@@ -192,6 +252,10 @@ pub struct App {
     pub settings_open: bool,
     pub tab: Tab,
     pub profile_name: String,
+    pub profile_username: String,
+    pub people_query: String,
+    pub mic_active: bool,
+    pub mic_until: Option<std::time::Instant>,
     pub passwords: [String; 3],
     pub show_passwords: bool,
     pub sessions: Option<Sessions>,
@@ -257,6 +321,9 @@ pub enum Msg {
     Communities(u64, Result<Vec<Community>, String>),
     Unread(Result<Vec<(String, (i64, String))>, String>),
     Query(String),
+    PeopleQuery(String),
+    ProfileUsername(String),
+    MicPoll,
     SetMode(Mode),
     OpenPeer(Option<String>),
     OpenPanel(Option<Panel>),
@@ -289,6 +356,20 @@ pub enum Msg {
     SubmitDialog,
     DialogDone(Result<Option<String>, String>),
     InviteReady(Result<CreatedInvite, String>),
+    InvitePreviewReady(String, Result<InvitePreview, String>),
+    ScreenUpdate(String, screen::Update),
+    ScreenOpenPicker,
+    ScreenSources(Vec<screen::Shareable>, bool),
+    ScreenClosePicker,
+    ScreenSelect(usize),
+    ScreenHeight(u32),
+    ScreenStart,
+    ScreenStop,
+    ScreenExpand(Option<String>),
+    ScreenVolume(String, f32),
+    NoiseSuppression(bool),
+    MissedCallSent(String, Result<chat::Message, String>),
+    JoinInvite(String),
     CopyInvite,
     BansLoaded(Result<Vec<Person>, String>),
     AskConfirm(Option<Confirm>),
@@ -359,6 +440,7 @@ pub enum Msg {
 impl App {
     fn boot() -> (Self, Task<Msg>) {
         let settings = store::load_settings();
+        voice_audio::NOISE_SUPPRESSION.store(!settings.noise_suppression_off, std::sync::atomic::Ordering::Relaxed);
         let server = if settings.server.is_empty() { "http://127.0.0.1:5000".to_string() } else { settings.server.clone() };
         let saved = store::load_session();
         let app = App {
@@ -373,8 +455,8 @@ impl App {
             unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, bans: None, confirm: None, busy: false,
-            settings_open: false, tab: Tab::Profile, profile_name: String::new(), passwords: Default::default(), show_passwords: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
             call: None, incoming: None, early_candidates: Vec::new(), room: None, rooms: HashMap::new(), toasts: Vec::new(), toast_id: 0, script: Default::default(), probe: None,
@@ -391,7 +473,7 @@ impl App {
             if let (Ok(email), Ok(password)) = (std::env::var("SONAR_DEV_EMAIL"), std::env::var("SONAR_DEV_PASSWORD")) {
                 app.auth.email = email;
                 app.auth.password = password;
-                if let Ok(name) = std::env::var("SONAR_DEV_NAME") { app.auth.signup = true; app.auth.name = name; }
+                if let Ok(name) = std::env::var("SONAR_DEV_NAME") { app.auth.signup = true; app.auth.username = name.to_lowercase().replace(' ', ""); app.auth.name = name; }
                 tasks.push(Task::done(Msg::Submit));
             } else if let Some((server, cookie)) = saved {
                 app.screen = Screen::Boot;
@@ -413,6 +495,9 @@ impl App {
             list.push(iced::time::every(std::time::Duration::from_secs(30)).map(|_| Msg::Refresh));
         }
         if self.probe.is_some() { list.push(iced::window::frames().map(Msg::ProbeFrame)); }
+        let speaking_possible = self.call.as_ref().is_some_and(|c| c.status == CallStatus::Connected && !c.muted && !c.deafened)
+            || self.room.as_ref().is_some_and(|r| r.controls.is_some() && !r.muted && !r.deafened);
+        if speaking_possible { list.push(iced::time::every(std::time::Duration::from_millis(100)).map(|_| Msg::MicPoll)); }
         if let Some(spec) = self.room.as_ref().and_then(|r| r.spec.clone()) {
             let id = spec.session_id.clone();
             list.push(Subscription::run_with(spec, room::run).with(id).map(|(id, update)| Msg::RoomUpdate(id, update)));
@@ -420,7 +505,45 @@ impl App {
         if let Some(call) = &self.call {
             list.push(Subscription::run_with(call.spec.clone(), call::run).with(call.spec.id.clone()).map(|(id, update)| Msg::CallUpdate(id, update)));
         }
+        if let Some(spec) = self.screen_spec() {
+            let key = spec.key.clone();
+            list.push(Subscription::run_with(spec, screen::run).with(key).map(|(key, update)| Msg::ScreenUpdate(key, update)));
+        }
         Subscription::batch(list)
+    }
+
+    /// Screen sharing exists only inside a connected call or a joined room.
+    fn screen_spec(&self) -> Option<screen::Spec> {
+        let session = self.session.clone()?;
+        let socket = self.socket.clone()?;
+        if let Some(call) = self.call.as_ref().filter(|c| c.status == CallStatus::Connected) {
+            return Some(screen::Spec { key: call.spec.id.clone(), scope: screen::Scope::Call { peer: call.spec.peer.clone(), id: call.spec.id.clone() }, session, socket, output: self.settings.output.clone(), relay_only: self.settings.relay_only });
+        }
+        let room = self.room.as_ref()?;
+        let spec = room.spec.as_ref()?;
+        Some(screen::Spec { key: spec.session_id.clone(), scope: screen::Scope::Room { community: spec.community.clone(), channel: spec.channel.clone(), session: spec.session_id.clone() }, session, socket, output: self.settings.output.clone(), relay_only: self.settings.relay_only })
+    }
+
+    fn sync_screen(&mut self) {
+        if self.screen_spec().is_none() {
+            self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
+            return;
+        }
+        let Some(controls) = self.screen_controls.clone() else { return };
+        let targets: Vec<screen::Target> = if let Some(call) = self.call.as_ref().filter(|c| c.status == CallStatus::Connected) {
+            vec![screen::Target { user: call.spec.peer.clone(), session: String::new() }]
+        } else if let Some(room) = self.room.as_ref() {
+            let mine = room.spec.as_ref().map(|s| s.session_id.clone()).unwrap_or_default();
+            room.participants.iter().filter(|p| p.session_id != mine).map(|p| screen::Target { user: p.user_id.clone(), session: p.session_id.clone() }).collect()
+        } else { Vec::new() };
+        if targets != self.screen_targets { self.screen_targets = targets.clone(); controls.send(screen::Command::Targets(targets)); }
+        let deafened = self.call.as_ref().is_some_and(|c| c.deafened) || self.room.as_ref().is_some_and(|r| r.deafened);
+        if deafened != self.screen_deafened { self.screen_deafened = deafened; controls.send(screen::Command::Deafen(deafened)); }
+    }
+
+    pub fn screen_name(&self, id: &str) -> String {
+        self.room.as_ref().and_then(|r| r.participants.iter().find(|p| p.user_id == id)).map(|p| p.name.clone()).filter(|n| !n.is_empty())
+            .or_else(|| self.person(id).map(|p| p.name.clone())).unwrap_or_else(|| "Member".into())
     }
 
     pub fn me(&self) -> &str { self.session.as_ref().map(|s| s.me()).unwrap_or_default() }
@@ -636,6 +759,64 @@ impl App {
         if unknown { self.refresh_community() } else { Task::none() }
     }
 
+    fn step(&mut self, message: Msg) -> Task<Msg> {
+        // A call that rang but was never answered becomes a message in the chat.
+        let unanswered = self.call.as_ref().filter(|c| c.rang && c.status == CallStatus::Calling).map(|c| (c.spec.id.clone(), c.spec.peer.clone()));
+        #[cfg(windows)]
+        set_taskbar_icon();
+        let task = self.update(message);
+        self.sync_ringtone();
+        self.sync_screen();
+        if let Some((id, peer)) = unanswered {
+            if self.call.as_ref().map(|c| &c.spec.id) != Some(&id) { return Task::batch([task, self.send_missed_call(peer), self.load_invite_previews()]); }
+        }
+        Task::batch([task, self.load_invite_previews()])
+    }
+
+    /// Best effort and silent: a failure here must not disturb the end of a call.
+    fn send_missed_call(&mut self, peer_id: String) -> Task<Msg> {
+        let (Some(session), Some(key)) = (self.session.clone(), self.key.clone()) else { return Task::none() };
+        let Some(peer_key) = self.person(&peer_id).and_then(|p| p.encryption_key.clone()) else { return Task::none() };
+        if !self.trust.remember(&peer_id, &peer_key) { return Task::none(); }
+        let me = self.me().to_owned();
+        let target = peer_id.clone();
+        Task::perform(async move {
+            let context = crypto::context(&me, &target, None).map_err(|e| e.to_string())?;
+            let plain = Zeroizing::new(message_content::encode_missed_call());
+            let envelope = crypto::encrypt(&key, &peer_key, &plain, &context).map_err(|e| e.to_string())?;
+            let stored = session.send_direct(&target, envelope).await?;
+            let mut message = local(stored, message_content::MISSED_CALL_TEXT.into(), None, None);
+            message.missed_call = true;
+            Ok::<_, String>(message)
+        }, move |result| Msg::MissedCallSent(peer_id.clone(), result))
+    }
+
+    /// Rings exactly while a call is waiting to be answered, however it ended.
+    fn sync_ringtone(&mut self) {
+        if self.incoming.is_some() == self.ringtone.is_some() { return; }
+        self.ringtone = self.incoming.is_some().then(|| {
+            if cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_SILENT_AUDIO").is_some() { audio::Ringtone::silent() }
+            else { audio::Ringtone::start(self.settings.output.clone()) }
+        });
+    }
+
+    /// Looks up the invite cards for any invite links newly in the conversation.
+    fn load_invite_previews(&mut self) -> Task<Msg> {
+        let scan = (self.thread.messages.len(), self.thread.messages.last().map(|m| m.id.clone()).unwrap_or_default());
+        if scan == self.invite_scan { return Task::none(); }
+        self.invite_scan = scan;
+        let Some(session) = self.session.clone() else { return Task::none() };
+        let mut tasks = Vec::new();
+        for message in &self.thread.messages {
+            let Some((token, _)) = api::find_invite(&message.text) else { continue };
+            if self.invite_previews.contains_key(&token) { continue; }
+            self.invite_previews.insert(token.clone(), None);
+            let session = session.clone();
+            tasks.push(Task::perform(async move { let result = session.invite_preview(&token).await; (token, result) }, |(token, result)| Msg::InvitePreviewReady(token, result)));
+        }
+        Task::batch(tasks)
+    }
+
     fn update(&mut self, message: Msg) -> Task<Msg> {
         match message {
             Msg::Tick => {
@@ -686,6 +867,7 @@ impl App {
                 2 => self.auth.password = value,
                 4 => self.auth.recovery_key = value,
                 5 => self.auth.confirm = value,
+                6 => self.auth.username = value.trim_start_matches('@').to_lowercase(),
                 _ => self.auth.server = value,
             },
             Msg::ToggleSignup => { if self.auth.recover { self.auth.recover = false; } else { self.auth.signup = !self.auth.signup; } self.auth.password.zeroize(); self.auth.confirm.zeroize(); self.auth.recovery_key.zeroize(); }
@@ -714,18 +896,18 @@ impl App {
             }
             Msg::ToggleServer => self.auth.server_open = !self.auth.server_open,
             Msg::Submit if !self.auth.busy => {
-                if self.auth.email.trim().is_empty() || self.auth.password.is_empty() || (self.auth.signup && self.auth.name.trim().is_empty()) {
+                if self.auth.email.trim().is_empty() || self.auth.password.is_empty() || (self.auth.signup && (self.auth.name.trim().is_empty() || self.auth.username.trim().is_empty())) {
                     self.fail("All fields are required".into());
                     return Task::none();
                 }
                 self.auth.busy = true;
                 let password = Zeroizing::new(self.auth.password.clone());
-                let (server, email, name) = (self.auth.server.clone(), self.auth.email.clone(), self.auth.name.clone());
+                let (server, email, name, username) = (self.auth.server.clone(), self.auth.email.clone(), self.auth.name.clone(), self.auth.username.clone());
                 let signup = self.auth.signup;
                 // Kept only until the key is unlocked or created, then wiped.
                 self.unlock_password = (*password).clone();
                 return Task::perform(async move {
-                    if signup { client::signup(server, name, email, password).await } else { client::login(server, email, password).await }
+                    if signup { client::signup(server, name, username, email, password).await } else { client::login(server, email, password).await }
                 }, Msg::Authenticated);
             }
             #[cfg(windows)]
@@ -838,6 +1020,11 @@ impl App {
                         if incoming.candidates.len() < 128 { incoming.candidates.push(candidate.candidate); }
                     } else if self.early_candidates.len() < 64 { self.early_candidates.push(candidate); }
                 }
+                live::Event::Screen { from, id, signal } => {
+                    if self.call.as_ref().is_some_and(|c| c.spec.id == id && c.spec.peer == from) {
+                        if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Signal { from, signal }); }
+                    }
+                }
                 live::Event::CallEnded(id) => {
                     if self.incoming.as_ref().is_some_and(|c| c.id == id) { self.incoming = None; self.toast(ToastKind::Plain, "Call ended"); }
                     if self.call.as_ref().is_some_and(|c| c.spec.id == id) { self.call = None; self.toast(ToastKind::Plain, "Call ended"); }
@@ -866,6 +1053,13 @@ impl App {
                         let field = |name: &str| value.get(name).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
                         if field("communityId") != room.community || field("channelId") != room.channel { return Task::none(); }
                         let (from, session, signal) = (field("from"), field("sessionId"), value.get("signal").cloned().unwrap_or_default());
+                        if signal.get("type").and_then(|t| t.as_str()).is_some_and(|t| t.starts_with("screen-")) {
+                            let mine = room.spec.as_ref().is_some_and(|s| s.session_id == field("toSession"));
+                            if mine && room.participants.iter().any(|p| p.user_id == from && p.session_id == session) {
+                                if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Signal { from, signal }); }
+                            }
+                            return Task::none();
+                        }
                         match (&room.spec, &room.controls) {
                             (Some(spec), Some(controls)) if field("toSession") == spec.session_id => controls.send(room::Command::Signal { from, session, signal }),
                             (Some(spec), _) if field("toSession") != spec.session_id => {}
@@ -937,6 +1131,13 @@ impl App {
                 }
             }
             Msg::Query(value) => self.query = value,
+            Msg::PeopleQuery(value) => self.people_query = value,
+            Msg::ProfileUsername(value) => self.profile_username = value.trim_start_matches('@').to_lowercase(),
+            Msg::MicPoll => {
+                let now = std::time::Instant::now();
+                if voice_audio::MIC_LEVEL.load(std::sync::atomic::Ordering::Relaxed) > 10_000 { self.mic_until = Some(now + std::time::Duration::from_millis(300)); }
+                self.mic_active = self.mic_until.is_some_and(|until| now < until);
+            }
             Msg::SetMode(mode) => {
                 if self.mode != mode {
                     self.save_draft();
@@ -951,7 +1152,7 @@ impl App {
                 if self.mode != Mode::Direct { self.save_draft(); self.mode = Mode::Direct; }
                 return self.open_peer(peer);
             }
-            Msg::OpenPanel(panel) => self.panel = panel,
+            Msg::OpenPanel(panel) => { self.panel = panel; self.people_query.clear(); }
             Msg::AcceptKey => {
                 if let Some(peer) = self.selected_peer().cloned() {
                     if let Some(key) = &peer.encryption_key {
@@ -1140,11 +1341,58 @@ impl App {
                     }
                 }, Msg::DialogDone);
             }
+            Msg::MissedCallSent(peer, Ok(message)) => {
+                if self.mode == Mode::Direct && self.peer.as_ref() == Some(&peer) && !self.thread.pins { chat::merge(&mut self.thread.messages, [message]); }
+            }
+            Msg::MissedCallSent(_, Err(_)) => {}
+            Msg::ScreenUpdate(key, update) => {
+                if self.screen_spec().is_none_or(|s| s.key != key) { return Task::none(); }
+                match update {
+                    screen::Update::Ready(controls) => { self.screen_targets.clear(); self.screen_controls = Some(controls); }
+                    screen::Update::Sharing(info) => self.screen_sharing = info,
+                    screen::Update::Notice(text) => self.toast(ToastKind::Plain, text),
+                    screen::Update::SoundFailed => self.toast(ToastKind::Plain, "Sharing without sound: Windows could not capture that app's audio."),
+                    screen::Update::ViewerGone(id) => { self.screen_views.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
+                    screen::Update::Pictures => if let Some(controls) = &self.screen_controls {
+                        if let Ok(mut slot) = controls.pictures.lock() {
+                            for (id, picture) in slot.drain() {
+                                let handle = iced::widget::image::Handle::from_rgba(picture.width, picture.height, bytes::Bytes::from(picture.rgba));
+                                self.screen_views.insert(id, (handle, picture.width, picture.height));
+                            }
+                        }
+                    },
+                }
+            }
+            Msg::ScreenOpenPicker => return Task::perform(async { tokio::task::spawn_blocking(|| (screen::list_shareable(), screen_media::has_hardware_encoder())).await.unwrap_or_default() }, |(list, hardware)| Msg::ScreenSources(list, hardware)),
+            Msg::ScreenSources(sources, hardware) => {
+                if sources.is_empty() { self.toast(ToastKind::Plain, "Nothing to share was found."); return Task::none(); }
+                self.screen_picker = Some(ScreenPicker { sources, selected: 0, height: 1080, hardware });
+            }
+            Msg::ScreenClosePicker => self.screen_picker = None,
+            Msg::ScreenSelect(index) => if let Some(p) = &mut self.screen_picker { p.selected = index; p.height = 1080; },
+            Msg::ScreenHeight(height) => if let Some(p) = &mut self.screen_picker { p.height = height; },
+            Msg::ScreenStart => if let (Some(p), Some(controls)) = (self.screen_picker.take(), &self.screen_controls) {
+                if let Some(source) = p.sources.get(p.selected) { controls.send(screen::Command::Start(screen::Choice { source: source.source, sound: source.sound, height: p.height })); }
+            },
+            Msg::ScreenStop => if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Stop); },
+            Msg::ScreenExpand(id) => self.screen_expanded = id,
+            Msg::ScreenVolume(id, volume) => {
+                if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Volume { from: id.clone(), volume }); }
+                self.screen_volumes.insert(id, volume);
+            }
+            Msg::InvitePreviewReady(token, result) => { self.invite_previews.insert(token, Some(result)); }
+            Msg::JoinInvite(token) if !self.busy => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                self.busy = true;
+                return Task::perform(async move { session.join(&token).await.map(|c| Some(c.id)) }, Msg::DialogDone);
+            }
             Msg::DialogDone(result) => {
                 self.busy = false;
                 match result {
                     Ok(open) => {
                         self.dialog = None;
+                        self.invite_previews.clear();
+                        self.invite_scan = Default::default();
                         let refresh = self.refresh();
                         if let Some(id) = open { self.mode = Mode::Community; return Task::batch([refresh, self.open_community(Some(id))]); }
                         return Task::batch([refresh, self.refresh_community()]);
@@ -1202,6 +1450,7 @@ impl App {
                 if open {
                     self.tab = Tab::Profile;
                     self.profile_name = self.session.as_ref().map(|s| s.account.full_name.clone()).unwrap_or_default();
+                    self.profile_username = self.session.as_ref().map(|s| s.account.username.clone()).unwrap_or_default();
                 }
             }
             Msg::SetTab(tab) => {
@@ -1237,14 +1486,15 @@ impl App {
             Msg::SaveProfile if !self.busy => {
                 let Some(session) = self.session.clone() else { return Task::none() };
                 let name = self.profile_name.trim().to_owned();
-                if name.is_empty() || name.chars().count() > 80 { return Task::none(); }
+                if name.is_empty() || name.chars().count() > 80 || self.profile_username.is_empty() { return Task::none(); }
+                let username = self.profile_username.clone();
                 self.busy = true;
-                return Task::perform(async move { session.update_name(&name).await }, Msg::ProfileSaved);
+                return Task::perform(async move { session.update_profile_details(&name, &username).await }, Msg::ProfileSaved);
             }
             Msg::ProfileSaved(result) => {
                 self.busy = false;
                 match result {
-                    Ok(account) => { if let Some(s) = self.session.as_mut() { s.account.full_name = account.full_name; } self.toast(ToastKind::Success, "Profile updated successfully"); }
+                    Ok(account) => { if let Some(s) = self.session.as_mut() { s.account.full_name = account.full_name; s.account.username = account.username; } self.toast(ToastKind::Success, "Profile updated successfully"); }
                     Err(error) => self.fail(error),
                 }
             }
@@ -1350,6 +1600,7 @@ impl App {
             Msg::AudioLoaded(result) => match result { Ok(devices) => self.audio_devices = Some(devices), Err(error) => self.fail(error) },
             Msg::SelectInput(value) => { self.settings.input = Some(value).filter(|v| v != ui::SYSTEM_DEFAULT); store::save_settings(&self.settings); }
             Msg::SelectOutput(value) => { self.settings.output = Some(value).filter(|v| v != ui::SYSTEM_DEFAULT); store::save_settings(&self.settings); }
+            Msg::NoiseSuppression(value) => { self.settings.noise_suppression_off = !value; voice_audio::NOISE_SUPPRESSION.store(value, std::sync::atomic::Ordering::Relaxed); store::save_settings(&self.settings); }
             Msg::RelayOnly(value) => { self.settings.relay_only = value; store::save_settings(&self.settings); }
             Msg::TestMic if !self.testing => {
                 self.testing = true; self.mic_level = None;
@@ -1455,14 +1706,14 @@ impl App {
                 if !self.online.contains(&peer) { return Task::none(); }
                 self.call = Some(CallState {
                     spec: call::Spec { id: call::new_id(), peer, role: call::Role::Outgoing, session, socket, input: self.settings.input.clone(), output: self.settings.output.clone(), relay_only: self.settings.relay_only },
-                    controls: None, status: CallStatus::Calling, muted: false, deafened: false, started: None,
+                    controls: None, status: CallStatus::Calling, muted: false, deafened: false, started: None, rang: false,
                 });
             }
             Msg::AcceptCall if self.call.is_none() && self.room.is_none() => {
                 let (Some(session), Some(socket), Some(incoming)) = (self.session.clone(), self.socket.clone(), self.incoming.take()) else { return Task::none() };
                 self.call = Some(CallState {
                     spec: call::Spec { id: incoming.id.clone(), peer: incoming.from.clone(), role: call::Role::Incoming(incoming), session, socket, input: self.settings.input.clone(), output: self.settings.output.clone(), relay_only: self.settings.relay_only },
-                    controls: None, status: CallStatus::Connecting, muted: false, deafened: false, started: None,
+                    controls: None, status: CallStatus::Connecting, muted: false, deafened: false, started: None, rang: false,
                 });
             }
             Msg::DeclineCall => {
@@ -1478,6 +1729,7 @@ impl App {
                         if state.deafened { controls.send(call::Command::Deafen(true)); }
                         state.controls = Some(controls);
                     }
+                    call::Update::Ringing => state.rang = true,
                     call::Update::Connecting => state.status = CallStatus::Connecting,
                     call::Update::Connected => { state.status = CallStatus::Connected; state.started = Some(std::time::Instant::now()); }
                     call::Update::Ended(error) => { self.call = None; if let Some(error) = error { self.fail(error); } }
@@ -1506,6 +1758,7 @@ impl App {
         let (kind, value) = step.split_once(':').unwrap_or((step.as_str(), ""));
         let value = value.to_owned();
         let message = match kind {
+            "joininvite" => self.invite_previews.keys().next().cloned().map(Msg::JoinInvite),
             "wait" => return Task::perform(tokio::time::sleep(std::time::Duration::from_millis(value.parse().unwrap_or(1000))), |_| Msg::Script),
             "shot" => return iced::window::latest().and_then(iced::window::screenshot).map(move |shot| Msg::Screenshot(value.clone(), shot)),
             "peer" => self.people.iter().find(|p| p.name == value).map(|p| Msg::OpenPeer(Some(p.id.clone()))),
@@ -1536,6 +1789,23 @@ impl App {
             "passkeylogin" => Some(Msg::PasskeySignIn),
             "focus" => return Task::batch([iced::window::latest().and_then(iced::window::gain_focus), next()]),
             "signout" => Some(Msg::SignOut),
+            #[cfg(debug_assertions)]
+            "wheel" => { wheel::test_notches(value.parse().unwrap_or(-3.0)); return next(); }
+            #[cfg(debug_assertions)]
+            "sharewindow" => {
+                if let (Some(window), Some(controls)) = (screen::own_window(), &self.screen_controls) {
+                    controls.send(screen::Command::Start(screen::Choice { source: screen_media::Source::Window(window), sound: screen_audio::Sound::OnlyProcess(std::process::id()), height: value.parse().unwrap_or(1080) }));
+                }
+                None
+            }
+            "sharestop" => Some(Msg::ScreenStop),
+            #[cfg(debug_assertions)]
+            "screenvolume" => self.screen_views.keys().next().cloned().map(|id| Msg::ScreenVolume(id, value.parse().unwrap_or(0.4))),
+            #[cfg(debug_assertions)]
+            "pickertest" => {
+                let item = |label: &str, monitor: bool, height: u32| screen::Shareable { label: label.into(), source: screen_media::Source::Window(0), sound: screen_audio::Sound::OnlyProcess(0), width: height * 16 / 9, height, monitor };
+                Some(Msg::ScreenSources(vec![item("Screen 1 (2560x1440)", true, 1440), item("Screen 2 (1920x1080)", true, 1080), item("Example browser window", false, 900), item("Example game", false, 1440)], true))
+            }
             "probe" => { self.probe = Some((std::time::Instant::now(), Vec::new())); return Task::none(); }
             "testmic" => Some(Msg::TestMic),
             "testspk" => Some(Msg::TestSpeakers),
@@ -1556,7 +1826,7 @@ impl App {
     fn debug_state(&self) -> String {
         let texts: Vec<&str> = self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| m.text.as_str()).collect();
         let reactions = chat::reactions(&self.thread.messages, self.now);
-        format!("{}", serde_json::json!({ "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+        format!("{}", serde_json::json!({ "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
     }
 
     fn send(&mut self, reaction: Option<chat::Reaction>) -> Task<Msg> {
@@ -1612,6 +1882,6 @@ fn local(stored: api::MessageEnvelope, text: String, reply: Option<String>, reac
         id: stored.id, sender: stored.sender_id, receiver: stored.receiver_id, channel: stored.channel_id,
         created: chat::timestamp(&stored.created_at).unwrap_or_else(chat::now), created_at: stored.created_at,
         expires: stored.expires_at.as_deref().and_then(chat::timestamp), pinned: stored.pinned,
-        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, unreadable: false,
+        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, missed_call: false, unreadable: false,
     }
 }

@@ -10,12 +10,13 @@ export const useVoiceSettingsStore = create((set) => ({
   update: (patch) => set(patch),
 }));
 export function audioConstraints() {
-  const { inputDeviceId, echoCancellation, noiseSuppression, autoGainControl } =
+  const { inputDeviceId, echoCancellation, autoGainControl } =
     useVoiceSettingsStore.getState();
   return {
     ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
     echoCancellation,
-    noiseSuppression,
+    // RNNoise does this instead (see lib/noiseSuppression.js); running both muffles speech.
+    noiseSuppression: false,
     autoGainControl,
   };
 }
