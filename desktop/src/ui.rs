@@ -552,16 +552,24 @@ fn sidebar(app: &App) -> E<'_> {
                         content = content.push(nav_row(Some(Icon::Hash), channel.name.clone(), Some(trailing.into()), selected, Some(Msg::OpenChannel(channel.id.clone()))));
                     }
                     content = content.push(voice_rooms(app, community));
-                    if owner {
+                    let moderator = app.moderator();
+                    if owner || moderator {
                         content = content.push(nav_row(Some(Icon::Settings), "Manage community", Some(t::icon(Icon::ChevronDown, 15.0, rgb(0x89939a))), false, Some(Msg::ToggleManage)));
                         if app.manage_open {
+                            for room in community.channels.iter().filter(|c| c.kind == "voice") {
+                                let (icon, verb) = if room.voice_locked { (Icon::LockOpen, "Unlock") } else { (Icon::Lock, "Lock") };
+                                content = content.push(nav_row(Some(icon), format!("{verb} {}", room.name), None, false, Some(Msg::RoomLock(room.id.clone(), !room.voice_locked))));
+                            }
+                        }
+                        if app.manage_open && owner {
                             content = content
                             .push(nav_row(None, "Rename community", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameCommunity)))))
                             .push(nav_row(None, "Rename a channel or room", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameChannel)))))
                             .push(danger_row(None, "Delete a channel or room", Some(Msg::OpenDialog(Some(Dialog::DeleteChannel)))))
                             .push(danger_row(None, "Delete community", Some(Msg::AskConfirm(Some(Confirm { action: "delete-community".into(), member: None, channel: None })))));
                         }
-                    } else {
+                    }
+                    if !owner {
                         content = content.push(danger_row(Some(Icon::LogOut), "Leave community", Some(Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
                     }
                 }
@@ -675,13 +683,9 @@ fn voice_rooms<'a>(app: &'a App, community: &'a crate::api::Community) -> E<'a> 
             Box::new(|_, _| button::Style { background: Some(rgb(0x222930).into()), text_color: rgb(0xd0d7dc), border: t::border(Color::TRANSPARENT, 0.0, 7.0), ..Default::default() })
         } else { t::nav_row(false) };
         list = list.push(container(button(row_content).width(FILL).padding(12).style(style).on_press_maybe((!active && !channel.voice_locked).then(|| Msg::JoinRoom(channel.id.clone())))).padding(Padding { bottom: 1.0, top: 3.0, ..Padding::ZERO }));
-        if owner || moderator {
-            let (icon, label) = if channel.voice_locked { (Icon::LockOpen, "Unlock room") } else { (Icon::Lock, "Lock room") };
-            list = list.push(button(lead_icon(icon, label, rgb(0xd0d7dc), 13.0, 13.0, 5.0)).padding([4, 10]).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::RoomLock(channel.id.clone(), !channel.voice_locked)));
-        }
         let mut people = Column::new().padding(Padding { top: 3.0, bottom: 8.0, left: 29.0, right: 8.0 });
         for person in &participants {
-            let mut line = Row::new().spacing(7).align_y(Vertical::Center).push(t::dot(t::GREEN, 5.0))
+            let mut line = Row::new().spacing(7).align_y(Vertical::Center).push(t::dot(app.status_color(&person.user_id), 5.0))
                 .push(text(format!("{}{}", person.name, if person.user_id == me { " (you)" } else { "" })).size(13).color(rgb(0xd0d7dc)).width(FILL));
             let can_kick = (owner || moderator) && person.user_id != me && Some(&person.user_id) != community.owner_id.as_ref() && (owner || !community.moderators.contains(&person.user_id));
             if can_kick {

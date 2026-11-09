@@ -2435,7 +2435,6 @@ p {
 .reaction-picker { color: #a3abb1; opacity: .65; }
 .reaction-picker:hover, .reaction-picker:focus-visible { opacity: 1; }
 
-.room-control { display: flex; align-items: center; gap: 5px; padding: 4px 10px; color: #d0d7dc; font-size: 13px; }
 .room-kick { color: #d0d7dc; padding: 3px; }
 .unlock-page {
   grid-template-columns: minmax(0, 1fr);
@@ -2918,6 +2917,10 @@ p {
 .modal-people .status-dot {
   flex: none;
   margin: 0 3px 0 5px;
+}
+.room-participants .status-dot {
+  width: 5px;
+  height: 5px;
 }
 .community-count {
   display: block;

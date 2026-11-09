@@ -60,8 +60,8 @@ function broadcast() {
   const connected = [...new Set([...io.sockets.sockets.values()].map((s) => s.userId))];
   const visible = connected.filter((id) => chosenPresence.get(id) !== "offline");
   io.emit("getOnlineUsers", visible);
-  // Being in a voice room always reads as available, because people can still be called there.
-  io.emit("getPresence", Object.fromEntries(visible.flatMap((id) => (voiceRoomUsers.has(id) ? [[id, "room"]] : ["away", "busy"].includes(chosenPresence.get(id)) ? [[id, chosenPresence.get(id)]] : []))));
+  // A status someone picked always shows. Otherwise being in a voice room reads as available.
+  io.emit("getPresence", Object.fromEntries(visible.flatMap((id) => (["away", "busy"].includes(chosenPresence.get(id)) ? [[id, chosenPresence.get(id)]] : voiceRoomUsers.has(id) ? [[id, "room"]] : []))));
 }
 export function setPresence(userId, presence) {
   chosenPresence.set(String(userId), presence);

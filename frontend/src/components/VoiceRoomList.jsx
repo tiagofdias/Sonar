@@ -1,15 +1,14 @@
 import { useEffect } from "react";
-import { Lock, LockOpen, LogOut, MicOff, Plus, Volume2 } from "lucide-react";
+import { Lock, LogOut, MicOff, Plus, Volume2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/useAuthStore";
-import { useCommunityStore } from "../store/useCommunityStore";
 export default function VoiceRoomList({
   community,
   voice,
   voiceRoom,
   onCreate,
 }) {
-  const { authUser, socket } = useAuthStore();
+  const { authUser, socket, presence } = useAuthStore();
   useEffect(() => {
     const load = () => voiceRoom.observe(community._id);
     if (socket?.connected) load();
@@ -71,17 +70,11 @@ export default function VoiceRoomList({
               {channel.locked && <Lock size={13} aria-label="Locked to new participants" />}
               <small>{participants.length}/6</small>
             </button>
-            {(owner || moderator) && <button className="room-control" onClick={async () => {
-              if (await useCommunityStore.getState().setVoiceLock(channel._id, !channel.locked))
-                toast(channel.locked ? "Voice room unlocked." : "Voice room locked to new participants.");
-            }} aria-label={`${channel.locked ? "Unlock" : "Lock"} voice room ${channel.name}`}>
-              {channel.locked ? <LockOpen size={13} /> : <Lock size={13} />}{channel.locked ? "Unlock room" : "Lock room"}
-            </button>}
             {participants.length > 0 && (
               <ul className="room-participants">
                 {participants.map((person) => (
                   <li key={person.sessionId}>
-                    <span className="green-dot" />
+                    <span className={["away", "busy"].includes(presence[person.userId]) ? `status-dot status-${presence[person.userId]}` : "green-dot"} />
                     <span>
                       {person.name}
                       {person.userId === authUser._id ? " (you)" : ""}

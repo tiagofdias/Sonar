@@ -6,6 +6,8 @@ import {
   Check,
   Copy,
   Hash,
+  Lock,
+  LockOpen,
   LockKeyhole,
   LogOut,
   MessageCircle,
@@ -381,7 +383,7 @@ export default function CommunityWorkspace({
                   open("channel");
                 }}
               />
-              {owner ? (
+              {(owner || moderator) && (
                 <>
                   <button className="nav-row manage-toggle" aria-expanded={manageOpen} onClick={() => setManageOpen(!manageOpen)}>
                     <Settings size={16} />
@@ -390,6 +392,15 @@ export default function CommunityWorkspace({
                   </button>
                   {manageOpen && (
                     <>
+                      {community.channels.filter((item) => item.type === "voice").map((item) => (
+                        <button className="nav-row" key={item._id} onClick={async () => {
+                          if (await store.setVoiceLock(item._id, !item.locked))
+                            toast(item.locked ? "Voice room unlocked." : "Voice room locked to new participants.");
+                        }}>
+                          {item.locked ? <LockOpen size={16} /> : <Lock size={16} />}
+                          {item.locked ? "Unlock" : "Lock"} {item.name}
+                        </button>
+                      ))}
                       {owner && <button className="nav-row" onClick={() => { open("rename-community"); setValue(community.name); }}>Rename community</button>}
                       {owner && <button className="nav-row" onClick={() => { open("rename-channel"); const first = community.channels[0]; setRenameChannel(first?._id || ""); setValue(first?.name || ""); }}>Rename a channel or room</button>}
                       {owner && <button className="nav-row leave-community" onClick={() => { open("delete-channel"); setRenameChannel(community.channels[0]?._id || ""); }}>Delete a channel or room</button>}
@@ -397,7 +408,8 @@ export default function CommunityWorkspace({
                     </>
                   )}
                 </>
-              ) : (
+              )}
+              {!owner && (
                 <button
                   className="nav-row leave-community"
                   onClick={() => setConfirmation({ action: "leave", communityId: community._id })}
