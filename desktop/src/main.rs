@@ -31,6 +31,7 @@ mod passkey;
 mod native_file;
 mod room;
 mod store;
+mod taskbar;
 mod theme;
 mod ui;
 mod wheel;
@@ -218,6 +219,9 @@ pub struct App {
     pub members_open: bool,
     pub thread: Thread,
     pub unread_direct: HashSet<String>,
+    unread_counts: HashMap<String, u32>,
+    shown_badge: u32,
+    last_chime: Option<std::time::Instant>,
     pub unread_channels: HashSet<String>,
     // Composer.
     pub composer: text_editor::Content,
@@ -478,7 +482,7 @@ impl App {
             live_generation: 0, live_connected: false, socket: None, online: HashSet::new(),
             mode: Mode::Direct, people: Vec::new(), people_loaded: false, query: String::new(), peer: None,
             communities: Vec::new(), community: None, channel: None, members_open: false, thread: Thread::default(),
-            unread_direct: HashSet::new(), unread_channels: HashSet::new(),
+            unread_counts: HashMap::new(), shown_badge: 0, last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
             invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
@@ -520,6 +524,7 @@ impl App {
             list.push(Subscription::run_with(session.live_auth(self.live_generation), live::events).map(|(generation, event)| Msg::Live(generation, event)));
             list.push(iced::time::every(std::time::Duration::from_secs(30)).map(|_| Msg::Refresh));
         }
+        list.push(iced::event::listen_with(|event, _, _| matches!(event, iced::Event::Window(iced::window::Event::Focused)).then_some(Msg::Noop)));
         if self.probe.is_some() { list.push(iced::window::frames().map(Msg::ProbeFrame)); }
         let speaking_possible = self.call.as_ref().is_some_and(|c| c.status == CallStatus::Connected && !c.muted && !c.deafened)
             || self.room.as_ref().is_some_and(|r| r.controls.is_some() && !r.muted && !r.deafened);
@@ -782,7 +787,16 @@ impl App {
         let me = self.me().to_owned();
         let peer_id = if envelope.sender_id == me { envelope.receiver_id.clone() } else { envelope.sender_id.clone() };
         let active = self.mode == Mode::Direct && self.peer.as_deref() == Some(&peer_id);
-        if !updated && envelope.sender_id != me && !active { self.unread_direct.insert(peer_id.clone()); }
+        if !updated && envelope.sender_id != me && !(active && taskbar::focused()) {
+            let opened = self.key.clone().zip(self.person(&peer_id).cloned()).map(|(key, peer)| chat::open(&key, peer.encryption_key.as_deref(), &envelope, true));
+            // Reactions are messages too, but nobody needs an alert for one.
+            if !opened.is_some_and(|m| m.reaction.is_some()) {
+                self.unread_direct.insert(peer_id.clone());
+                *self.unread_counts.entry(peer_id.clone()).or_default() += 1;
+                let name = self.person(&peer_id).map_or_else(|| "someone".to_owned(), |p| p.name.clone());
+                self.alert_message(format!("New message from {name}"));
+            }
+        }
         if !active || !self.visible(&envelope.id) { return; }
         let (Some(key), Some(peer)) = (self.key.clone(), self.person(&peer_id).cloned()) else { return };
         let message = chat::open(&key, peer.encryption_key.as_deref(), &envelope, !self.trust_changed(&peer));
@@ -795,7 +809,17 @@ impl App {
         let Ok(envelope) = serde_json::from_value::<api::MessageEnvelope>(value) else { return Task::none() };
         let (Some(community_id), Some(channel_id)) = (envelope.community_id.clone(), envelope.channel_id.clone()) else { return Task::none() };
         let active = self.mode == Mode::Community && self.community.as_ref().is_some_and(|c| c.id == community_id) && self.channel.as_deref() == Some(&channel_id);
-        if new && envelope.sender_id != self.me() && !active { self.unread_channels.insert(format!("{community_id}:{channel_id}")); }
+        if new && envelope.sender_id != self.me() && !(active && taskbar::focused()) {
+            let sender_key = self.member(&envelope.sender_id).and_then(|p| p.encryption_key.clone());
+            let reaction = self.key.clone().is_some_and(|key| chat::open(&key, sender_key.as_deref(), &envelope, true).reaction.is_some());
+            if !reaction {
+                let unread = format!("{community_id}:{channel_id}");
+                *self.unread_counts.entry(unread.clone()).or_default() += 1;
+                self.unread_channels.insert(unread);
+                let place = self.communities.iter().find(|c| c.id == community_id).map_or_else(|| "a server".to_owned(), |c| c.name.clone());
+                self.alert_message(format!("New message in {place}"));
+            }
+        }
         if !active || !self.visible(&envelope.id) { return Task::none(); }
         let Some(key) = self.key.clone() else { return Task::none() };
         let sender_key = self.member(&envelope.sender_id).and_then(|p| p.encryption_key.clone());
@@ -814,6 +838,7 @@ impl App {
         set_taskbar_icon();
         let task = self.update(message);
         self.sync_ringtone();
+        self.sync_unread();
         self.sync_screen();
         if let Some((id, peer)) = unanswered {
             if self.call.as_ref().map(|c| &c.spec.id) != Some(&id) { return Task::batch([task, self.send_missed_call(peer), self.load_invite_previews()]); }
@@ -840,6 +865,31 @@ impl App {
     }
 
     /// Rings exactly while a call is waiting to be answered, however it ended.
+    /// Sound, a notice and a flashing taskbar button. Busy means no sound.
+    fn alert_message(&mut self, text: String) {
+        let focused = taskbar::focused();
+        if focused { self.toast(ToastKind::Plain, text); } else { taskbar::flash(); }
+        let busy = self.session.as_ref().is_some_and(|s| s.account.presence == "busy");
+        let due = self.last_chime.is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(1200));
+        if busy || !due || (cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_SILENT_AUDIO").is_some()) { return; }
+        self.last_chime = Some(std::time::Instant::now());
+        audio::play_message(self.settings.output.clone(), if self.call.is_some() || self.room.is_some() { 0.3 } else { 0.8 });
+    }
+
+    /// Keeps the taskbar number equal to what is still unread.
+    fn sync_unread(&mut self) {
+        if taskbar::focused() {
+            match self.mode {
+                Mode::Direct => if let Some(peer) = &self.peer { self.unread_direct.remove(peer); },
+                Mode::Community => if let (Some(community), Some(channel)) = (&self.community, &self.channel) { self.unread_channels.remove(&format!("{}:{channel}", community.id)); },
+            }
+        }
+        let (direct, channels) = (&self.unread_direct, &self.unread_channels);
+        self.unread_counts.retain(|key, _| direct.contains(key) || channels.contains(key));
+        let total = direct.iter().chain(channels.iter()).map(|key| self.unread_counts.get(key).copied().unwrap_or(1)).sum();
+        if total != self.shown_badge && taskbar::set_badge(total) { self.shown_badge = total; }
+    }
+
     fn sync_ringtone(&mut self) {
         // When the current call ends, a waiting call becomes a normal incoming one.
         if self.call.is_none() && self.incoming.is_none() { self.incoming = self.waiting.take(); }
@@ -1990,7 +2040,7 @@ impl App {
     fn debug_state(&self) -> String {
         let texts: Vec<&str> = self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| m.text.as_str()).collect();
         let reactions = chat::reactions(&self.thread.messages, self.now);
-        format!("{}", serde_json::json!({ "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+        format!("{}", serde_json::json!({ "shownBadge": self.shown_badge, "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
     }
 
     /// Where an attachment is being sent, as the upload's query string.

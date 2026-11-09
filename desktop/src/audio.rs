@@ -108,7 +108,31 @@ impl Ringtone {
     }
 }
 
+static MESSAGE: &[u8] = include_bytes!("../../frontend/public/sounds/message.wav");
+
+/// Plays the new-message sound once. Trouble with the speakers just leaves it silent.
+pub fn play_message(selected: Option<String>, level: f32) {
+    std::thread::spawn(move || {
+        let length = (MESSAGE.len() - 44) / 2;
+        let opened = open_sound(selected, |rate| {
+            let (mut position, step) = (0.0f64, RINGTONE_RATE / rate);
+            move || {
+                let at = 44 + position as usize * 2;
+                position += step;
+                if at + 1 >= MESSAGE.len() { return 0.0; }
+                f32::from(i16::from_le_bytes([MESSAGE[at], MESSAGE[at + 1]])) / 32768.0 * level
+            }
+        });
+        let Ok(stream) = opened else { return };
+        if stream.play().is_ok() { std::thread::sleep(std::time::Duration::from_secs_f64(length as f64 / RINGTONE_RATE + 0.25)); }
+    });
+}
+
 fn open_ringtone(selected: Option<String>, level: f32) -> Result<cpal::Stream, String> {
+    open_sound(selected, |rate| { let mut player = RingtonePlayer::new(rate, level); move || player.next_sample() })
+}
+
+fn open_sound<P: FnMut() -> f32 + Send + 'static>(selected: Option<String>, make: impl FnOnce(f64) -> P) -> Result<cpal::Stream, String> {
     use cpal::{SampleFormat, StreamConfig};
     let device = output_device(selected)?;
     let supported = device.default_output_config().map_err(|_| "Could not set up your speakers.")?;
@@ -116,12 +140,12 @@ fn open_ringtone(selected: Option<String>, level: f32) -> Result<cpal::Stream, S
     let config: StreamConfig = supported.into();
     let channels = usize::from(config.channels);
     if config.sample_rate.0 == 0 || channels == 0 { return Err("Invalid audio configuration.".into()); }
-    let mut player = RingtonePlayer::new(f64::from(config.sample_rate.0), level);
+    let mut player = make(f64::from(config.sample_rate.0));
     let on_error = |_error| {};
     match format {
-        SampleFormat::F32 => device.build_output_stream(&config, move |data: &mut [f32], _| fill(data, channels, || player.next_sample(), |v| v), on_error, None),
-        SampleFormat::I16 => device.build_output_stream(&config, move |data: &mut [i16], _| fill(data, channels, || player.next_sample(), |v| (v * i16::MAX as f32) as i16), on_error, None),
-        SampleFormat::U16 => device.build_output_stream(&config, move |data: &mut [u16], _| fill(data, channels, || player.next_sample(), |v| ((v * 0.5 + 0.5) * u16::MAX as f32) as u16), on_error, None),
+        SampleFormat::F32 => device.build_output_stream(&config, move |data: &mut [f32], _| fill(data, channels, &mut player, |v| v), on_error, None),
+        SampleFormat::I16 => device.build_output_stream(&config, move |data: &mut [i16], _| fill(data, channels, &mut player, |v| (v * i16::MAX as f32) as i16), on_error, None),
+        SampleFormat::U16 => device.build_output_stream(&config, move |data: &mut [u16], _| fill(data, channels, &mut player, |v| ((v * 0.5 + 0.5) * u16::MAX as f32) as u16), on_error, None),
         _ => return Err("This speaker format is not supported yet.".into()),
     }.map_err(|_| "Could not open your speakers.".to_string())
 }

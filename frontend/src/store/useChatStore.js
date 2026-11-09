@@ -7,6 +7,7 @@ import { mergeHistory, withoutExpired } from "../lib/history";
 import { deleteFile } from "../lib/attachments";
 import { encodeFile, encodeMessage, encodeMissedCall, encodeReaction, MISSED_CALL_TEXT } from "../lib/messageContent";
 import { useUnreadStore } from "./useUnreadStore";
+import { messageAlert } from "../lib/messageAlert";
 import { refreshedContact } from "../lib/contacts";
 import { candidatePosition, newer, readPosition, rememberPosition } from "../lib/offlineUnread";
 let generation = 0;
@@ -285,12 +286,18 @@ export const useChatStore = create((set, get) => ({
       deleted.add(id);
       set({ messages: get().messages.filter(item => item._id !== id) });
     };
-    const onNewMessage = (message) => {
+    const onNewMessage = async (message) => {
       const me = useAuthStore.getState().authUser?._id;
       if (message.receiverId === me && message.senderId !== me) {
         const unread = useUnreadStore.getState();
         const first = !unread.direct[message.senderId];
+        const sender = get().users.find((user) => user._id === message.senderId);
+        // Reactions are messages too, but nobody needs an alert for one.
+        const decoded = sender ? await decrypt(me, sender, message).catch(() => null) : null;
+        if (decoded?.reaction) return receive(message);
         unread.markDirect(message.senderId);
+        if (useUnreadStore.getState().activePeer !== message.senderId)
+          messageAlert(`New message from ${sender?.fullName || "someone"}`);
         if (first && unread.notificationsEnabled && document.hidden &&
             typeof Notification !== "undefined" && Notification.permission === "granted") {
           try { new Notification("Sonar", { body: "You have a new message.", tag: "sonar-new-message" }); } catch { /* Unsupported browser */ }

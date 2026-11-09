@@ -37,6 +37,7 @@ import MessageText from "../components/MessageText";
 import CallNotice from "../components/CallNotice";
 import { initials } from "../lib/initials";
 import toast from "react-hot-toast";
+import { messageAlert } from "../lib/messageAlert";
 import ComposerTools, { FileCard } from "../components/ComposerTools";
 import { fileLabel } from "../lib/messageContent";
 import { reactionSummary } from "../lib/reactions";
@@ -134,6 +135,11 @@ export default function HomePage() {
     }, 30000);
     return () => clearInterval(timer);
   }, [getUsers]);
+  const unreadTotal = Object.keys(unread).length + Object.keys(unreadChannels).length;
+  useEffect(() => {
+    document.title = unreadTotal ? `(${unreadTotal}) Sonar` : "Sonar";
+    return () => { document.title = "Sonar"; };
+  }, [unreadTotal]);
   useEffect(() => {
     if (!socket) return;
     const refresh = () => { getUsers(); useChatStore.getState().getFriendRequests(); };
@@ -168,8 +174,13 @@ export default function HomePage() {
   useEffect(() => {
     if (!socket) return;
     const newChannelMessage = (message) => {
-      if (message.senderId !== useAuthStore.getState().authUser?._id)
-        useUnreadStore.getState().markChannel(`${message.communityId}:${message.channelId}`);
+      if (message.senderId === useAuthStore.getState().authUser?._id) return;
+      const key = `${message.communityId}:${message.channelId}`;
+      useUnreadStore.getState().markChannel(key);
+      if (useUnreadStore.getState().activeChannel !== key) {
+        const community = useCommunityStore.getState().communities.find((item) => item._id === message.communityId);
+        messageAlert(`New message in ${community?.name || "a server"}`);
+      }
     };
     const removedCommunity = ({ communityId }) => useUnreadStore.getState().clearCommunity(communityId);
     socket.on("channelMessageNew", newChannelMessage);
