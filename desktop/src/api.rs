@@ -1016,7 +1016,7 @@ impl Session {
         if community_id.len() != 24 || !community_id.bytes().all(|c| c.is_ascii_hexdigit()) { return Err("Comunidade invalida.".into()); }
         if !["text", "voice"].contains(&kind) { return Err("Tipo de canal invalido.".into()); }
         let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-        if name.is_empty() || name.encode_utf16().count() > 40 || name.chars().any(|c| c.is_control() || "<>\/".contains(c)) { return Err("Use a channel name between 1 and 40 characters".into()); }
+        if name.is_empty() || name.encode_utf16().count() > 40 || name.chars().any(|c| c.is_control() || r"<>\/".contains(c)) { return Err("Use a channel name between 1 and 40 characters".into()); }
         self.community_request(&format!("api/communities/{community_id}/channels"), serde_json::json!({ "name": name, "type": kind })).await
     }
     pub async fn create_invite(self, community_id: String) -> Result<CreatedInvite, String> {

@@ -29,7 +29,12 @@ const version = /^version = "(.+)"/m.exec(readFileSync(join(desktop, "Cargo.toml
 const exe = join(desktop, "target/release/sonar-desktop.exe");
 const parked = `${exe}.${process.pid}.locked`;
 if (existsSync(exe)) renameSync(exe, parked); // A running copy would block the build.
-execFileSync("cargo", ["build", "--release"], { cwd: desktop, stdio: "inherit" });
+try {
+  execFileSync("cargo", ["build", "--release"], { cwd: desktop, stdio: "inherit" });
+} catch (error) {
+  if (existsSync(parked)) renameSync(parked, exe);
+  throw error;
+}
 rmSync(parked, { force: true });
 
 const zip = join(downloads, "Sonar-Desktop-windows-x64.zip");
