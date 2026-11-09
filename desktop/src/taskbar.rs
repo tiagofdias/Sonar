@@ -8,17 +8,18 @@ use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, DestroyIcon, H
 
 const SIZE: usize = 32;
 
-/// Sonar's own top-level window.
+/// The Sonar window that has a taskbar button. The windowing library also keeps
+/// an invisible helper window that counts as visible, so that one must be skipped.
 fn own_window() -> Option<HWND> {
     use windows_sys::core::BOOL;
     use windows_sys::Win32::Foundation::{HWND as RawWindow, LPARAM};
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowLongW, GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW};
     unsafe extern "system" fn visit(window: RawWindow, found: LPARAM) -> BOOL {
         let mut owner = 0;
         unsafe {
             GetWindowThreadProcessId(window, &mut owner);
-            if owner != GetCurrentProcessId() || IsWindowVisible(window) == 0 { return 1; }
+            if owner != GetCurrentProcessId() || IsWindowVisible(window) == 0 || GetWindowLongW(window, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW != 0 { return 1; }
             *(found as *mut RawWindow) = window;
         }
         0
@@ -102,7 +103,9 @@ fn badge_pixels(text: &str) -> Vec<u8> {
 fn create_icon(pixels: &[u8]) -> windows::core::Result<HICON> {
     unsafe {
         let color = CreateBitmap(SIZE as i32, SIZE as i32, 1, 32, Some(pixels.as_ptr().cast()));
-        let mask = CreateBitmap(SIZE as i32, SIZE as i32, 1, 1, None);
+        // Without explicit bits the mask's contents are undefined.
+        let blank = [0u8; SIZE * SIZE / 8];
+        let mask = CreateBitmap(SIZE as i32, SIZE as i32, 1, 1, Some(blank.as_ptr().cast()));
         let info = ICONINFO { fIcon: true.into(), xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
         let icon = CreateIconIndirect(&info);
         let _ = DeleteObject(color);
