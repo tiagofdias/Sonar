@@ -3,12 +3,14 @@ import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import { io } from "../lib/socket.js";
 import { parseKeyBackup } from "../lib/keyBackup.js";
+import { ANIMALS } from "../lib/animals.js";
 import { availableUsername, normalizeUsername, USERNAME_RULES } from "../lib/usernames.js";
 const publicUser = (user) => ({
   _id: user._id,
   fullName: user.fullName,
   username: user.username,
   presence: user.presence || "online",
+  animal: user.animal || null,
   email: user.email,
   profilePic: user.profilePic,
   encryptionKey: user.encryptionKey,
@@ -133,7 +135,9 @@ export const logout = async (req, res) => {
 };
 
 export const updateProfile = async (req, res) => {
-  const { fullName, username: requested } = req.body;
+  const { fullName, username: requested, animal } = req.body;
+  if (animal !== undefined && !ANIMALS.includes(animal))
+    return res.status(400).json({ message: "Choose an animal from the list" });
   if (typeof fullName !== "string" || !fullName.trim() || fullName.length > 80)
     return res
       .status(400)
@@ -143,9 +147,10 @@ export const updateProfile = async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { fullName: fullName.trim(), ...(username ? { username } : {}) },
+      { fullName: fullName.trim(), ...(username ? { username } : {}), ...(animal ? { animal } : {}) },
       { new: true },
     ).select("-password");
+    if (animal) io.emit("profileChanged", { userId: String(user._id), animal });
     res.json(publicUser(user));
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ message: "That username is taken" });

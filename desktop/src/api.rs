@@ -16,6 +16,8 @@ pub struct Account {
     pub email: String,
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
+    #[serde(default)]
+    pub animal: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,7 +30,24 @@ pub struct Person {
     pub username: String,
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
+    #[serde(default)]
+    pub animal: Option<String>,
+    #[serde(rename = "disappearAfter", default)]
+    pub disappear_after: u32,
+    #[serde(default)]
+    pub note: Option<crate::crypto::Envelope>,
 }
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Folder { pub name: String, pub people: Vec<String> }
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Preferences { pub muted_communities: Vec<String>, pub pinned_people: Vec<String>, pub folders: Vec<Folder>, pub typing_hidden: bool, pub blocked: Vec<Person> }
+#[derive(Clone, Debug, Deserialize)]
+pub struct ActivityRow { pub name: String, pub action: String, pub at: String }
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ModeratorLimit { pub user_id: String, pub denied: Vec<String> }
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct FriendRequests {
     pub incoming: Vec<Person>,
@@ -43,6 +62,10 @@ pub struct Community {
     pub owner_id: Option<String>,
     #[serde(default)]
     pub moderators: Vec<String>,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(rename = "moderatorLimits", default)]
+    pub moderator_limits: Vec<ModeratorLimit>,
     #[serde(rename = "memberDetails", default)]
     pub member_details: Vec<Person>,
     #[serde(default)]
@@ -61,8 +84,10 @@ pub struct Channel {
     pub name: String,
     #[serde(rename = "type", default)]
     pub kind: String,
-    #[serde(rename = "voiceLocked", default)]
+    #[serde(rename = "voiceLocked", alias = "locked", default)]
     pub voice_locked: bool,
+    #[serde(rename = "disappearAfter", default)]
+    pub disappear_after: u32,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +119,8 @@ pub struct MessageEnvelope {
     pub pinned: bool,
     pub created_at: String,
     pub expires_at: Option<String>,
+    #[serde(default)]
+    pub edited_at: Option<String>,
 }
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
@@ -988,11 +1015,8 @@ impl Session {
     pub async fn create_channel(self, community_id: String, name: String, kind: &str) -> Result<Community, String> {
         if community_id.len() != 24 || !community_id.bytes().all(|c| c.is_ascii_hexdigit()) { return Err("Comunidade invalida.".into()); }
         if !["text", "voice"].contains(&kind) { return Err("Tipo de canal invalido.".into()); }
-        let name = name.trim().to_lowercase().split_whitespace().collect::<Vec<_>>().join("-");
-        if name.is_empty() || name.len() > 40 || !name.bytes().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) ||
-            !name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-') {
-            return Err("Usa 1 a 40 letras sem acentos, numeros ou hifens.".into());
-        }
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() || name.encode_utf16().count() > 40 || name.chars().any(|c| c.is_control() || "<>\/".contains(c)) { return Err("Use a channel name between 1 and 40 characters".into()); }
         self.community_request(&format!("api/communities/{community_id}/channels"), serde_json::json!({ "name": name, "type": kind })).await
     }
     pub async fn create_invite(self, community_id: String) -> Result<CreatedInvite, String> {

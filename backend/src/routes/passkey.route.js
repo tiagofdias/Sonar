@@ -316,6 +316,7 @@ router.post(
       presence: user.presence || "online",
       email: user.email,
       profilePic: user.profilePic,
+      animal: user.animal || null,
       encryptionKey: user.encryptionKey,
     });
   }),

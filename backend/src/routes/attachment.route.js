@@ -1,5 +1,5 @@
 import express from "express";
-import { areFriends } from "../lib/friends.js";
+import { areFriends, disappearingExpiry, pairDisappearAfter } from "../lib/friends.js";
 import mongoose from "mongoose";
 import Attachment from "../models/attachment.model.js";
 import Community from "../models/community.model.js";
@@ -22,7 +22,7 @@ router.post(
   "/",
   express.raw({ type: "application/octet-stream", limit: MAX_FILE_BYTES + OVERHEAD }),
   async (req, res) => {
-    const { to, community } = req.query;
+    const { to, community, channel } = req.query;
     if (!Buffer.isBuffer(req.body) || req.body.length <= OVERHEAD || Boolean(to) === Boolean(community))
       return res.status(400).json({ message: "Invalid file upload" });
     if (!valid(to || community)) return res.status(400).json({ message: "Invalid file upload" });
@@ -36,7 +36,10 @@ router.post(
         return res.status(413).json({ message: "You have reached your file limit. Older files clear after 7 days." });
       if ((await usedBy({})) + req.body.length > TOTAL_BYTES)
         return res.status(507).json({ message: "File storage is full right now. Older files clear after 7 days." });
-      const attachment = await Attachment.create({ ownerId: req.user._id, recipientId: to, communityId: community, size: req.body.length, data: req.body });
+      // A file in a disappearing conversation disappears with its message.
+      let seconds = to ? await pairDisappearAfter(req.user._id, to) : 0;
+      if (community && valid(channel)) seconds = (await Community.findById(community).select("channels").lean())?.channels.find((item) => String(item._id) === channel)?.disappearAfter || 0;
+      const attachment = await Attachment.create({ ownerId: req.user._id, recipientId: to, communityId: community, size: req.body.length, data: req.body, ...disappearingExpiry(seconds) });
       res.status(201).json({ id: attachment._id });
     } catch {
       res.status(503).json({ message: "Could not store the file" });

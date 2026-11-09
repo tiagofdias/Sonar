@@ -19,6 +19,14 @@ pub struct Settings {
     pub relay_only: bool,
     /// Stored inverted so that it defaults to on for existing settings files.
     pub noise_suppression_off: bool,
+    /// Sound level for message alerts and the ringtone, once someone has changed it.
+    pub alert_volume: Option<f32>,
+    pub confirm_calls: bool,
+    /// Matched on this device only. The server never sees them.
+    pub keywords: Vec<String>,
+    /// Stored inverted so that closing hides to the tray by default.
+    pub quit_on_close: bool,
+    pub start_with_windows: bool,
 }
 pub fn load_settings() -> Settings {
     std::fs::read(root().join("settings.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()

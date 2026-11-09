@@ -112,6 +112,10 @@ impl CallHandle {
         if sdp.is_empty() || sdp.len() > 30000 { return Err("Invalid call answer.".into()); }
         self.send_signal(&call.from, &call.id, serde_json::json!({ "type": "answer", "callId": call.id, "sdp": { "type": "answer", "sdp": sdp } })).await
     }
+    /// A one-way note, such as "I am typing".
+    pub async fn notify(&self, event: &'static str, payload: serde_json::Value) {
+        let _ = self.0.emit(event, payload).await;
+    }
     /// Sends an acknowledged request (voice rooms) and returns the server's
     /// reply, or its `error` message.
     pub async fn request(&self, event: &'static str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
@@ -222,6 +226,9 @@ pub fn events(auth: &Auth) -> impl Stream<Item = (u64, Event)> + 'static {
                 let mut sender = ended_sender.clone();
                 async move { if let Some(id) = ended(payload) { let _ = sender.send(Event::CallEnded(id)).await; } }.boxed()
             })
+            .on("preferencesChanged", data_handler(sender.clone(), "preferencesChanged"))
+            .on("profileChanged", data_handler(sender.clone(), "profileChanged"))
+            .on("typing", data_handler(sender.clone(), "typing"))
             .on("friendsChanged", data_handler(sender.clone(), "friendsChanged"))
             .on("friendRequest", data_handler(sender.clone(), "friendRequest"))
             .on("newMessage", data_handler(sender.clone(), "newMessage"))

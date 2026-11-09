@@ -15,6 +15,7 @@ pub fn fingerprint(encoded: &str) -> Result<String, &'static str> {
     let digest = Sha256::digest(&bytes);
     Ok(digest.chunks(2).map(|part| format!("{:02x}{:02x}", part[0], part[1])).collect::<Vec<_>>().join(" "))
 }
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct Envelope { pub iv: String, pub ciphertext: String }
 fn cipher(private: &SecretKey, peer_public: &str) -> Result<Aes256Gcm, &'static str> {
     let bytes = STANDARD.decode(peer_public).map_err(|_| "invalid public key")?;

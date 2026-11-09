@@ -16,6 +16,7 @@ import messageRoutes from "./routes/message.route.js";
 import communityRoutes from "./routes/community.route.js";
 import voiceRoutes from "./routes/voice.route.js";
 import friendsRoutes from "./routes/friends.route.js";
+import preferencesRoutes from "./routes/preferences.route.js";
 import { seedFriendsFromMessages } from "./lib/friends.js";
 import attachmentRoutes from "./routes/attachment.route.js";
 import Attachment from "./models/attachment.model.js";
@@ -84,6 +85,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/friends", friendsRoutes);
+app.use("/api/preferences", preferencesRoutes);
 app.use("/api/communities", communityRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/attachments", attachmentRoutes);

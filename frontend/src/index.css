@@ -2962,3 +2962,27 @@ p {
   border-color: #3f9dff;
   color: #bfeaff;
 }
+
+.animal-face { display: block; width: 74%; height: 74%; background: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+.settings-avatar .animal-face { width: 70%; height: 70%; }
+.animal-picker { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin: 14px 0; }
+.animal-picker button { aspect-ratio: 1; display: grid; place-items: center; background: #272e37; color: #cfd4d7; border: 1px solid transparent; border-radius: 12px; cursor: pointer; }
+.animal-picker button:hover { background: #2f3741; }
+.animal-picker button.chosen { background: #163447; border-color: #70eeff; color: #d7f3ff; }
+.mention { color: #70eeff; background: #163447; border-radius: 4px; padding: 0 3px; }
+.edited-label { color: #8a959e; font-size: 11px; }
+.folder-label { color: #8a959e; font-size: 11px; font-weight: 600; letter-spacing: .06em; padding: 10px 8px 4px; }
+.friend-row { display: flex; align-items: center; gap: 4px; }
+.friend-row > .person { flex: 1; min-width: 0; }
+.friend-row .member-actions { max-width: 92px; }
+.friend-note { display: block; color: #a9d8ee; font-size: 12px; overflow-wrap: anywhere; }
+.friend-note-input { width: 100%; margin: 8px 0 2px; padding: 9px 12px; background: #1b2025; border: 1px solid #323b45; border-radius: 9px; color: #d0d7dc; font: inherit; font-size: 14px; }
+.disappear-select { background: #272e37; color: #d0d7dc; border: 1px solid #323b45; border-radius: 7px; padding: 2px 6px; font: inherit; font-size: 12px; }
+.mention-picker { display: flex; flex-direction: column; gap: 2px; padding: 6px; margin-bottom: 4px; background: #21272e; border: 1px solid #323b45; border-radius: 9px; }
+.mention-picker button { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: none; border: 0; border-radius: 6px; color: #d0d7dc; font: inherit; font-size: 14px; cursor: pointer; text-align: left; }
+.mention-picker button:hover { background: #163447; }
+.mention-picker .avatar-tile { width: 24px; height: 24px; border-radius: 8px; }
+.search-panel .modal-people { max-height: 46vh; overflow-y: auto; }
+.search-result { padding: 8px 10px; border-radius: 8px; background: #21272e; margin-top: 6px; text-align: left; }
+.search-result p { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.keyword-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

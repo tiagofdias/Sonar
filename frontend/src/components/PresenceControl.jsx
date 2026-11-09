@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuthStore } from "../store/useAuthStore";
 import { PRESENCE_OPTIONS, presenceLabel } from "../lib/presence";
-import { initials } from "../lib/initials";
+import Avatar from "./Avatar";
 
 // The account row at the bottom of the sidebar, where you choose your status.
 export default function PresenceControl({ children }) {
@@ -22,10 +22,7 @@ export default function PresenceControl({ children }) {
       )}
       <footer className="user-footer">
         <button className="status-trigger" title="Set your status" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <span className="avatar-tile">
-            {initials(authUser.fullName)}
-            <i className={`status-${current}`} />
-          </span>
+          <Avatar user={authUser} dot={current} />
           <span className="status-text">
             <strong>{authUser.fullName}</strong>
             <small>{presenceLabel(current)}</small>

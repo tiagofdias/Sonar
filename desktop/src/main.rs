@@ -33,6 +33,8 @@ mod room;
 mod store;
 mod taskbar;
 mod theme;
+#[cfg(windows)]
+mod tray;
 mod ui;
 mod update;
 mod wheel;
@@ -60,6 +62,15 @@ use zeroize::{Zeroize, Zeroizing};
 /// Windows uses the large icon on the taskbar and Iced only sets the small one,
 /// so hand it the .exe's own icon once the window exists.
 #[cfg(windows)]
+const FRIEND_NOTE_SCOPE: &str = "000000000000000000000001";
+
+#[cfg(windows)]
+fn show_window() -> Task<Msg> {
+    iced::window::latest().and_then(|id| Task::batch([iced::window::set_mode(id, iced::window::Mode::Windowed), iced::window::gain_focus(id)]))
+}
+
+fn t_animal(value: &str) -> Option<&'static str> { theme::ANIMALS.iter().find(|(name, _)| *name == value).map(|(name, _)| *name) }
+
 fn first_update_check() -> Task<Msg> {
     Task::perform(tokio::time::sleep(std::time::Duration::from_secs(10)), |_| Msg::UpdateCheck)
 }
@@ -116,6 +127,7 @@ fn main() -> iced::Result {
         .window(iced::window::Settings {
             size: if cfg!(debug_assertions) { std::env::var("SONAR_DEV_SIZE").ok().and_then(|v| { let (w, h) = v.split_once('x')?; Some(iced::Size::new(w.parse().ok()?, h.parse().ok()?)) }).unwrap_or(iced::Size::new(1280.0, 820.0)) } else { iced::Size::new(1280.0, 820.0) },
             min_size: Some(iced::Size::new(980.0, 620.0)),
+            exit_on_close_request: false,
             icon: app_icon(),
             // Development builds can run scripted visual checks off-screen.
             position: if cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_OFFSCREEN").is_some() { iced::window::Position::Specific(iced::Point::new(-4000.0, -4000.0)) } else { iced::window::Position::Default },
@@ -132,11 +144,11 @@ pub enum UnlockReason { Recovery, Password, Missing }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode { Direct, Community }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Panel { People, Privacy }
+pub enum Panel { People, Privacy, Search, Group }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tab { Profile, Security, Privacy, Voice }
+pub enum Tab { Profile, Security, Privacy, Voice, Alerts }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Dialog { Start, Create, Join, Channel, Invite, Bans, RenameCommunity, RenameChannel, DeleteChannel }
+pub enum Dialog { Start, Create, Join, Channel, Invite, Bans, RenameCommunity, RenameChannel, DeleteChannel, Activity, Permissions }
 #[derive(Clone, Debug)]
 pub struct Confirm { pub action: String, pub member: Option<Person>, pub channel: Option<api::Channel> }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +238,25 @@ pub struct App {
     pub unread_direct: HashSet<String>,
     unread_counts: HashMap<String, u32>,
     shown_badge: u32,
+    shown_tip: u32,
+    deferred_preferences: bool,
+    hidden: bool,
+    pub preferences: api::Preferences,
+    pub editing: Option<String>,
+    pub search_query: String,
+    pub search_results: Option<Vec<chat::Message>>,
+    pub search_busy: bool,
+    typing: HashMap<String, std::time::Instant>,
+    last_typing: Option<std::time::Instant>,
+    pub friend_note: String,
+    pub friend_notes: HashMap<String, String>,
+    pub keyword_input: String,
+    pub group_name: String,
+    pub group_picks: Vec<String>,
+    pub folder_name: String,
+    pub activity: Option<Vec<api::ActivityRow>>,
+    pub permissions_for: Option<Person>,
+    pub denied: Vec<String>,
     pub update_ready: Option<String>,
     last_chime: Option<std::time::Instant>,
     pub unread_channels: HashSet<String>,
@@ -310,6 +341,49 @@ pub enum Msg {
     UpdateCheck,
     UpdateChecked(Result<Option<String>, String>),
     UpdateRestart,
+    PreferencesLoaded(Result<api::Preferences, String>),
+    SavePreferences(serde_json::Value),
+    ToggleMute(String),
+    TogglePinPerson(String),
+    MoveToFolder(String, String),
+    FolderName(String),
+    Unblock(String),
+    SetAnimal(&'static str),
+    AnimalSaved(Result<api::Account, String>),
+    StartEdit(String),
+    CancelEdit,
+    Edited(u64, Result<chat::Message, String>),
+    Disappear(u32),
+    Finished(Result<(), String>),
+    SearchQuery(String),
+    SearchRun,
+    SearchDone(Result<Vec<chat::Message>, String>),
+    AlertVolume(f32),
+    ConfirmCalls(bool),
+    AskCall,
+    TypingHidden(bool),
+    KeywordInput(String),
+    AddKeyword,
+    RemoveKeyword(String),
+    FriendNote(String),
+    GroupName(String),
+    GroupPick(String, bool),
+    CreateGroup,
+    GroupCreated(Result<api::Community, String>),
+    OpenGroup(String),
+    ActivityLoaded(Result<Vec<api::ActivityRow>, String>),
+    OpenPermissions(Person),
+    Deny(&'static str, bool),
+    SavePermissions,
+    PermissionsSaved(Result<(), String>),
+    InsertMention(String),
+    MutedAlert(Box<api::MessageEnvelope>, Result<api::Community, String>),
+    NoteOpened(String, String),
+    CloseRequested(iced::window::Id),
+    #[cfg(windows)]
+    Tray(tray::Action),
+    QuitOnClose(bool),
+    StartWithWindows(bool),
     // Authentication.
     Restored(Result<Session, String>),
     AuthField(u8, String),
@@ -491,7 +565,7 @@ impl App {
             live_generation: 0, live_connected: false, socket: None, online: HashSet::new(),
             mode: Mode::Direct, people: Vec::new(), people_loaded: false, query: String::new(), peer: None,
             communities: Vec::new(), community: None, channel: None, members_open: false, thread: Thread::default(),
-            unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
+            unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
             invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
@@ -529,7 +603,9 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Msg> {
-        let mut list = vec![iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Msg::Tick), iced::time::every(std::time::Duration::from_secs(6 * 60 * 60)).map(|_| Msg::UpdateCheck)];
+        let mut list = vec![iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Msg::Tick), iced::time::every(std::time::Duration::from_secs(6 * 60 * 60)).map(|_| Msg::UpdateCheck), iced::window::close_requests().map(Msg::CloseRequested)];
+        #[cfg(windows)]
+        if !(cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_SCRIPT").is_some()) { list.push(Subscription::run(tray::events).map(Msg::Tray)); }
         if let (Some(session), Screen::Main) = (&self.session, self.screen) {
             list.push(Subscription::run_with(session.live_auth(self.live_generation), live::events).map(|(generation, event)| Msg::Live(generation, event)));
             list.push(iced::time::every(std::time::Duration::from_secs(30)).map(|_| Msg::Refresh));
@@ -684,6 +760,8 @@ impl App {
         self.session = Some(session);
         self.key = Some(key);
         self.screen = Screen::Main;
+        self.typing.clear();
+        self.deferred_preferences = true;
         self.unlock_password.zeroize(); self.auth.password.zeroize(); self.auth.busy = false; self.unlock_confirm = false; self.unlock_reset = false;
         self.live_generation += 1;
         self.refresh()
@@ -704,6 +782,108 @@ impl App {
         let Some(session) = self.session.clone() else { return Task::none() };
         Task::perform(async move { session.friend_requests().await }, Msg::FriendRequests)
     }
+    fn load_preferences(&self) -> Task<Msg> {
+        let Some(session) = self.session.clone() else { return Task::none() };
+        Task::perform(async move { session.preferences().await }, Msg::PreferencesLoaded)
+    }
+
+    pub fn blocked(&self, id: &str) -> bool { self.preferences.blocked.iter().any(|p| p.id == id) }
+    pub fn muted(&self, id: &str) -> bool { self.preferences.muted_communities.iter().any(|c| c == id) }
+    pub fn group(&self) -> bool { self.community.as_ref().is_some_and(|c| c.kind == "group") }
+    pub fn may(&self, permission: &str) -> bool {
+        let me = self.me();
+        self.owner() || (self.moderator() && !self.community.as_ref().is_some_and(|c| c.moderator_limits.iter().any(|l| l.user_id == me && l.denied.iter().any(|d| d == permission))))
+    }
+    pub fn typing_line(&self) -> Option<String> {
+        let names: Vec<String> = self.typing.keys().map(|id| {
+            let full = if self.mode == Mode::Direct { self.person(id).map(|p| p.name.clone()) } else { self.member(id).map(|p| p.name.clone()) };
+            full.and_then(|n| n.split_whitespace().next().map(str::to_owned)).unwrap_or_else(|| "Someone".into())
+        }).collect();
+        match names.as_slice() {
+            [] => None,
+            [one] => Some(format!("{one} is typing...")),
+            [one, two] => Some(format!("{one} and {two} are typing...")),
+            _ => Some("Several people are typing...".into()),
+        }
+    }
+    pub fn typing_query(&self) -> Option<String> {
+        let text = self.composer.text();
+        let text = text.trim_end_matches('\n');
+        let at = text.rfind('@')?;
+        if at > 0 && !text[..at].ends_with(char::is_whitespace) { return None; }
+        let query = &text[at + 1..];
+        (!query.contains(char::is_whitespace)).then(|| query.to_owned())
+    }
+    fn named_people(&self, text: &str) -> Vec<String> {
+        if self.mode != Mode::Community { return Vec::new(); }
+        let value = text.to_lowercase();
+        let mut found: Vec<String> = self.community.iter().flat_map(|c| c.member_details.iter()).filter(|m| value.contains(&format!("@{}", m.name.to_lowercase()))).map(|m| m.id.clone()).collect();
+        if value.split_whitespace().any(|word| word.starts_with("@everyone")) { found.push("everyone".into()); }
+        found.truncate(32);
+        found
+    }
+    fn alert_worthy(&self, message: &chat::Message, can_everyone: bool) -> bool {
+        let text = message.text.to_lowercase();
+        message.mentions.iter().any(|m| m == self.me()) || (can_everyone && message.mentions.iter().any(|m| m == "everyone"))
+            || self.settings.keywords.iter().any(|word| !word.is_empty() && text.contains(&word.to_lowercase()))
+    }
+    fn channel_alert(&mut self, community_id: &str, channel_id: &str) {
+        let unread = format!("{community_id}:{channel_id}");
+        *self.unread_counts.entry(unread.clone()).or_default() += 1;
+        self.unread_channels.insert(unread);
+        let place = self.communities.iter().find(|c| c.id == community_id).map_or_else(|| "a server".to_owned(), |c| c.name.clone());
+        self.alert_message(format!("New message in {place}"));
+    }
+    fn send_edit(&mut self, id: String) -> Task<Msg> {
+        let (Some(session), Some(key)) = (self.session.clone(), self.key.clone()) else { return Task::none() };
+        let Some(original) = self.thread.messages.iter().find(|m| m.id == id).cloned() else { return Task::none() };
+        let text = self.composer.text().trim().to_owned();
+        if text.is_empty() { return Task::none(); }
+        let named = self.named_people(&text);
+        let Ok(plain) = message_content::encode_text_with_mentions(&text, original.reply_to.as_deref(), &named) else { self.fail("Messages can be up to 4000 characters.".into()); return Task::none() };
+        let plain = Zeroizing::new(plain);
+        let (generation, me) = (self.generation, self.me().to_owned());
+        self.sending = true;
+        let finish = move |stored: api::MessageEnvelope, text: String, named: Vec<String>| { let mut message = local(stored, text, original.reply_to.clone(), None); message.mentions = named; message };
+        match self.mode {
+            Mode::Direct => {
+                let Some(peer) = self.selected_peer().cloned() else { self.sending = false; return Task::none() };
+                let Some(peer_key) = peer.encryption_key.clone() else { self.sending = false; return Task::none() };
+                Task::perform(async move {
+                    let context = crypto::context(&me, &peer.id, None).map_err(|e| e.to_string())?;
+                    let envelope = crypto::encrypt(&key, &peer_key, &plain, &context).map_err(|e| e.to_string())?;
+                    Ok(finish(session.edit_direct(&id, envelope).await?, text, named))
+                }, move |r| Msg::Edited(generation, r))
+            }
+            Mode::Community => {
+                let (Some(community_id), Some(channel)) = (self.community.as_ref().map(|c| c.id.clone()), self.channel.clone()) else { self.sending = false; return Task::none() };
+                Task::perform(async move {
+                    let community = session.community(&community_id).await?;
+                    let mut envelopes = Vec::with_capacity(community.member_details.len());
+                    for member in &community.member_details {
+                        let member_key = member.encryption_key.as_deref().ok_or("A member has not set up encryption yet.")?;
+                        let context = crypto::context(&me, &member.id, Some(&channel)).map_err(|e| e.to_string())?;
+                        let envelope = crypto::encrypt(&key, member_key, &plain, &context).map_err(|e| e.to_string())?;
+                        envelopes.push(serde_json::json!({ "recipientId": member.id, "version": 1, "iv": envelope.iv, "ciphertext": envelope.ciphertext }));
+                    }
+                    Ok(finish(session.edit_channel(&community_id, &channel, &id, community.revision, envelopes).await?, text, named))
+                }, move |r| Msg::Edited(generation, r))
+            }
+        }
+    }
+    fn open_notes(&self) -> Task<Msg> {
+        let Some(key) = self.key.clone() else { return Task::none() };
+        let me = self.me().to_owned();
+        let mut tasks = Vec::new();
+        for person in &self.friend_requests.incoming {
+            if self.friend_notes.contains_key(&person.id) { continue; }
+            let (Some(note), Some(public)) = (&person.note, &person.encryption_key) else { continue };
+            let Ok(context) = crypto::context(&person.id, &me, Some(FRIEND_NOTE_SCOPE)) else { continue };
+            if let Ok(text) = crypto::decrypt(&key, public, note, &context) { tasks.push(Task::done(Msg::NoteOpened(person.id.clone(), text.to_string()))); }
+        }
+        Task::batch(tasks)
+    }
+
     fn refresh_people(&self) -> Task<Msg> {
         let Some(session) = self.session.clone() else { return Task::none() };
         let generation = self.generation;
@@ -792,6 +972,19 @@ impl App {
 
     fn visible(&self, id: &str) -> bool { !self.thread.deleted.contains(id) }
 
+    fn typing_event(&mut self, value: &serde_json::Value) {
+        if self.preferences.typing_hidden { return; }
+        let Some(from) = value.get("from").and_then(|v| v.as_str()) else { return };
+        if self.blocked(from) { return; }
+        let community = value.get("communityId").and_then(|v| v.as_str());
+        let channel = value.get("channelId").and_then(|v| v.as_str());
+        let here = match self.mode {
+            Mode::Direct => community.is_none() && self.peer.as_deref() == Some(from),
+            Mode::Community => community == self.community.as_ref().map(|c| c.id.as_str()) && community.is_some() && channel == self.channel.as_deref(),
+        };
+        if here { self.typing.insert(from.to_owned(), std::time::Instant::now() + std::time::Duration::from_secs(4)); }
+    }
+
     fn receive_direct(&mut self, value: serde_json::Value, updated: bool) {
         let Ok(envelope) = serde_json::from_value::<api::MessageEnvelope>(value) else { return };
         let me = self.me().to_owned();
@@ -819,15 +1012,23 @@ impl App {
         let Ok(envelope) = serde_json::from_value::<api::MessageEnvelope>(value) else { return Task::none() };
         let (Some(community_id), Some(channel_id)) = (envelope.community_id.clone(), envelope.channel_id.clone()) else { return Task::none() };
         let active = self.mode == Mode::Community && self.community.as_ref().is_some_and(|c| c.id == community_id) && self.channel.as_deref() == Some(&channel_id);
-        if new && envelope.sender_id != self.me() && !(active && taskbar::focused()) {
+        if new && envelope.sender_id != self.me() && !self.blocked(&envelope.sender_id) && !(active && taskbar::focused()) {
             let sender_key = self.member(&envelope.sender_id).and_then(|p| p.encryption_key.clone());
-            let reaction = self.key.clone().is_some_and(|key| chat::open(&key, sender_key.as_deref(), &envelope, true).reaction.is_some());
-            if !reaction {
-                let unread = format!("{community_id}:{channel_id}");
-                *self.unread_counts.entry(unread.clone()).or_default() += 1;
-                self.unread_channels.insert(unread);
-                let place = self.communities.iter().find(|c| c.id == community_id).map_or_else(|| "a server".to_owned(), |c| c.name.clone());
-                self.alert_message(format!("New message in {place}"));
+            let opened = self.key.clone().filter(|_| sender_key.is_some()).map(|key| chat::open(&key, sender_key.as_deref(), &envelope, true));
+            if !opened.as_ref().is_some_and(|m| m.reaction.is_some()) {
+                if self.muted(&community_id) {
+                    // A muted server stays silent unless you were named or a keyword of yours appears.
+                    match &opened {
+                        Some(message) => {
+                            let can_everyone = self.community.as_ref().is_some_and(|c| c.owner_id.as_deref() == Some(envelope.sender_id.as_str()) || c.moderators.contains(&envelope.sender_id));
+                            if self.alert_worthy(message, can_everyone) { self.channel_alert(&community_id, &channel_id); }
+                        }
+                        None => if let Some(session) = self.session.clone() {
+                            let (id, boxed) = (community_id.clone(), Box::new(envelope.clone()));
+                            return Task::perform(async move { session.community(&id).await }, move |result| Msg::MutedAlert(boxed.clone(), result));
+                        },
+                    }
+                } else { self.channel_alert(&community_id, &channel_id); }
             }
         }
         if !active || !self.visible(&envelope.id) { return Task::none(); }
@@ -846,7 +1047,10 @@ impl App {
         let unanswered = self.call.as_ref().filter(|c| c.rang && c.status == CallStatus::Calling).map(|c| (c.spec.id.clone(), c.spec.peer.clone()));
         #[cfg(windows)]
         set_taskbar_icon();
-        let task = self.update(message);
+        let mut task = self.update(message);
+        if std::mem::take(&mut self.deferred_preferences) { task = Task::batch([task, self.load_preferences()]); }
+        #[cfg(windows)]
+        if self.hidden && self.incoming.is_some() { self.hidden = false; task = Task::batch([task, show_window()]); }
         self.sync_ringtone();
         self.sync_unread();
         self.sync_screen();
@@ -883,7 +1087,8 @@ impl App {
         let due = self.last_chime.is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(1200));
         if busy || !due || (cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_SILENT_AUDIO").is_some()) { return; }
         self.last_chime = Some(std::time::Instant::now());
-        audio::play_message(self.settings.output.clone(), if self.call.is_some() || self.room.is_some() { 0.3 } else { 0.8 });
+        let volume = self.settings.alert_volume.unwrap_or(0.8);
+        audio::play_message(self.settings.output.clone(), if self.call.is_some() || self.room.is_some() { volume * 0.375 } else { volume });
     }
 
     /// Keeps the taskbar number equal to what is still unread.
@@ -898,6 +1103,8 @@ impl App {
         self.unread_counts.retain(|key, _| direct.contains(key) || channels.contains(key));
         let total = direct.iter().chain(channels.iter()).map(|key| self.unread_counts.get(key).copied().unwrap_or(1)).sum();
         if total != self.shown_badge && taskbar::set_badge(total) { self.shown_badge = total; }
+        #[cfg(windows)]
+        if total != self.shown_tip { tray::set_unread(total); self.shown_tip = total; }
     }
 
     fn sync_ringtone(&mut self) {
@@ -905,6 +1112,7 @@ impl App {
         if self.call.is_none() && self.incoming.is_none() { self.incoming = self.waiting.take(); }
         // A second call rings softly so it never drowns out the conversation.
         let level = if self.incoming.is_some() && self.room.is_none() { 1.0 } else if self.waiting.is_some() || self.incoming.is_some() { 0.35 } else { 0.0 };
+        let level = level * (self.settings.alert_volume.unwrap_or(0.8) / 0.8).min(1.25);
         if level == self.ringtone_level { return; }
         self.ringtone_level = level;
         self.ringtone = (level > 0.0).then(|| {
@@ -937,6 +1145,7 @@ impl App {
                 let now = std::time::Instant::now();
                 self.toasts.retain(|toast| toast.until > now);
                 let current = self.now;
+                self.typing.retain(|_, until| *until > now);
                 self.thread.messages.retain(|m| m.live(current));
             }
             Msg::DismissToast(id) => self.toasts.retain(|toast| toast.id != id),
@@ -968,13 +1177,200 @@ impl App {
                 return Task::done(Msg::Script);
             }
             Msg::Noop => {}
+            Msg::PreferencesLoaded(result) => if let Ok(preferences) = result { self.preferences = preferences; if self.preferences.typing_hidden { self.typing.clear(); } },
+            Msg::SavePreferences(body) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                return Task::perform(async move { session.save_preferences(body).await }, Msg::PreferencesLoaded);
+            }
+            Msg::ToggleMute(id) => {
+                let mut list = self.preferences.muted_communities.clone();
+                if list.contains(&id) { list.retain(|item| item != &id); } else { list.push(id); }
+                self.preferences.muted_communities = list.clone();
+                return self.update(Msg::SavePreferences(serde_json::json!({ "mutedCommunities": list })));
+            }
+            Msg::TogglePinPerson(id) => {
+                let mut list = self.preferences.pinned_people.clone();
+                if list.contains(&id) { list.retain(|item| item != &id); } else { list.push(id); }
+                self.preferences.pinned_people = list.clone();
+                return self.update(Msg::SavePreferences(serde_json::json!({ "pinnedPeople": list })));
+            }
+            Msg::FolderName(value) => self.folder_name = value.chars().take(30).collect(),
+            Msg::MoveToFolder(person, name) => {
+                let mut folders = self.preferences.folders.clone();
+                for folder in &mut folders { folder.people.retain(|id| id != &person); }
+                let name = if name == crate::ui::NEW_FOLDER { self.folder_name.trim().to_owned() } else if name == crate::ui::NO_FOLDER { String::new() } else { name };
+                if !name.is_empty() {
+                    if let Some(folder) = folders.iter_mut().find(|f| f.name == name) { folder.people.push(person); }
+                    else { folders.push(api::Folder { name, people: vec![person] }); }
+                }
+                folders.retain(|f| !f.people.is_empty());
+                self.folder_name.clear();
+                self.preferences.folders = folders.clone();
+                let body: Vec<_> = folders.iter().map(|f| serde_json::json!({ "name": f.name, "people": f.people })).collect();
+                return self.update(Msg::SavePreferences(serde_json::json!({ "folders": body })));
+            }
+            Msg::Unblock(id) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                return Task::perform(async move { session.unblock(&id).await }, Msg::PreferencesLoaded);
+            }
+            Msg::SetAnimal(animal) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                let name = session.account.full_name.clone();
+                return Task::perform(async move { session.set_animal(&name, animal).await }, Msg::AnimalSaved);
+            }
+            Msg::AnimalSaved(result) => match result {
+                Ok(account) => if let Some(session) = &mut self.session { session.account.animal = account.animal; },
+                Err(error) => self.fail(error),
+            },
+            Msg::StartEdit(id) => {
+                if let Some(message) = self.thread.messages.iter().find(|m| m.id == id) {
+                    self.composer = text_editor::Content::with_text(&message.text);
+                    self.editing = Some(id);
+                    self.reply_to = None;
+                }
+            }
+            Msg::CancelEdit => { self.editing = None; self.composer = text_editor::Content::new(); }
+            Msg::Edited(generation, result) => {
+                self.sending = false;
+                match result {
+                    Ok(message) if generation == self.generation => {
+                        self.editing = None;
+                        self.composer = text_editor::Content::new();
+                        chat::merge(&mut self.thread.messages, [message]);
+                    }
+                    Ok(_) => {}
+                    Err(error) => self.fail(error),
+                }
+            }
+            Msg::Disappear(seconds) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                match self.mode {
+                    Mode::Direct => {
+                        let Some(peer) = self.peer.clone() else { return Task::none() };
+                        return Task::perform(async move { session.disappear_direct(&peer, seconds).await }, Msg::Finished);
+                    }
+                    Mode::Community => {
+                        let (Some(community), Some(channel)) = (self.community.as_ref().map(|c| c.id.clone()), self.channel.clone()) else { return Task::none() };
+                        return Task::perform(async move { session.disappear_channel(&community, &channel, seconds).await }, Msg::Finished);
+                    }
+                }
+            }
+            Msg::Finished(result) => if let Err(error) = result { self.fail(error); },
+            Msg::SearchQuery(value) => self.search_query = value.chars().take(200).collect(),
+            Msg::SearchRun if !self.search_busy => {
+                let (Some(session), Some(key)) = (self.session.clone(), self.key.clone()) else { return Task::none() };
+                let needle = self.search_query.trim().to_lowercase();
+                if needle.is_empty() { return Task::none(); }
+                self.search_busy = true;
+                self.search_results = None;
+                let peer = self.selected_peer().cloned();
+                let place = (self.community.clone(), self.channel.clone());
+                let mode = self.mode;
+                // Runs on this device: pages of history are decrypted and looked through in memory.
+                return Task::perform(async move {
+                    let (mut found, mut before): (Vec<chat::Message>, Option<String>) = (Vec::new(), None);
+                    for _ in 0..40 {
+                        let page = match (mode, &place, &peer) {
+                            (Mode::Community, (Some(community), Some(channel)), _) => session.channel_page(&community.id, channel, before.as_deref(), false).await?,
+                            (_, _, Some(peer)) => session.direct_page(&peer.id, before.as_deref(), false).await?,
+                            _ => return Ok(found),
+                        };
+                        for envelope in &page.messages {
+                            let public = match mode {
+                                Mode::Community => place.0.as_ref().and_then(|c| c.member_details.iter().chain(c.history_authors.iter()).find(|p| p.id == envelope.sender_id)).and_then(|p| p.encryption_key.as_deref()),
+                                Mode::Direct => peer.as_ref().and_then(|p| p.encryption_key.as_deref()),
+                            };
+                            let message = chat::open(&key, public, envelope, true);
+                            if message.reaction.is_none() && !message.unreadable && message.text.to_lowercase().contains(&needle) { found.push(message); }
+                        }
+                        if !page.has_more { break; }
+                        before = page.next_cursor;
+                    }
+                    Ok(found)
+                }, Msg::SearchDone);
+            }
+            Msg::SearchDone(result) => {
+                self.search_busy = false;
+                match result { Ok(found) => self.search_results = Some(found), Err(error) => self.fail(error) }
+            }
+            Msg::AlertVolume(value) => { self.settings.alert_volume = Some(value); store::save_settings(&self.settings); }
+            Msg::ConfirmCalls(value) => { self.settings.confirm_calls = value; store::save_settings(&self.settings); }
+            Msg::AskCall => {
+                if self.settings.confirm_calls { self.confirm = Some(Confirm { action: "call".into(), member: self.selected_peer().cloned(), channel: None }); }
+                else { return self.update(Msg::StartCall); }
+            }
+            Msg::TypingHidden(value) => { self.preferences.typing_hidden = value; if value { self.typing.clear(); } return self.update(Msg::SavePreferences(serde_json::json!({ "typingHidden": value }))); }
+            Msg::KeywordInput(value) => self.keyword_input = value.chars().take(40).collect(),
+            Msg::AddKeyword => {
+                let word = self.keyword_input.trim().to_owned();
+                if !word.is_empty() && !self.settings.keywords.contains(&word) && self.settings.keywords.len() < 30 { self.settings.keywords.push(word); store::save_settings(&self.settings); }
+                self.keyword_input.clear();
+            }
+            Msg::RemoveKeyword(word) => { self.settings.keywords.retain(|item| item != &word); store::save_settings(&self.settings); }
+            Msg::FriendNote(value) => self.friend_note = value.chars().take(200).collect(),
+            Msg::NoteOpened(id, text) => { self.friend_notes.insert(id, text); }
+            Msg::GroupName(value) => self.group_name = value.chars().take(60).collect(),
+            Msg::GroupPick(id, on) => { if on && self.group_picks.len() < 9 { self.group_picks.push(id); } else { self.group_picks.retain(|item| item != &id); } }
+            Msg::CreateGroup => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                let (picks, name) = (self.group_picks.clone(), self.group_name.trim().to_owned());
+                return Task::perform(async move { session.create_group(picks, name).await }, Msg::GroupCreated);
+            }
+            Msg::GroupCreated(result) => match result {
+                Ok(group) => { self.panel = None; let id = group.id.clone(); self.communities.push(group); return self.update(Msg::OpenGroup(id)); }
+                Err(error) => self.fail(error),
+            },
+            Msg::OpenGroup(id) => { let first = self.update(Msg::SetMode(Mode::Community)); return Task::batch([first, Task::done(Msg::OpenCommunity(Some(id)))]); }
+            Msg::ActivityLoaded(result) => match result { Ok(rows) => self.activity = Some(rows), Err(error) => self.fail(error) },
+            Msg::OpenPermissions(member) => {
+                self.denied = self.community.as_ref().and_then(|c| c.moderator_limits.iter().find(|l| l.user_id == member.id)).map(|l| l.denied.clone()).unwrap_or_default();
+                self.permissions_for = Some(member);
+                self.dialog = Some(Dialog::Permissions);
+            }
+            Msg::Deny(permission, allowed) => { if allowed { self.denied.retain(|d| d != permission); } else if !self.denied.iter().any(|d| d == permission) { self.denied.push(permission.to_owned()); } }
+            Msg::SavePermissions => {
+                let (Some(session), Some(community), Some(member)) = (self.session.clone(), self.community.as_ref().map(|c| c.id.clone()), self.permissions_for.clone()) else { return Task::none() };
+                let denied = self.denied.clone();
+                return Task::perform(async move { session.set_moderator_limits(&community, &member.id, denied).await }, Msg::PermissionsSaved);
+            }
+            Msg::PermissionsSaved(result) => match result { Ok(()) => { self.dialog = None; return self.refresh_community(); } Err(error) => self.fail(error) },
+            Msg::InsertMention(name) => {
+                let text = self.composer.text();
+                let text = text.trim_end_matches('\n');
+                if let Some(at) = text.rfind('@') { self.composer = text_editor::Content::with_text(&format!("{}@{name} ", &text[..at])); self.composer.perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd)); }
+            }
+            Msg::MutedAlert(envelope, result) => if let (Ok(community), Some(key)) = (result, self.key.clone()) {
+                let sender = community.member_details.iter().find(|p| p.id == envelope.sender_id);
+                let message = chat::open(&key, sender.and_then(|p| p.encryption_key.as_deref()), &envelope, true);
+                let can_everyone = community.owner_id.as_deref() == Some(envelope.sender_id.as_str()) || community.moderators.contains(&envelope.sender_id);
+                if !message.unreadable && message.reaction.is_none() && self.alert_worthy(&message, can_everyone) {
+                    if let (Some(a), Some(b)) = (envelope.community_id.clone(), envelope.channel_id.clone()) { self.channel_alert(&a, &b); }
+                }
+            },
+            Msg::CloseRequested(id) => {
+                #[cfg(windows)]
+                if !self.settings.quit_on_close { self.hidden = true; return iced::window::set_mode(id, iced::window::Mode::Hidden); }
+                let _ = id;
+                #[cfg(windows)]
+                tray::remove();
+                return iced::exit();
+            }
+            #[cfg(windows)]
+            Msg::Tray(tray::Action::Open) => { self.hidden = false; return show_window(); }
+            #[cfg(windows)]
+            Msg::Tray(tray::Action::Quit) => { tray::remove(); return iced::exit(); }
+            Msg::QuitOnClose(value) => { self.settings.quit_on_close = value; store::save_settings(&self.settings); }
+            Msg::StartWithWindows(value) => {
+                #[cfg(windows)]
+                if tray::set_start_with_windows(value) { self.settings.start_with_windows = value; store::save_settings(&self.settings); }
+            }
             Msg::UpdateCheck => return Task::perform(update::check(), Msg::UpdateChecked),
             Msg::UpdateChecked(result) => if let Ok(Some(version)) = result { self.update_ready = Some(version); },
             Msg::UpdateRestart => {
                 if self.call.is_none() && self.room.is_none() {
                     if let Some(version) = self.update_ready.clone() {
                         match update::restart(&version) {
-                            Ok(()) => return iced::exit(),
+                            Ok(()) => { #[cfg(windows)] tray::remove(); return iced::exit(); }
                             Err(_) => self.toast(ToastKind::Error, "Sonar could not update itself. Download the new version from the website."),
                         }
                     }
@@ -1160,6 +1556,14 @@ impl App {
                 }
                 live::Event::MatrixChanged => {}
                 live::Event::Data(name, value) => match name {
+                    "typing" => self.typing_event(&value),
+                    "preferencesChanged" => return self.load_preferences(),
+                    "profileChanged" => {
+                        let (Some(user), Some(animal)) = (value.get("userId").and_then(|v| v.as_str()).map(str::to_owned), value.get("animal").and_then(|v| v.as_str()).map(str::to_owned)) else { return Task::none() };
+                        for person in self.people.iter_mut().filter(|p| p.id == user) { person.animal = Some(animal.clone()); }
+                        if let Some(community) = &mut self.community { for person in community.member_details.iter_mut().filter(|p| p.id == user) { person.animal = Some(animal.clone()); } }
+                        if let Some(session) = self.session.as_mut().filter(|s| s.account.id.as_deref() == Some(user.as_str())) { session.account.animal = Some(animal); }
+                    }
                     "friendsChanged" => return self.refresh_people(),
                     "friendRequest" => { let who = value.get("fullName").and_then(|v| v.as_str()).unwrap_or("Someone").to_owned(); self.toast(ToastKind::Success, format!("{who} sent you a friend request")); }
                     "newMessage" => self.receive_direct(value, false),
@@ -1270,14 +1674,25 @@ impl App {
             }
             Msg::Query(value) => self.query = value,
             Msg::PeopleQuery(value) => self.people_query = value,
-            Msg::FriendRequests(result) => { if let Ok(requests) = result { self.friend_requests = requests; } }
+            Msg::FriendRequests(result) => { if let Ok(requests) = result { self.friend_requests = requests; return self.open_notes(); } }
             Msg::SendFriendRequest => {
                 let username = self.people_query.trim().to_owned();
                 let Some(session) = self.session.clone().filter(|_| !username.is_empty()) else { return Task::none() };
-                return Task::perform(async move { session.send_friend_request(&username).await }, Msg::FriendRequestSent);
+                let (note, key, me) = (self.friend_note.trim().to_owned(), self.key.clone(), self.me().to_owned());
+                return Task::perform(async move {
+                    let mut sealed = None;
+                    if !note.is_empty() {
+                        let peer = session.friend_key(&username).await?;
+                        let public = peer.encryption_key.ok_or("They need to sign in to Sonar once before you can add a note")?;
+                        let key = key.ok_or("Your key is not unlocked")?;
+                        let context = crypto::context(&me, &peer.id, Some(FRIEND_NOTE_SCOPE)).map_err(|e| e.to_string())?;
+                        sealed = Some(crypto::encrypt(&key, &public, &note, &context).map_err(|e| e.to_string())?);
+                    }
+                    session.send_friend_request(&username, sealed).await
+                }, Msg::FriendRequestSent);
             }
             Msg::FriendRequestSent(result) => match result {
-                Ok(()) => { self.people_query.clear(); self.toast(ToastKind::Success, "Friend request sent"); return self.refresh_people(); }
+                Ok(()) => { self.people_query.clear(); self.friend_note.clear(); self.toast(ToastKind::Success, "Friend request sent"); return self.refresh_people(); }
                 Err(error) => self.fail(error),
             },
             Msg::AnswerFriendRequest(id, accept) => {
@@ -1305,7 +1720,7 @@ impl App {
                 if self.mode != Mode::Direct { self.save_draft(); self.mode = Mode::Direct; }
                 return self.open_peer(peer);
             }
-            Msg::OpenPanel(panel) => { self.panel = panel; self.people_query.clear(); }
+            Msg::OpenPanel(panel) => { self.panel = panel; self.people_query.clear(); self.search_results = None; self.search_query.clear(); if panel == Some(Panel::Group) { self.group_picks.clear(); self.group_name.clear(); } }
             Msg::AcceptKey => {
                 if let Some(peer) = self.selected_peer().cloned() {
                     if let Some(key) = &peer.encryption_key {
@@ -1340,9 +1755,24 @@ impl App {
                 return self.load_thread(None);
             }
             Msg::Edit(action) => {
+                let typing = action.is_edit();
                 if !action.is_edit() || self.composer.text().chars().count() < 4000 { self.composer.perform(action); }
+                let now = std::time::Instant::now();
+                if typing && !self.preferences.typing_hidden && self.composer.text().trim().len() > 0 && self.last_typing.is_none_or(|at| now.duration_since(at).as_millis() >= 2500) {
+                    let target = match self.mode {
+                        Mode::Direct => self.peer.clone().map(|to| serde_json::json!({ "to": to })),
+                        Mode::Community => self.community.as_ref().map(|c| c.id.clone()).zip(self.channel.clone()).map(|(community, channel)| serde_json::json!({ "communityId": community, "channelId": channel })),
+                    };
+                    if let (Some(socket), Some(target)) = (self.socket.clone(), target) {
+                        self.last_typing = Some(now);
+                        return Task::perform(async move { socket.notify("typing", target).await }, |_| Msg::Noop);
+                    }
+                }
             }
-            Msg::Send => return self.send(None),
+            Msg::Send => {
+                if let Some(id) = self.editing.clone() { return self.send_edit(id); }
+                return self.send(None);
+            }
             Msg::React(target, emoji, selected) => {
                 self.picker = None;
                 return self.send(Some(chat::Reaction { target, emoji, action: if selected { "remove".into() } else { "add".into() } }));
@@ -1453,6 +1883,13 @@ impl App {
                 if !matches!(dialog, Some(Dialog::Channel)) { self.dialog_voice = false; }
                 let first = self.community.as_ref().and_then(|c| c.channels.first()).cloned();
                 self.dialog_channel = first.as_ref().map(|c| c.id.clone());
+                if dialog == Some(Dialog::Activity) {
+                    self.activity = None;
+                    if let (Some(session), Some(community)) = (self.session.clone(), self.community.as_ref().map(|c| c.id.clone())) {
+                        self.dialog = dialog;
+                        return Task::perform(async move { session.activity(&community).await }, Msg::ActivityLoaded);
+                    }
+                }
                 if dialog == Some(Dialog::RenameCommunity) { self.dialog_value = self.community.as_ref().map(|c| c.name.clone()).unwrap_or_default(); }
                 if dialog == Some(Dialog::RenameChannel) { self.dialog_value = first.map(|c| c.name).unwrap_or_default(); }
                 self.dialog = dialog.clone();
@@ -1625,6 +2062,11 @@ impl App {
                 }
             }
             Msg::BansLoaded(result) => { self.busy = false; match result { Ok(list) => self.bans = Some(list), Err(error) => self.fail(error) } }
+            Msg::ApplyConfirm if self.confirm.as_ref().is_some_and(|c| c.action == "call") => { self.confirm = None; return self.update(Msg::StartCall); }
+            Msg::ApplyConfirm if self.confirm.as_ref().is_some_and(|c| c.action == "block") => {
+                let (Some(session), Some(member)) = (self.session.clone(), self.confirm.take().and_then(|c| c.member)) else { return Task::none() };
+                return Task::perform(async move { session.block(&member.id).await }, Msg::PreferencesLoaded);
+            }
             Msg::AskConfirm(confirm) => { if !self.busy { self.confirm = confirm; if self.confirm.is_some() { self.dialog = None; } } }
             Msg::ApplyConfirm if !self.busy => {
                 let (Some(confirm), Some(session), Some(community)) = (self.confirm.clone(), self.session.clone(), self.community.as_ref().map(|c| c.id.clone())) else { return Task::none() };
@@ -1695,7 +2137,7 @@ impl App {
                         }, Msg::BackupStatus);
                     }
                     Tab::Voice => return Task::perform(async { tokio::task::spawn_blocking(audio::enumerate).await.map_err(|_| "Audio devices unavailable".to_string())? }, Msg::AudioLoaded),
-                    Tab::Profile => {}
+                    Tab::Profile | Tab::Alerts => {}
                 }
             }
             Msg::ProfileName(value) => self.profile_name = value,
@@ -2031,6 +2473,13 @@ impl App {
                 return Task::batch([Task::perform(async move { save_file(session, file, path).await }, |result| Msg::Done(result, "File saved")), next()]);
             }
             "updaterestart" => Some(Msg::UpdateRestart),
+            "friendnote" => Some(Msg::FriendNote(value.clone())),
+            "panelsearch" => Some(Msg::OpenPanel(Some(Panel::Search))),
+            "search" => { self.search_query = value.clone(); Some(Msg::SearchRun) }
+            "editlast" => { let me = self.me().to_owned(); self.thread.messages.iter().rev().find(|m| m.sender == me && m.reaction.is_none()).map(|m| Msg::StartEdit(m.id.clone())) }
+            "animal" => t_animal(&value).map(Msg::SetAnimal),
+            "disappear" => value.parse().ok().map(Msg::Disappear),
+            "mute" => self.community.as_ref().map(|c| Msg::ToggleMute(c.id.clone())),
             "friendadd" => { self.people_query = value.clone(); Some(Msg::SendFriendRequest) }
             "friendaccept" => self.friend_requests.incoming.first().map(|p| Msg::AnswerFriendRequest(p.id.clone(), true)),
             "emoji" => Some(Msg::ToggleEmoji),
@@ -2063,14 +2512,14 @@ impl App {
     fn debug_state(&self) -> String {
         let texts: Vec<&str> = self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| m.text.as_str()).collect();
         let reactions = chat::reactions(&self.thread.messages, self.now);
-        format!("{}", serde_json::json!({ "updateReady": self.update_ready, "shownBadge": self.shown_badge, "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+        format!("{}", serde_json::json!({ "searchResults": self.search_results.as_ref().map(|r| r.iter().map(|m| m.text.clone()).collect::<Vec<_>>()), "typing": self.typing_line(), "animal": self.session.as_ref().and_then(|s| s.account.animal.clone()), "threadText": self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| format!("{}{}", m.text, if m.edited { " (edited)" } else { "" })).collect::<Vec<_>>(), "updateReady": self.update_ready, "shownBadge": self.shown_badge, "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
     }
 
     /// Where an attachment is being sent, as the upload's query string.
     fn upload_target(&self) -> Option<String> {
         match self.mode {
             Mode::Direct => self.selected_peer().filter(|p| p.encryption_key.is_some()).map(|p| format!("to={}", p.id)),
-            Mode::Community => self.community.as_ref().map(|c| format!("community={}", c.id)),
+            Mode::Community => self.community.as_ref().map(|c| match &self.channel { Some(channel) => format!("community={}&channel={channel}", c.id), None => format!("community={}", c.id) }),
         }
     }
 
@@ -2084,7 +2533,7 @@ impl App {
         let plain = match (&file, &reaction) {
             (Some(file), _) => message_content::encode_file(file).map_err(|_| "invalid file"),
             (None, Some(r)) => message_content::encode_reaction(&r.target, &r.emoji, &r.action),
-            (None, None) => message_content::encode_text(&text, reply.as_deref()),
+            (None, None) => message_content::encode_text_with_mentions(&text, reply.as_deref(), &self.named_people(&text)),
         };
         let plain = match plain { Ok(p) => Zeroizing::new(p), Err(_) => { self.fail("Messages can be up to 4000 characters.".into()); return Task::none(); } };
         let generation = self.generation;
@@ -2159,6 +2608,6 @@ fn local(stored: api::MessageEnvelope, text: String, reply: Option<String>, reac
         id: stored.id, sender: stored.sender_id, receiver: stored.receiver_id, channel: stored.channel_id,
         created: chat::timestamp(&stored.created_at).unwrap_or_else(chat::now), created_at: stored.created_at,
         expires: stored.expires_at.as_deref().and_then(chat::timestamp), pinned: stored.pinned,
-        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, missed_call: false, file: None, unreadable: false,
+        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, missed_call: false, file: None, unreadable: false, edited: stored.edited_at.is_some(), mentions: Vec::new(),
     }
 }

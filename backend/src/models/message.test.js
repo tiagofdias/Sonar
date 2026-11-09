@@ -77,8 +77,9 @@ test("history excludes expired records and is scoped to both participants", asyn
     Message.find = original;
   }
 });
-test("pin authorization requires participation and unexpired history", async () => {
+test("pin authorization requires participation and unexpired history", async (t) => {
   const original = Message.findOneAndUpdate;
+  t.mock.method(Message, "findById", () => ({ select: () => ({ lean: async () => null }) }));
   let filter, update;
   Message.findOneAndUpdate = async (f, u) => {
     filter = f;

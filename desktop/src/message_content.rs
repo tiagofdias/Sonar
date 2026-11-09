@@ -51,6 +51,26 @@ pub fn encode_text(text: &str, reply_to: Option<&str>) -> Result<String, &'stati
     } else { Ok(text.to_owned()) }
 }
 
+fn valid_mention(item: &str) -> bool { item == "everyone" || valid_id(item) }
+
+pub fn encode_text_with_mentions(text: &str, reply_to: Option<&str>, mentions: &[String]) -> Result<String, &'static str> {
+    if mentions.is_empty() || mentions.len() > 32 || !mentions.iter().all(|item| valid_mention(item)) { return encode_text(text, reply_to); }
+    if text.encode_utf16().count() > 4000 { return Err("message too long"); }
+    if reply_to.is_some_and(|id| !valid_id(id)) { return Err("invalid reply target"); }
+    let mut data = serde_json::json!({ "text": text, "mentions": mentions });
+    if let Some(id) = reply_to { data["replyTo"] = id.into(); }
+    Ok(format!("{REPLY}{data}"))
+}
+
+/// Who a decrypted message names. A bad list counts as naming nobody, as on the web.
+pub fn mentions(value: &str) -> Vec<String> {
+    let Some(payload) = value.strip_prefix(REPLY) else { return Vec::new() };
+    let Ok(data) = serde_json::from_str::<serde_json::Value>(payload) else { return Vec::new() };
+    let Some(list) = data.get("mentions").and_then(|v| v.as_array()) else { return Vec::new() };
+    let items: Vec<String> = list.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+    if items.len() == list.len() && items.len() <= 32 && items.iter().all(|item| valid_mention(item)) { items } else { Vec::new() }
+}
+
 /// A call that rang and was never answered, sent by the caller's app.
 pub fn encode_missed_call() -> String { format!("{CALL}{}", serde_json::json!({ "event": "missed" })) }
 
@@ -103,6 +123,15 @@ mod tests {
         }
         let oversized = format!("sonar-reply-v1:{{\"text\":\"{}\"}}", "\u{1f44d}".repeat(2001));
         assert_eq!(decode(&oversized), Content::Text { text: oversized.clone(), reply_to: None });
+    }
+    #[test]
+    fn mentions_round_trip_like_the_web() {
+        let id = "0123456789abcdef01234567".to_owned();
+        let made = encode_text_with_mentions("hi", None, &[id.clone(), "everyone".into()]).unwrap();
+        assert_eq!(decode(&made), Content::Text { text: "hi".into(), reply_to: None });
+        assert_eq!(mentions(&made), vec![id, "everyone".to_owned()]);
+        assert_eq!(encode_text_with_mentions("plain", None, &[]).unwrap(), "plain");
+        assert!(mentions("sonar-reply-v1:{\"text\":\"hi\",\"mentions\":[\"bad id\"]}").is_empty());
     }
     #[test]
     fn file_messages_validate_and_cannot_be_typed() {

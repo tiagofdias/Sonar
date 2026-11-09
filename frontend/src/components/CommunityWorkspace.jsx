@@ -13,6 +13,11 @@ import {
   MessageCircle,
   Pin,
   Plus,
+  Pencil,
+  Search,
+  Ban,
+  BellOff,
+  Bell,
   Send,
   Reply,
   ChevronDown,
@@ -37,6 +42,12 @@ import { reactionSummary } from "../lib/reactions";
 import VoiceRoomBanner from "./VoiceRoomBanner";
 import VoiceRoomList from "./VoiceRoomList";
 import { useHistoryScroll } from "../lib/useHistoryScroll";
+import Avatar from "./Avatar";
+import SearchPanel from "./SearchPanel";
+import { usePreferencesStore } from "../store/usePreferencesStore";
+import { useTyping, typingText } from "../lib/useTyping";
+import { completeMention, mentionQuery, mentionsIn } from "../lib/mentions";
+const PERMISSIONS = [["pin", "Pin other people's messages"], ["delete", "Delete other people's messages"], ["remove", "Remove and ban members"], ["lock", "Lock voice rooms"]];
 const initials = (name) =>
   name
     ?.trim()
@@ -52,7 +63,7 @@ export default function CommunityWorkspace({
   voiceRoom,
   hasUnreadDirect,
 }) {
-  const { authUser, socket, onlineUsers, presence, logout } = useAuthStore();
+  const { authUser, socket, onlineUsers, logout } = useAuthStore();
   const store = useCommunityStore();
   const messageBox = useRef(null);
   const [manageOpen, setManageOpen] = useState(false);
@@ -71,7 +82,14 @@ export default function CommunityWorkspace({
     [channelType, setChannelType] = useState("text"),
     [renameChannel, setRenameChannel] = useState(""),
     [replyTo, setReplyTo] = useState(null),
-    [bans, setBans] = useState(null);
+    [bans, setBans] = useState(null),
+    [editing, setEditing] = useState(null),
+    [searching, setSearching] = useState(false),
+    [activity, setActivity] = useState(null),
+    [permissionsFor, setPermissionsFor] = useState(null),
+    [denied, setDenied] = useState([]);
+  const preferences = usePreferencesStore();
+  const { typing, typed } = useTyping(socket, community && channel ? { communityId: community._id, channelId: channel._id } : null);
   const { text, setText, clearSent } = useConversationDraft(
     channel ? `channel:${community._id}:${channel._id}` : null,
   );
@@ -146,6 +164,7 @@ export default function CommunityWorkspace({
   useEffect(() => {
     setPins(false);
     setReplyTo(null);
+    setEditing(null);
     setShowChannels(false);
   }, [channel?._id]);
   useEffect(() => {
@@ -197,6 +216,17 @@ export default function CommunityWorkspace({
   };
   const owner = community?.ownerId === authUser._id;
   const moderator = community?.moderators?.includes(authUser._id) || false;
+  const group = community?.kind === "group";
+  const may = (permission) => owner || (moderator && !community?.moderatorLimits?.find((limit) => limit.userId === authUser._id)?.denied.includes(permission));
+  const canDisappear = group || owner || moderator;
+  const members = community?.memberDetails || [];
+  const typingMention = mentionQuery(text);
+  const mentionOptions = typingMention === null ? [] : [
+    ...((owner || moderator) && "everyone".startsWith(typingMention.toLowerCase()) ? [{ _id: "everyone", fullName: "everyone" }] : []),
+    ...members.filter((member) => member._id !== authUser._id && member.fullName.toLowerCase().includes(typingMention.toLowerCase())),
+  ].slice(0, 6);
+  const openPermissions = (member) => { setDenied(community.moderatorLimits?.find((limit) => limit.userId === member._id)?.denied || []); setPermissionsFor(member); open("permissions"); };
+  const openActivity = async () => { setActivity(null); open("activity"); setActivity(await store.getActivity()); };
   const choose = async (item) => {
     await store.select(item._id);
     setShowChannels(false);
@@ -247,8 +277,13 @@ export default function CommunityWorkspace({
     const draft = text;
     setSending(true);
     try {
+      const named = mentionsIn(draft, members);
+      if (editing) {
+        if (await store.edit(editing, draft.trim(), named)) { clearSent(draft); setEditing(null); }
+        return;
+      }
       const target = replyTo?._id;
-      if (await store.send(draft.trim(), target)) {
+      if (await store.send(draft.trim(), target, null, null, named)) {
         clearSent(draft);
         setReplyTo(current => current?._id === target ? null : current);
       }
@@ -259,9 +294,10 @@ export default function CommunityWorkspace({
   const reactions = reactionSummary(messages, now);
   const visible = messages.filter(
     (message) =>
-      !message.reaction && (message.pinned || new Date(message.expiresAt).getTime() > now) &&
+      !message.reaction && !preferences.isBlocked(message.senderId) && (message.pinned || new Date(message.expiresAt).getTime() > now) &&
       (!pins || message.pinned),
   );
+  const servers = communities.filter((item) => item.kind !== "group");
   return (
     <div
       className={`workspace community-workspace ${community ? "has-chat" : ""} ${showChannels ? "show-channels" : ""}`}
@@ -284,7 +320,7 @@ export default function CommunityWorkspace({
           {hasUnreadDirect && <span className="unread-dot rail-unread" aria-label="New direct messages" />}
         </button>
         <div className="community-rail-list">
-          {communities.map((item) => (
+          {servers.map((item) => (
             <button
               key={item._id}
               title={item.name}
@@ -340,14 +376,14 @@ export default function CommunityWorkspace({
               <small className="community-count">
                 {community.members.length} {community.members.length === 1 ? "member" : "members"}
               </small>
-              {owner && (
+              {owner && !group && (
                 <button className="community-invite" onClick={generateInvite}>
                   <Users size={15} /> Invite your people <Plus size={14} />
                 </button>
               )}
               <div className="sidebar-section">
                 <span>TEXT CHANNELS</span>
-                {owner && (
+                {owner && !group && (
                   <button
                     className="icon-button"
                     title="Create a channel"
@@ -383,7 +419,11 @@ export default function CommunityWorkspace({
                   open("channel");
                 }}
               />
-              {(owner || moderator) && (
+              <button className="nav-row" onClick={() => preferences.toggleMute(community._id)}>
+                {preferences.isMuted(community._id) ? <Bell size={16} /> : <BellOff size={16} />}
+                {preferences.isMuted(community._id) ? `Unmute ${group ? "group" : "server"}` : `Mute ${group ? "group" : "server"}`}
+              </button>
+              {(owner || moderator) && !group && (
                 <>
                   <button className="nav-row manage-toggle" aria-expanded={manageOpen} onClick={() => setManageOpen(!manageOpen)}>
                     <Settings size={16} />
@@ -392,7 +432,8 @@ export default function CommunityWorkspace({
                   </button>
                   {manageOpen && (
                     <>
-                      {community.channels.filter((item) => item.type === "voice").map((item) => (
+                      <button className="nav-row" onClick={openActivity}>Who joined or left</button>
+                      {may("lock") && community.channels.filter((item) => item.type === "voice").map((item) => (
                         <button className="nav-row" key={item._id} onClick={async () => {
                           if (await store.setVoiceLock(item._id, !item.locked))
                             toast(item.locked ? "Voice room unlocked." : "Voice room locked to new participants.");
@@ -415,7 +456,7 @@ export default function CommunityWorkspace({
                   onClick={() => setConfirmation({ action: "leave", communityId: community._id })}
                 >
                   <LogOut size={16} />
-                  Leave community
+                  {group ? "Leave group" : "Leave community"}
                 </button>
               )}
             </>
@@ -424,7 +465,7 @@ export default function CommunityWorkspace({
               <div className="sidebar-section">
                 <span>YOUR COMMUNITIES</span>
               </div>
-              {communities.map((item) => (
+              {servers.map((item) => (
                 <button
                   className="person"
                   key={item._id}
@@ -486,6 +527,11 @@ export default function CommunityWorkspace({
               Encrypted
             </span>
             {channel && (
+              <button className="icon-button" title="Search messages" aria-label="Search messages" onClick={() => setSearching(true)}>
+                <Search size={18} />
+              </button>
+            )}
+            {channel && (
               <button
                 className={`icon-button ${pins ? "accent" : ""}`}
                 title="Pinned messages"
@@ -512,8 +558,17 @@ export default function CommunityWorkspace({
         <div className="retention-banner">
           <Timer size={14} />
           <span>
-            Messages disappear after 7 days. Pin the ones worth keeping.
+            {channel?.disappearAfter
+              ? `Disappearing messages are on. New messages vanish after ${channel.disappearAfter === 3600 ? "1 hour" : "1 day"}.`
+              : "Messages disappear after 7 days. Pin the ones worth keeping."}
           </span>
+          {channel && canDisappear && (
+            <select aria-label="Disappearing messages" title="Disappearing messages" className="disappear-select" value={channel.disappearAfter || 0} onChange={(event) => store.setDisappearAfter(channel._id, Number(event.target.value))}>
+              <option value={0}>7 days</option>
+              <option value={3600}>1 hour</option>
+              <option value={86400}>1 day</option>
+            </select>
+          )}
         </div>
         <VoiceCallBanner voice={voice} voiceRoom={voiceRoom} users={community?.memberDetails || []} />
         <VoiceRoomBanner voiceRoom={voiceRoom} />
@@ -624,9 +679,7 @@ export default function CommunityWorkspace({
                         className={`message ${message.pinned ? "is-pinned" : ""}`}
                         key={message._id}
                       >
-                        <span className="avatar-tile">
-                          {initials(sender?.fullName)}
-                        </span>
+                        <Avatar user={sender || { _id: message.senderId }} />
                         <div className="message-content">
                           <div className="message-meta">
                             <strong>{sender?.fullName || "Member"}</strong>
@@ -641,6 +694,7 @@ export default function CommunityWorkspace({
                                 minute: "2-digit",
                               })}
                             </time>
+                            {message.editedAt && <span className="edited-label">(edited)</span>}
                             {message.pinned && (
                               <span className="pin-label">
                                 <Pin size={11} />
@@ -649,11 +703,12 @@ export default function CommunityWorkspace({
                             )}
                           </div>
                           {message.replyTo && <div className="reply-reference">Replying to: {visible.find(item => item._id === message.replyTo && !item.unreadable)?.text || "Original message unavailable"}</div>}
-                          {message.file ? <FileCard file={message.file} /> : <MessageText text={message.text} />}
+                          {message.file ? <FileCard file={message.file} /> : <MessageText text={message.text} names={members.map((member) => member.fullName)} />}
                           {!pins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => store.send("", null, reaction)} />}
                         </div>
                         <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>
-                        {message.senderId === authUser._id && <button className="pin-action" title="Delete message" aria-label="Delete message"
+                        {message.senderId === authUser._id && !message.file && !message.unreadable && <button className="pin-action" title="Edit message" aria-label="Edit message" onClick={() => { setReplyTo(null); setEditing(message); setText(message.text); messageBox.current?.focus(); }}><Pencil size={14} /></button>}
+                        {(message.senderId === authUser._id || may("delete")) && <button className="pin-action" title="Delete message" aria-label="Delete message"
                           onClick={() => { if (window.confirm("Delete this message for the community? Copies already saved elsewhere cannot be removed.")) store.deleteMessage(message); }}><Trash2 size={14} /></button>}
                         <button
                           className="pin-action"
@@ -673,6 +728,17 @@ export default function CommunityWorkspace({
             {community && channel && (
               <div className="composer-area">
                 {replyTo && <div className="reply-composer"><span>Replying to: {replyTo.text}</span><button className="icon-button" aria-label="Cancel reply" onClick={() => setReplyTo(null)}><X size={16} /></button></div>}
+                {editing && <div className="reply-composer"><span>Editing your message</span><button className="icon-button" aria-label="Cancel edit" onClick={() => { setEditing(null); setText(""); }}><X size={16} /></button></div>}
+                {mentionOptions.length > 0 && (
+                  <div className="mention-picker" role="listbox" aria-label="Mention someone">
+                    {mentionOptions.map((member) => (
+                      <button type="button" key={member._id} onClick={() => { setText(completeMention(text, member.fullName)); messageBox.current?.focus(); }}>
+                        {member._id !== "everyone" && <Avatar user={member} />}
+                        @{member.fullName}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <form className="composer" onSubmit={send}>
                   <LockKeyhole size={18} />
                   <textarea
@@ -682,7 +748,7 @@ export default function CommunityWorkspace({
                     maxLength={4000}
                     placeholder={`Message #${channel.name}...`}
                     value={text}
-                    onChange={(event) => setText(event.target.value)}
+                    onChange={(event) => { setText(event.target.value); if (event.target.value) typed(); }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault();
@@ -694,7 +760,7 @@ export default function CommunityWorkspace({
                     textarea={messageBox}
                     value={text}
                     setValue={setText}
-                    target={{ community: community._id }}
+                    target={{ community: community._id, channel: channel._id }}
                     disabled={loading}
                     stillHere={() => useCommunityStore.getState().channel?._id === channel._id}
                     send={(file) => store.send(fileLabel(file), null, null, file)}
@@ -708,9 +774,11 @@ export default function CommunityWorkspace({
                 </form>
                 <div className="composer-hint">
                   <span>
-                    <LockKeyhole size={11} />
-                    Encrypted for {community.members.length}{" "}
-                    {community.members.length === 1 ? "member" : "members"}
+                    {typing.length ? typingText(typing.map((person) => members.find((member) => member._id === person)?.fullName.split(" ")[0] || "Someone")) : <>
+                      <LockKeyhole size={11} />
+                      Encrypted for {community.members.length}{" "}
+                      {community.members.length === 1 ? "member" : "members"}
+                    </>}
                   </span>
                   <span>Enter to send · Shift + Enter for a new line</span>
                 </div>
@@ -732,10 +800,7 @@ export default function CommunityWorkspace({
               {owner && <button className="nav-row" onClick={openBans}>Manage bans</button>}
               {community.memberDetails.map((member) => (
                 <div className="person" key={member._id}>
-                  <span className="avatar-tile">
-                    {initials(member?.fullName)}
-                    {onlineUsers.includes(member._id) && <i className={presence[member._id] ? `status-${presence[member._id]}` : undefined} />}
-                  </span>
+                  <Avatar user={member} dot={onlineUsers.includes(member._id)} />
                   <span>
                     <strong>{member.fullName}</strong>
                     <small>
@@ -743,12 +808,14 @@ export default function CommunityWorkspace({
                       {member._id === authUser._id ? " · You" : ""}
                     </small>
                   </span>
-                  {(owner && member._id !== authUser._id) || (moderator && member._id !== authUser._id && member._id !== community.ownerId && !community.moderators?.includes(member._id)) ? (
+                  {member._id !== authUser._id && <button className="icon-button" title="Block" aria-label={`Block ${member.fullName}`} onClick={() => { if (window.confirm(`Block ${member.fullName}? Their messages will be hidden and they will not be told.`)) preferences.block(member._id); }}><Ban size={14} /></button>}
+                  {!group && ((owner && member._id !== authUser._id) || (moderator && member._id !== authUser._id && member._id !== community.ownerId && !community.moderators?.includes(member._id) && may("remove"))) ? (
                     <select
                       className="member-actions"
                       aria-label={`Manage ${member.fullName}`}
                       value=""
                       onChange={(event) => {
+                        if (event.target.value === "permissions") { openPermissions(member); return; }
                         setConfirmation({
                           action: event.target.value,
                           member,
@@ -762,6 +829,7 @@ export default function CommunityWorkspace({
                       <option value="remove">Remove member</option>
                       <option value="ban">Ban member</option>
                       {owner && <option value={community.moderators?.includes(member._id) ? "demote" : "promote"}>{community.moderators?.includes(member._id) ? "Remove moderator role" : "Make moderator"}</option>}
+                      {owner && community.moderators?.includes(member._id) && <option value="permissions">Moderator permissions</option>}
                       {owner && <option value="transfer">Make owner</option>}
                     </select>
                   ) : (
@@ -780,6 +848,9 @@ export default function CommunityWorkspace({
           <span>Always free. Always ad-free.</span>
         </footer>
       </main>
+      {searching && channel && (
+        <SearchPanel search={store.searchAll} senderName={(message) => (message.senderId === authUser._id ? "You" : [...members, ...(community.historyAuthors || [])].find((member) => member._id === message.senderId)?.fullName || "Member")} onClose={() => setSearching(false)} />
+      )}
       {confirmation && (
         <div
           className="modal-backdrop"
@@ -969,6 +1040,25 @@ export default function CommunityWorkspace({
                   </p>
                 )}
               </>
+            ) : dialog === "activity" ? (
+              <>
+                <h2>Who joined or left</h2>
+                <p>The latest 50 changes to this community&apos;s members.</p>
+                {!activity ? <p>Loading...</p> : !activity.length ? <p>Nothing yet.</p> :
+                  <ul className="session-list">{activity.map((row, index) => <li key={index}><strong>{row.name}</strong> {row.action} <small>{new Date(row.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></li>)}</ul>}
+              </>
+            ) : dialog === "permissions" ? (
+              <>
+                <h2>What {permissionsFor?.fullName} can do</h2>
+                <p>Moderators can do all of this until you switch something off.</p>
+                {PERMISSIONS.map(([value, label]) => (
+                  <label className="settings-checkbox" key={value}>
+                    <input type="checkbox" checked={!denied.includes(value)} onChange={(event) => setDenied(event.target.checked ? denied.filter((item) => item !== value) : [...denied, value])} />
+                    {label}
+                  </label>
+                ))}
+                <button className="primary" disabled={busy} onClick={async () => { setBusy(true); try { if (await store.setModeratorLimits(permissionsFor._id, denied)) setDialog(null); } finally { setBusy(false); } }}>Save permissions</button>
+              </>
             ) : dialog === "bans" ? (
               <>
                 <h2>Community bans</h2>
@@ -1067,8 +1157,8 @@ export default function CommunityWorkspace({
                           ? "The weekend crew"
                           : dialog === "channel"
                             ? channelType === "voice"
-                              ? "lounge"
-                              : "ideas-and-plans"
+                              ? "Lounge"
+                              : "Ideas and plans"
                             : "Paste your invite here"
                       }
                       onChange={(event) => setValue(event.target.value)}

@@ -138,3 +138,7 @@ The key and session are stored in `%LOCALAPPDATA%\Sonar`, protected with Windows
 ### Voice room moderation
 
 Owners and moderators can lock or unlock a voice room and disconnect participants from it. A locked room blocks new joins; people already inside remain connected. Disconnecting someone does not ban them, and they can rejoin unless the room is locked. Moderators cannot disconnect the owner or other moderators. Room locks persist in the community database; room occupancy remains process-local.
+
+## Publishing a desktop update
+
+Bump `version` in `desktop/Cargo.toml`, then run `node desktop/scripts/release.mjs`. It builds the Windows download and signs it with the key in `~/.sonar-release`, which must stay private and backed up. Commit the new zip and `latest.json`; installed copies pick the update up from the site. Push alerts generate their keys automatically unless `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are set.

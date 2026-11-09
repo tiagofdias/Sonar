@@ -8,6 +8,7 @@ import { deleteFile } from "../lib/attachments";
 import { encodeFile, encodeMessage, encodeMissedCall, encodeReaction, MISSED_CALL_TEXT } from "../lib/messageContent";
 import { useUnreadStore } from "./useUnreadStore";
 import { messageAlert } from "../lib/messageAlert";
+import { searchHistory } from "../lib/search";
 import { refreshedContact } from "../lib/contacts";
 import { candidatePosition, newer, readPosition, rememberPosition } from "../lib/offlineUnread";
 let generation = 0;
@@ -107,9 +108,15 @@ export const useChatStore = create((set, get) => ({
       set({ friendRequests: (await api.get("/friends")).data });
     } catch { /* The next refresh tries again. */ }
   },
-  sendFriendRequest: async (username) => {
+  sendFriendRequest: async (username, noteText = "") => {
     try {
-      const { data } = await api.post("/friends/request", { username });
+      let note;
+      if (noteText.trim()) {
+        const peer = (await api.get(`/friends/key/${encodeURIComponent(username.trim().replace(/^@/, ""))}`)).data;
+        if (!peer.encryptionKey) throw new Error("They need to sign in to Sonar once before you can add a note");
+        note = await encrypt(useAuthStore.getState().authUser._id, peer, noteText.trim().slice(0, 200), "000000000000000000000001");
+      }
+      const { data } = await api.post("/friends/request", { username, ...(note ? { note } : {}) });
       toast.success(data.status === "accepted" ? "You're friends now" : "Friend request sent");
       return true;
     } catch (e) {
@@ -124,6 +131,29 @@ export const useChatStore = create((set, get) => ({
       toast.error(e.response?.data?.message || "That request is no longer available");
     }
     await Promise.all([get().getUsers(), get().getFriendRequests()]);
+  },
+  setDisappearAfter: async (peerId, seconds) => {
+    try {
+      await api.put(`/friends/${peerId}/disappear`, { seconds });
+      await get().getUsers();
+    } catch (e) { fail(e); }
+  },
+  searchAll: async (query, stillWanted) => {
+    const peer = get().selectedUser, me = useAuthStore.getState().authUser._id;
+    return searchHistory(
+      async (before) => (await api.get(`/messages/${peer._id}`, { params: { page: true, ...(before ? { before } : {}) } })).data,
+      (message) => decrypt(me, peer, message), query, stillWanted,
+    ).catch((error) => { fail(error); return []; });
+  },
+  editMessage: async (message, text) => {
+    try {
+      const peer = get().selectedUser, me = useAuthStore.getState().authUser._id;
+      const envelope = await encrypt(me, peer, encodeMessage(text, message.replyTo));
+      const { data } = await api.patch(`/messages/${message._id}`, envelope);
+      if (get().selectedUser?._id === peer._id)
+        set({ messages: visibleMessages(mergeHistory(get().messages, [{ ...data, text, ...(message.replyTo ? { replyTo: message.replyTo } : {}) }])) });
+      return true;
+    } catch (e) { fail(e); return false; }
   },
   setSelectedUser: (user) => {
     deleted.clear();

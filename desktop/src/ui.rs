@@ -4,10 +4,24 @@ use crate::theme::{self as t, Icon, rgb, rgba};
 use crate::{App, CallStatus, Confirm, Dialog, Mode, Msg, Panel, Screen, Tab, ToastKind, UnlockReason};
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::text::LineHeight;
-use iced::widget::{tooltip, button, center, column, container, hover, mouse_area, opaque, pick_list, row, scrollable, space, stack, text, text_editor, text_input, Column, Row};
+use iced::widget::{slider, tooltip, button, center, column, container, hover, mouse_area, opaque, pick_list, row, scrollable, space, stack, text, text_editor, text_input, Column, Row};
 use iced::{Color, Element, Length, Padding};
 
 pub const SYSTEM_DEFAULT: &str = "System default";
+pub const NO_FOLDER: &str = "No folder";
+pub const NEW_FOLDER: &str = "New folder (name it above)";
+
+/// What sits in a person's bubble: their animal. Servers keep their letters.
+#[derive(Clone)]
+enum Face { Animal(Icon), Letters(String) }
+fn face_of(id: &str, animal: Option<&str>) -> Face { Face::Animal(t::animal_icon(id, animal)) }
+fn person_face(person: &crate::api::Person) -> Face { face_of(&person.id, person.animal.as_deref()) }
+fn own_face(app: &App) -> Face { app.session.as_ref().map_or(Face::Letters(String::new()), |s| face_of(s.account.id.as_deref().unwrap_or_default(), s.account.animal.as_deref())) }
+
+#[derive(Clone, PartialEq, Eq)]
+struct Span { label: &'static str, seconds: u32 }
+impl std::fmt::Display for Span { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.label) } }
+const SPANS: [Span; 3] = [Span { label: "7 days", seconds: 0 }, Span { label: "1 hour", seconds: 3600 }, Span { label: "1 day", seconds: 86400 }];
 type E<'a> = Element<'a, Msg>;
 const FILL: Length = Length::Fill;
 
@@ -34,14 +48,15 @@ fn body<'a>(value: impl text::IntoFragment<'a>, size: f32, color: Color, line: f
     text(value).size(size).color(color).font(t::REGULAR).line_height(LineHeight::Relative(line))
 }
 
-fn avatar<'a>(name: &str, index: usize, online: Option<Color>, size: f32) -> E<'a> { avatar_status(name, index, online, t::presence_color("online"), size) }
-fn avatar_status<'a>(name: &str, index: usize, online: Option<Color>, dot: Color, size: f32) -> E<'a> {
+fn avatar<'a>(face: Face, index: usize, online: Option<Color>, size: f32) -> E<'a> { avatar_status(face, index, online, t::presence_color("online"), size) }
+fn avatar_status<'a>(face: Face, index: usize, online: Option<Color>, dot: Color, size: f32) -> E<'a> {
     let (background, color) = t::avatar_colors(index);
-    tile(name, background, color, None, size, if size > 40.0 { 23.0 } else { 12.0 }, if size > 40.0 { 24.0 } else { 14.0 }, online, dot)
+    tile(face, background, color, None, size, if size > 40.0 { 23.0 } else { 12.0 }, if size > 40.0 { 24.0 } else { 14.0 }, online, dot)
 }
 #[allow(clippy::too_many_arguments)]
-fn tile<'a>(name: &str, background: Color, color: Color, line: Option<Color>, size: f32, r: f32, font: f32, online: Option<Color>, dot: Color) -> E<'a> {
-    let face: E<'a> = container(text(t::initials(name)).size(font).color(color).font(t::semibold()))
+fn tile<'a>(who: Face, background: Color, color: Color, line: Option<Color>, size: f32, r: f32, font: f32, online: Option<Color>, dot: Color) -> E<'a> {
+    let inner: E<'a> = match who { Face::Animal(icon) => t::icon(icon, size * 0.74, color).into(), Face::Letters(name) => text(t::initials(&name)).size(font).color(color).font(t::semibold()).into() };
+    let face: E<'a> = container(inner)
         .width(size).height(size).center_x(size).center_y(size)
         .style(move |_| container::Style { background: Some(background.into()), border: t::border(line.unwrap_or(Color::TRANSPARENT), if line.is_some() { 1.0 } else { 0.0 }, r), ..Default::default() }).into();
     match online {
@@ -411,7 +426,7 @@ fn rail(app: &App) -> E<'_> {
         }
         Mode::Community => {
             top = top.push(rail_button(Icon::MessageCircle, false, !app.unread_direct.is_empty(), Msg::SetMode(Mode::Direct)));
-            let list = app.communities.iter().fold(Column::new().spacing(12).align_x(Horizontal::Center).padding([4, 0]), |list, item| {
+            let list = app.communities.iter().filter(|c| c.kind != "group").fold(Column::new().spacing(12).align_x(Horizontal::Center).padding([4, 0]), |list, item| {
                 let active = app.community.as_ref().is_some_and(|c| c.id == item.id);
                 let unread = app.unread_channels.iter().any(|key| key.starts_with(&format!("{}:", item.id)));
                 let mut face = Row::new().align_y(Vertical::Center).push(text(t::initials(&item.name)).size(16).font(t::semibold()));
@@ -451,9 +466,9 @@ fn danger_row<'a>(icon: Option<Icon>, label: &'a str, on: Option<Msg>) -> E<'a> 
     content = content.push(text(label).size(15).color(color));
     container(button(content).width(FILL).padding(12).style(t::danger_row()).on_press_maybe(on)).padding(Padding { top: 11.0, bottom: 3.0, ..Padding::ZERO }).into()
 }
-fn person_row<'a>(name: &str, sub: &str, index: usize, dot: Option<Color>, chosen: bool, trailing: Vec<E<'a>>, on: Option<Msg>) -> E<'a> {
+fn person_row<'a>(who: Face, name: &str, sub: &str, index: usize, dot: Option<Color>, chosen: bool, trailing: Vec<E<'a>>, on: Option<Msg>) -> E<'a> {
     let mut content = Row::new().spacing(11).align_y(Vertical::Center)
-        .push(avatar_status(name, index, dot.map(|_| t::SIDEBAR), dot.unwrap_or(t::OFFLINE), 35.0))
+        .push(avatar_status(who, index, dot.map(|_| t::SIDEBAR), dot.unwrap_or(t::OFFLINE), 35.0))
         .push(column![text(name.to_owned()).size(15).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(sub.to_owned()).size(13).color(rgb(0x78848e))].spacing(4));
     // Like the web row: an unread dot follows the name; the lock sits at the end.
     let mut trailing = trailing;
@@ -485,7 +500,7 @@ fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>,
     }
     let footer = footer.push(container(row![
         button(row![
-            avatar_status(name, 0, Some(t::FOOTER_BG), t::presence_color(status), 35.0),
+            avatar_status(own_face(app), 0, Some(t::FOOTER_BG), t::presence_color(status), 35.0),
             column![text(name.to_owned()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(status_label).size(12).color(rgb(0x7d8892))].spacing(4).width(FILL),
         ].spacing(10).align_y(Vertical::Center)).width(FILL).padding(0).style(t::plain(t::TEXT, t::TEXT)).on_press(Msg::ToggleStatusMenu),
         icon_btn(Icon::LogOut, 17.0, Some(Msg::SignOut), false),
@@ -504,12 +519,29 @@ fn sidebar(app: &App) -> E<'_> {
             let query = app.query.to_lowercase();
             let mut list = Column::new().spacing(5);
             if !app.people_loaded { list = list.push(text("Loading people...").size(15).color(t::MUTED)); }
-            for (index, person) in app.people.iter().filter(|p| matches_person(p, &query)).enumerate() {
-                let online = app.online.contains(&person.id);
-                let mut trailing: Vec<E> = Vec::new();
-                if app.unread_direct.contains(&person.id) { trailing.push(t::dot(t::UNREAD, 8.0)); }
-                if person.encryption_key.is_some() { trailing.push(t::icon(Icon::LockKeyhole, 12.0, rgb(0xd0d7dc))); }
-                list = list.push(person_row(&person.name, app.status_text(&person.id, "Around now"), index, app.avatar_dot(&person.id), app.peer.as_deref() == Some(&person.id), trailing, Some(Msg::OpenPeer(Some(person.id.clone())))));
+            let prefs = &app.preferences;
+            let pinned = |p: &crate::api::Person| prefs.pinned_people.contains(&p.id);
+            let filed = |p: &crate::api::Person| prefs.folders.iter().any(|f| f.people.contains(&p.id));
+            let mut sections: Vec<(Option<String>, Vec<&crate::api::Person>)> = vec![(prefs.pinned_people.is_empty().then_some(None).unwrap_or(Some("PINNED".to_string())), app.people.iter().filter(|p| pinned(p)).collect())];
+            for folder in &prefs.folders { sections.push((Some(folder.name.to_uppercase()), app.people.iter().filter(|p| folder.people.contains(&p.id) && !pinned(p)).collect())); }
+            sections.push(((!prefs.pinned_people.is_empty() || !prefs.folders.is_empty()).then(|| "EVERYONE ELSE".to_string()), app.people.iter().filter(|p| !pinned(p) && !filed(p)).collect()));
+            let mut index = 0;
+            for (title, people) in sections {
+                let shown: Vec<_> = people.into_iter().filter(|p| matches_person(p, &query)).collect();
+                if shown.is_empty() { continue; }
+                if let Some(title) = title { list = list.push(container(text(title).size(11).font(t::semibold()).color(rgb(0x8a959e))).padding(Padding { top: 10.0, bottom: 4.0, left: 8.0, right: 8.0 })); }
+                for person in shown {
+                    let mut trailing: Vec<E> = Vec::new();
+                    if app.unread_direct.contains(&person.id) { trailing.push(t::dot(t::UNREAD, 8.0)); }
+                    if person.encryption_key.is_some() { trailing.push(t::icon(Icon::LockKeyhole, 12.0, rgb(0xd0d7dc))); }
+                    list = list.push(person_row(person_face(person), &person.name, app.status_text(&person.id, "Around now"), index, app.avatar_dot(&person.id), app.peer.as_deref() == Some(&person.id), trailing, Some(Msg::OpenPeer(Some(person.id.clone())))));
+                    index += 1;
+                }
+            }
+            let mut groups = Column::new().spacing(5);
+            for item in app.communities.iter().filter(|c| c.kind == "group") {
+                let trailing = if app.unread_channels.iter().any(|key| key.starts_with(&format!("{}:", item.id))) { vec![t::dot(t::UNREAD, 8.0), space().into()] } else { vec![] };
+                groups = groups.push(person_row(Face::Animal(Icon::Users), &item.name, &format!("{} people", item.members.len()), 0, None, false, trailing, Some(Msg::OpenGroup(item.id.clone()))));
             }
             if app.people_loaded && app.people.is_empty() {
                 list = list.push(container(body("Your space starts with a hello. Go to People and add someone by their username.", 15.0, rgb(0x7f8a94), 1.8)).padding(12));
@@ -526,6 +558,8 @@ fn sidebar(app: &App) -> E<'_> {
                 section("CONVERSATIONS", Some(icon_btn(Icon::Search, 15.0, Some(Msg::OpenPanel(Some(Panel::People))), false))),
                 container(search).padding(Padding { left: 5.0, right: 5.0, bottom: 13.0, ..Padding::ZERO }),
                 list,
+                section("GROUPS", Some(icon_btn(Icon::Plus, 15.0, Some(Msg::OpenPanel(Some(Panel::Group))), false))),
+                groups,
             ];
             sidebar_frame(title.into(), Some(icon_btn(Icon::ChevronDown, 18.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)), content.into(), Some((Icon::ShieldCheck, "A little more private.", "Messages disappear after 7 days.")), app)
         }
@@ -539,11 +573,12 @@ fn sidebar(app: &App) -> E<'_> {
                     let owner = app.owner();
                     let count = community.members.len();
                     content = content.push(container(text(format!("{count} {}", if count == 1 { "member" } else { "members" })).size(13).color(rgb(0x89939a))).padding(Padding { top: 2.0, bottom: 14.0, left: 12.0, right: 12.0 }));
-                    if owner {
+                    let group = community.kind == "group";
+                    if owner && !group {
                         content = content.push(button(row![t::icon(Icon::Users, 15.0, rgb(0xd0d7dc)), text("Invite your people").size(14).color(rgb(0xd0d7dc)), grow(), t::icon(Icon::Plus, 14.0, rgb(0xd0d7dc))].spacing(8).align_y(Vertical::Center))
                             .width(FILL).padding(11).style(t::community_invite()).on_press(Msg::OpenDialog(Some(Dialog::Invite))));
                     }
-                    content = content.push(section("TEXT CHANNELS", owner.then(|| icon_btn(Icon::Plus, 16.0, Some(Msg::NewChannel(false)), false))));
+                    content = content.push(section("TEXT CHANNELS", (owner && !group).then(|| icon_btn(Icon::Plus, 16.0, Some(Msg::NewChannel(false)), false))));
                     for channel in community.channels.iter().filter(|c| c.kind != "voice") {
                         let selected = app.channel.as_deref() == Some(&channel.id);
                         let mut trailing = Row::new().spacing(8).align_y(Vertical::Center);
@@ -553,9 +588,13 @@ fn sidebar(app: &App) -> E<'_> {
                     }
                     content = content.push(voice_rooms(app, community));
                     let moderator = app.moderator();
-                    if owner || moderator {
+                    let muted = app.muted(&community.id);
+                    let kind = if group { "group" } else { "server" };
+                    content = content.push(nav_row(Some(if muted { Icon::Bell } else { Icon::BellOff }), format!("{} {kind}", if muted { "Unmute" } else { "Mute" }), None, false, Some(Msg::ToggleMute(community.id.clone()))));
+                    if (owner || moderator) && !group {
                         content = content.push(nav_row(Some(Icon::Settings), "Manage community", Some(t::icon(Icon::ChevronDown, 15.0, rgb(0x89939a))), false, Some(Msg::ToggleManage)));
-                        if app.manage_open {
+                        if app.manage_open { content = content.push(nav_row(None, "Who joined or left", None, false, Some(Msg::OpenDialog(Some(Dialog::Activity))))); }
+                        if app.manage_open && app.may("lock") {
                             for room in community.channels.iter().filter(|c| c.kind == "voice") {
                                 let (icon, verb) = if room.voice_locked { (Icon::LockOpen, "Unlock") } else { (Icon::Lock, "Lock") };
                                 content = content.push(nav_row(Some(icon), format!("{verb} {}", room.name), None, false, Some(Msg::RoomLock(room.id.clone(), !room.voice_locked))));
@@ -570,13 +609,13 @@ fn sidebar(app: &App) -> E<'_> {
                         }
                     }
                     if !owner {
-                        content = content.push(danger_row(Some(Icon::LogOut), "Leave community", Some(Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
+                        content = content.push(danger_row(Some(Icon::LogOut), if group { "Leave group" } else { "Leave community" }, Some(Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
                     }
                 }
                 None => {
                     content = content.push(section("YOUR COMMUNITIES", None));
-                    for (index, item) in app.communities.iter().enumerate() {
-                        content = content.push(person_row(&item.name, &format!("{} members", item.members.len()), index, None, false, vec![t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))], Some(Msg::OpenCommunity(Some(item.id.clone())))));
+                    for (index, item) in app.communities.iter().filter(|c| c.kind != "group").enumerate() {
+                        content = content.push(person_row(Face::Letters(item.name.clone()), &item.name, &format!("{} members", item.members.len()), index, None, false, vec![t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))], Some(Msg::OpenCommunity(Some(item.id.clone())))));
                     }
                     content = content.push(nav_row(Some(Icon::Plus), "Create a community", None, false, Some(Msg::OpenDialog(Some(Dialog::Create)))))
                         .push(nav_row(Some(Icon::Users), "Join with an invite", None, false, Some(Msg::OpenDialog(Some(Dialog::Join)))));
@@ -600,7 +639,7 @@ fn conversation(app: &App) -> E<'_> {
             Some(peer) => {
                 let online = app.online.contains(&peer.id);
                 (row![
-                    avatar_status(&peer.name, 0, online.then_some(t::CONVERSATION), app.status_color(&peer.id), 35.0),
+                    avatar_status(person_face(peer), 0, online.then_some(t::CONVERSATION), app.status_color(&peer.id), 35.0),
                     column![
                         text(peer.name.clone()).size(16).font(t::semibold()).color(t::TEXT),
                         row![t::dot(if !online { t::OFFLINE } else if app.presence.contains_key(&peer.id) { app.status_color(&peer.id) } else { t::GREEN }, 5.0), text(app.status_text(&peer.id, "Online").to_owned()).size(13).color(rgb(0x7e8993)), text("/").size(13).color(rgb(0x3a444f)), text("Direct message").size(13).color(rgb(0x7e8993))].spacing(5).align_y(Vertical::Center),
@@ -609,12 +648,13 @@ fn conversation(app: &App) -> E<'_> {
                 vec![
                     container(encrypted_badge()).padding(Padding { right: 8.0, ..Padding::ZERO }).into(),
                     {
-                        let phone = icon_btn(Icon::Phone, 19.0, (online && app.call.is_none() && app.incoming.is_none() && app.live_connected).then_some(Msg::StartCall), false);
+                        let phone = icon_btn(Icon::Phone, 19.0, (online && app.call.is_none() && app.incoming.is_none() && app.live_connected).then_some(Msg::AskCall), false);
                         if online { phone } else {
                             let first = peer.name.split_whitespace().next().unwrap_or_default();
                             tooltip(phone, container(text(format!("{first} is offline. Calls need both people online.")).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0)), tooltip::Position::Bottom).into()
                         }
                     },
+                    icon_btn(Icon::Search, 19.0, Some(Msg::OpenPanel(Some(Panel::Search))), false),
                     icon_btn(Icon::Pin, 19.0, Some(Msg::TogglePins), app.thread.pins),
                     icon_btn(Icon::Ellipsis, 21.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false),
                 ])
@@ -625,6 +665,7 @@ fn conversation(app: &App) -> E<'_> {
         Mode::Community => {
             let channel = app.channel_info();
             let mut actions: Vec<E> = vec![container(encrypted_badge()).padding(Padding { right: 8.0, ..Padding::ZERO }).into()];
+            if channel.is_some() { actions.push(icon_btn(Icon::Search, 18.0, Some(Msg::OpenPanel(Some(Panel::Search))), false)); }
             if channel.is_some() { actions.push(icon_btn(Icon::Pin, 18.0, Some(Msg::TogglePins), app.thread.pins)); }
             if app.community.is_some() { actions.push(icon_btn(Icon::Users, 19.0, Some(Msg::ToggleMembers), app.members_open)); }
             (row![t::icon(Icon::Hash, 22.0, rgb(0xd0d7dc)), column![
@@ -637,8 +678,16 @@ fn conversation(app: &App) -> E<'_> {
         container(row![identity, grow(), Row::from_vec(actions).spacing(12).align_y(Vertical::Center)].align_y(Vertical::Center)).height(82).padding([0, 33]).center_y(82),
         t::rule(t::LINE_CHAT, true),
     ];
-    let retention_text = if app.mode == Mode::Direct { "A conversation, not a permanent record. Messages disappear after 7 days." } else { "Messages disappear after 7 days. Pin the ones worth keeping." };
+    let disappear = if app.mode == Mode::Direct { app.selected_peer().map(|p| p.disappear_after) } else { app.channel_info().map(|c| c.disappear_after) };
+    let retention_text = match disappear {
+        Some(seconds) if seconds > 0 => format!("Disappearing messages are on. New messages vanish after {}.", if seconds == 3600 { "1 hour" } else { "1 day" }),
+        _ if app.mode == Mode::Direct => "A conversation, not a permanent record. Messages disappear after 7 days.".to_owned(),
+        _ => "Messages disappear after 7 days. Pin the ones worth keeping.".to_owned(),
+    };
     let mut banner = Row::new().spacing(8).align_y(Vertical::Center).push(t::icon(Icon::Timer, 14.0, rgb(0xd0d7dc))).push(text(retention_text).size(13).color(rgb(0x8a949b)));
+    if let Some(seconds) = disappear.filter(|_| app.mode == Mode::Direct || app.group() || app.owner() || app.moderator()) {
+        banner = banner.push(pick_list(SPANS.to_vec(), SPANS.iter().find(|s| s.seconds == seconds).cloned(), |span: Span| Msg::Disappear(span.seconds)).text_size(12).padding([2, 6]).style(t::select()).menu_style(t::menu()));
+    }
     if app.mode == Mode::Direct {
         banner = banner.push(h_space(6.0)).push(button(row![text("How it works").size(13).color(rgb(0xd0d7dc)), t::icon(Icon::ArrowUpRight, 12.0, rgb(0xd0d7dc))].spacing(5).align_y(Vertical::Center)).padding(0).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::OpenPanel(Some(Panel::Privacy))));
     }
@@ -824,7 +873,7 @@ fn invite_card<'a>(app: &'a App, token: String) -> E<'a> {
 
 fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
     let reactions = crate::chat::reactions(&app.thread.messages, app.now);
-    let visible: Vec<&crate::chat::Message> = app.thread.messages.iter().filter(|m| m.reaction.is_none() && m.live(app.now) && (!app.thread.pins || m.pinned)).collect();
+    let visible: Vec<&crate::chat::Message> = app.thread.messages.iter().filter(|m| m.reaction.is_none() && !app.blocked(&m.sender) && m.live(app.now) && (!app.thread.pins || m.pinned)).collect();
     let mut out = Vec::new();
     if app.thread.has_more {
         let label = if app.thread.loading_older { "Decrypting older messages..." } else if app.thread.pins { "Load older pinned messages" } else { "Load older messages" };
@@ -844,6 +893,7 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
         let mut meta = Row::new().spacing(10).align_y(Vertical::Center).push(text(sender_name.clone()).size(15).font(t::semibold()).color(t::TEXT));
         if message.sender == me { meta = meta.push(container(text(t::tracked("YOU")).size(10).color(rgb(0xd0d7dc))).padding([1, 4]).style(t::panel(rgb(0x2a313a), rgb(0x2a313a), 3.0))); }
         meta = meta.push(text(if community { message.date_time() } else { message.time() }).size(12).color(rgb(0x74808b)));
+        if message.edited { meta = meta.push(text("(edited)").size(11).color(rgb(0x8a959e))); }
         if message.pinned { meta = meta.push(lead_icon(Icon::Pin, "Pinned", rgb(0xd0d7dc), 11.0, 12.0, 4.0)); }
         let mut content = Column::new().width(FILL).push(container(meta).padding(Padding { bottom: 7.0, ..Padding::ZERO }));
         if let Some(target) = &message.reply_to {
@@ -866,7 +916,8 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
         }
         let invite = if message.unreadable || message.missed_call || message.file.is_some() { None } else { crate::api::find_invite(&message.text) };
         if !message.missed_call && message.file.is_none() && !invite.as_ref().is_some_and(|(_, only)| *only) {
-            content = content.push(body(message.text.as_str(), 16.0, if message.unreadable { rgb(0x828d96) } else { rgb(0xb8bec2) }, 1.8).wrapping(text::Wrapping::WordOrGlyph));
+            let names: Vec<&str> = if community { app.community.iter().flat_map(|c| c.member_details.iter()).map(|m| m.name.as_str()).collect() } else { Vec::new() };
+            content = content.push(message_body(message.text.as_str(), message.unreadable, &names));
         }
         if let Some((token, _)) = invite { content = content.push(invite_card(app, token)); }
         if !app.thread.pins {
@@ -884,17 +935,53 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
             bar = bar.push(button(t::icon(Icon::SmilePlus, 14.0, rgb(0xa3abb1))).padding([3, 7]).style(t::reaction(false)).on_press_maybe((!message.unreadable).then(|| Msg::Picker(Some(message.id.clone())))));
             content = content.push(container(bar).padding(Padding { top: 5.0, ..Padding::ZERO }));
         }
-        let row_view = container(row![avatar(&sender_name, 0, None, 35.0), content, h_space(if message.sender == me { 92.0 } else { 57.0 })].spacing(13)).padding([14, 11]).width(FILL)
+        let who = if message.sender == me { own_face(app) } else if community { app.member(&message.sender).map_or_else(|| face_of(&message.sender, None), person_face) } else { app.selected_peer().map_or_else(|| face_of(&message.sender, None), person_face) };
+        let row_view = container(row![avatar(who, 0, None, 35.0), content, h_space(if message.sender == me { 92.0 } else { 57.0 })].spacing(13)).padding([14, 11]).width(FILL)
             .style(if message.pinned { t::fill(rgba(0xd0d7dc05)) } else { t::fill(Color::TRANSPARENT) });
         let mut tools = Row::new().spacing(2);
         let tool = |icon: Icon, on: Option<Msg>| -> E { button(t::icon(icon, 14.0, rgb(0xd0d7dc))).padding(4).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press_maybe(on).into() };
         tools = tools.push(tool(Icon::Reply, (!message.unreadable).then(|| Msg::Reply(Some(message.id.clone())))));
-        if message.sender == me { tools = tools.push(tool(Icon::Trash, Some(Msg::AskDelete(Some(message.id.clone()))))); }
+        if message.sender == me && message.file.is_none() && !message.missed_call && !message.unreadable { tools = tools.push(tool(Icon::Pencil, Some(Msg::StartEdit(message.id.clone())))); }
+        if message.sender == me || (community && app.may("delete")) { tools = tools.push(tool(Icon::Trash, Some(Msg::AskDelete(Some(message.id.clone()))))); }
         tools = tools.push(tool(Icon::Pin, Some(Msg::Pin(message.id.clone()))));
         let overlay = container(tools).width(FILL).align_x(Horizontal::Right).padding([14, 11]);
         out.push(container(hover(container(row_view).style(|_| container::Style { border: t::border(Color::TRANSPARENT, 0.0, 6.0), ..Default::default() }), overlay)).padding(Padding { bottom: 4.0, left: -11.0, right: -11.0, top: 0.0 }).into());
     }
     out
+}
+
+fn message_body<'a>(value: &'a str, unreadable: bool, names: &[&str]) -> E<'a> {
+    let color = if unreadable { rgb(0x828d96) } else { rgb(0xb8bec2) };
+    let parts = mention_parts(value, names);
+    if parts.len() == 1 && !parts[0].1 { return body(value, 16.0, color, 1.8).wrapping(text::Wrapping::WordOrGlyph).into(); }
+    let spans: Vec<text::Span<'a, (), iced::Font>> = parts.into_iter().map(|(part, named)| {
+        let span = text::Span::new(part).color(if named { rgb(0x70eeff) } else { color });
+        if named { span.background(rgb(0x163447)).border(t::border(Color::TRANSPARENT, 0.0, 4.0)) } else { span }
+    }).collect();
+    iced::widget::text::Rich::<'a, (), Msg>::with_spans(spans).size(16).font(t::REGULAR).line_height(LineHeight::Relative(1.8)).wrapping(text::Wrapping::WordOrGlyph).into()
+}
+
+/// Splits text around "@name" and "@everyone", keeping the original spelling.
+fn mention_parts(value: &str, names: &[&str]) -> Vec<(String, bool)> {
+    let mut wanted: Vec<String> = names.iter().map(|name| format!("@{}", name.to_lowercase())).collect();
+    wanted.push("@everyone".into());
+    wanted.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    let (mut parts, mut plain, mut at) = (Vec::new(), String::new(), 0);
+    while at < value.len() {
+        let rest = &value[at..];
+        let hit = rest.starts_with('@').then(|| wanted.iter().find_map(|name| rest.get(..name.len()).filter(|part| part.to_lowercase() == *name))).flatten();
+        if let Some(part) = hit {
+            if !plain.is_empty() { parts.push((std::mem::take(&mut plain), false)); }
+            parts.push((part.to_owned(), true));
+            at += part.len();
+        } else {
+            let next = rest.chars().next().unwrap_or_default();
+            plain.push(next);
+            at += next.len_utf8();
+        }
+    }
+    if !plain.is_empty() || parts.is_empty() { parts.push((plain, false)); }
+    parts
 }
 
 const EMOJI: [&str; 92] = ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","🙂","😉","😍","🥰","😘","😋","😜","🤪","😎","🤩","🥳","😏","😒","😔","😢","😭","😤","😡","🤯","😳","🥺","😱","🤔","🤗","🤫","🙄","😴","🤒","🤮","🤠","👻","💀","👽","🤖","💩","👍","👎","👏","🙌","🙏","💪","🤝","👋","🤞","🤘","👌","👀","🧠","❤","🧡","💛","💚","💙","💜","🖤","💔","💯","🔥","✨","⭐","🎉","🎊","🎁","🎂","🍕","🍔","🍟","🍺","☕","🎮","🎧","🎵","⚽","🏆","🚀","💡","💻","📱","💰","⏰","✅","❌","❓"];
@@ -908,6 +995,21 @@ fn composer<'a>(app: &'a App, placeholder: String, enabled: bool, hint_left: Str
         let quoted = app.thread.messages.iter().find(|m| &m.id == reply).map(|m| m.text.clone()).unwrap_or_default();
         area = area.push(container(row![text(format!("Replying to: {quoted}")).size(14).color(rgb(0xd0d7dc)).wrapping(text::Wrapping::None).width(FILL), icon_btn(Icon::X, 16.0, Some(Msg::Reply(None)), false)].spacing(8).align_y(Vertical::Center))
             .padding([6, 10]).style(|_| container::Style { background: Some(rgb(0x272e37).into()), border: iced::Border { radius: iced::border::Radius { top_left: 8.0, top_right: 8.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() }));
+    }
+    if app.editing.is_some() {
+        area = area.push(container(row![text("Editing your message").size(14).color(rgb(0xd0d7dc)).width(FILL), icon_btn(Icon::X, 16.0, Some(Msg::CancelEdit), false)].spacing(8).align_y(Vertical::Center))
+            .padding([6, 10]).style(|_| container::Style { background: Some(rgb(0x272e37).into()), border: iced::Border { radius: iced::border::Radius { top_left: 8.0, top_right: 8.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() }));
+    }
+    if let (Mode::Community, Some(query), Some(community)) = (app.mode, app.typing_query(), &app.community) {
+        let needle = query.to_lowercase();
+        let mut picker = Column::new().spacing(2);
+        if (app.owner() || app.moderator()) && "everyone".starts_with(&needle) {
+            picker = picker.push(button(text("@everyone").size(14).color(rgb(0xd0d7dc))).width(FILL).padding([5, 8]).style(t::person_row(false)).on_press(Msg::InsertMention("everyone".into())));
+        }
+        for member in community.member_details.iter().filter(|m| m.id != app.me() && m.name.to_lowercase().contains(&needle)).take(6) {
+            picker = picker.push(button(row![avatar(person_face(member), 0, None, 24.0), text(format!("@{}", member.name)).size(14).color(rgb(0xd0d7dc))].spacing(8).align_y(Vertical::Center)).width(FILL).padding([5, 8]).style(t::person_row(false)).on_press(Msg::InsertMention(member.name.clone())));
+        }
+        area = area.push(container(container(picker).padding(6).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x323b45), 9.0))).padding(Padding { bottom: 4.0, ..Padding::ZERO }));
     }
     let mut editor = text_editor(&app.composer).placeholder(placeholder).size(15).padding(0).height(Length::Shrink).max_height(120.0)
         .line_height(LineHeight::Relative(1.6)).style(t::composer_editor())
@@ -935,8 +1037,9 @@ fn composer<'a>(app: &'a App, placeholder: String, enabled: bool, hint_left: Str
         .padding([13, 15]).style(move |_| container::Style {
             background: Some(rgb(0x21272d).into()), border: t::border(if focused { rgb(0x7e8a94) } else { rgb(0x333c47) }, 1.0, 10.0), ..Default::default()
         }));
+    let hint: E<'a> = match app.typing_line() { Some(line) => text(line).size(11).color(rgb(0x74808b)).into(), None => lead_icon(Icon::LockKeyhole, hint_left, rgb(0x74808b), 11.0, 11.0, 5.0).into() };
     area = area.push(container(row![
-        lead_icon(Icon::LockKeyhole, hint_left, rgb(0x74808b), 11.0, 11.0, 5.0), grow(),
+        hint, grow(),
         text("Enter to send · Shift + Enter for a new line").size(11).color(rgb(0x74808b)),
     ]).padding([10, 1]));
     container(area).padding(Padding { top: 18.0, bottom: 12.0, left: 33.0, right: 33.0 }).into()
@@ -951,7 +1054,7 @@ fn direct_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
     let first = peer.name.split_whitespace().next().unwrap_or_default().to_owned();
     let changed = app.trust_changed(peer);
     let start = column![
-        container(tile(&peer.name, rgb(0x333c46), rgb(0xd0d7dc), Some(rgb(0x74808b)), 69.0, 23.0, 24.0, None, t::presence_color("online"))).padding(Padding { bottom: 18.0, ..Padding::ZERO }),
+        container(tile(person_face(peer), rgb(0x333c46), rgb(0xd0d7dc), Some(rgb(0x74808b)), 69.0, 23.0, 24.0, None, t::presence_color("online"))).padding(Padding { bottom: 18.0, ..Padding::ZERO }),
         container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("This is your space with {first}.") }).size(24).font(t::bold()).color(rgb(0xeef0f1))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
         body(if app.thread.pins { "Pinned messages stay until you unpin them." } else { "Say something. Make a plan. Stay a while." }, 15.0, rgb(0x838e96), 1.7),
         container(lead_icon(Icon::LockKeyhole, if changed { "Contact key changed. Verify it in conversation details before sending.".to_string() } else if peer.encryption_key.is_some() { "Encrypted on your device before sending".to_string() } else { format!("{first} hasn't set up encryption yet. They need to sign in to Sonar once before you can message them.") }, if changed { rgb(0xe3b8a8) } else { rgb(0xd0d7dc) }, 12.0, 12.0, 6.0)).padding(Padding { top: 17.0, ..Padding::ZERO }),
@@ -1001,20 +1104,22 @@ fn members_panel(app: &App) -> E<'_> {
     for (index, member) in community.member_details.iter().enumerate() {
         let is_mod = community.moderators.contains(&member.id);
         let role = if Some(&member.id) == community.owner_id.as_ref() { "Owner" } else if is_mod { "Moderator" } else { "Member" };
-        let manageable = (owner && member.id != me) || (moderator && member.id != me && Some(&member.id) != community.owner_id.as_ref() && !is_mod);
+        let manageable = community.kind != "group" && ((owner && member.id != me) || (moderator && member.id != me && Some(&member.id) != community.owner_id.as_ref() && !is_mod && app.may("remove")));
         let trailing: E = if manageable {
             let mut choices = vec![Choice { label: "Remove member", action: "remove" }, Choice { label: "Ban member", action: "ban" }];
+            if owner && is_mod { choices.push(Choice { label: "Moderator permissions", action: "permissions" }); }
             if owner {
                 choices.push(if is_mod { Choice { label: "Remove moderator role", action: "demote" } } else { Choice { label: "Make moderator", action: "promote" } });
                 choices.push(Choice { label: "Make owner", action: "transfer" });
             }
             let member = member.clone();
-            pick_list(choices, None::<Choice>, move |choice| Msg::AskConfirm(Some(Confirm { action: choice.action.into(), member: Some(member.clone()), channel: None })))
+            pick_list(choices, None::<Choice>, move |choice| if choice.action == "permissions" { Msg::OpenPermissions(member.clone()) } else { Msg::AskConfirm(Some(Confirm { action: choice.action.into(), member: Some(member.clone()), channel: None })) })
                 .placeholder("Manage").text_size(11).padding([5, 4]).width(84).style(t::select()).menu_style(t::menu()).into()
         } else { t::icon(Icon::LockKeyhole, 11.0, rgb(0xd0d7dc)) };
         list = list.push(container(row![
-            avatar_status(&member.name, index, app.online.contains(&member.id).then_some(rgb(0x171b1f)), app.status_color(&member.id), 30.0),
+            avatar_status(person_face(member), index, app.online.contains(&member.id).then_some(rgb(0x171b1f)), app.status_color(&member.id), 30.0),
             column![text(member.name.clone()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).color(rgb(0x78848e))].spacing(4).width(FILL),
+            if member.id == me { E::from(space()) } else { icon_btn(Icon::Ban, 14.0, Some(Msg::AskConfirm(Some(Confirm { action: "block".into(), member: Some(member.clone()), channel: None }))), false) },
             trailing,
         ].spacing(8).align_y(Vertical::Center)).padding([10, 4]));
     }
@@ -1035,12 +1140,41 @@ fn privacy_item<'a>(icon: Icon, title: &'a str, note: &'a str) -> E<'a> {
 fn panel_view(app: &App, panel: Panel) -> E<'_> {
     let close = Msg::OpenPanel(None);
     let content: E = match panel {
+        Panel::Search => {
+            let mut list = Column::new().spacing(6).padding(Padding { top: 16.0, ..Padding::ZERO });
+            if let Some(results) = &app.search_results {
+                if results.is_empty() { list = list.push(body("Nothing found in the last 7 days or your pinned messages.", 15.0, rgb(0x929ca3), 1.8)); }
+                for message in results {
+                    let sender = if message.sender == app.me() { "You".to_owned() } else if app.mode == Mode::Community { app.member(&message.sender).map_or_else(|| "Member".to_owned(), |p| p.name.clone()) } else { app.selected_peer().map_or_else(String::new, |p| p.name.clone()) };
+                    list = list.push(container(column![text(format!("{sender} · {}", message.date_time())).size(12).color(rgb(0x8a959e)), body(message.text.clone(), 15.0, rgb(0xb8bec2), 1.6).wrapping(text::Wrapping::WordOrGlyph)].spacing(3)).padding([8, 10]).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x21272e), 8.0)));
+                }
+            }
+            let can = !app.search_busy && !app.search_query.trim().is_empty();
+            column![modal_header(Icon::Search, 28.0, close.clone()), modal_title("Find it again."),
+                body("Searched on your device. The server never sees what you look for.", 15.0, rgb(0x9099a0), 1.8),
+                container(row![container(text_input("Search this conversation", &app.search_query).on_input(Msg::SearchQuery).on_submit(Msg::SearchRun).size(14).padding(0).style(t::bare_input())).padding([9, 10]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0)), button(text(if app.search_busy { "Searching..." } else { "Search" }).size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 12]).style(t::primary()).on_press_maybe(can.then_some(Msg::SearchRun))].spacing(10).align_y(Vertical::Center)).padding(Padding { top: 20.0, ..Padding::ZERO }),
+                list].into()
+        }
+        Panel::Group => {
+            let mut list = Column::new().spacing(8).padding(Padding { top: 16.0, bottom: 18.0, ..Padding::ZERO });
+            for person in &app.people {
+                let id = person.id.clone();
+                list = list.push(row![checkbox_row(&person.name, app.group_picks.contains(&person.id), move |on| Msg::GroupPick(id.clone(), on))].align_y(Vertical::Center));
+            }
+            if app.people.is_empty() { list = list.push(body("Add some friends first.", 15.0, rgb(0x929ca3), 1.8)); }
+            column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Bring a few friends together."),
+                body("Pick 2 to 9 friends. Group chats are encrypted for each person and have a voice room.", 15.0, rgb(0x9099a0), 1.8),
+                container(field("Group name (optional)", dialog_input("", &app.group_name, Msg::GroupName, false), 8.0, 13.0, rgb(0xd0d7dc))).padding(Padding { top: 18.0, ..Padding::ZERO }),
+                list, primary("Create group", Some(Icon::Check), (app.group_picks.len() >= 2).then_some(Msg::CreateGroup))].into()
+        }
         Panel::People => {
             let mut people = Column::new().spacing(6).padding(Padding { top: 20.0, ..Padding::ZERO });
             let section = |label: &'static str| -> E<'_> { container(t::eyebrow(label, 10.0, t::EYEBROW)).padding(Padding { top: 12.0, bottom: 2.0, ..Padding::ZERO }).into() };
             let small = |label: &'static str, primary: bool, on: Msg| -> E<'_> { button(text(label).size(13).font(t::semibold()).color(if primary { rgb(0x1e2329) } else { rgb(0xd0d7dc) })).padding([6, 11]).style(if primary { t::primary() } else { t::secondary() }).on_press(on).into() };
             let request = |person: &crate::api::Person, index: usize, actions: Vec<E<'static>>| -> E<'static> {
-                let mut line = row![avatar(&person.name, index, None, 35.0), column![text(person.name.clone()).size(15).font(t::semibold()).color(t::TEXT), text(format!("@{}", person.username)).size(13).color(rgb(0x78848e))].spacing(3).width(FILL)].spacing(11).align_y(Vertical::Center);
+                let mut details = column![text(person.name.clone()).size(15).font(t::semibold()).color(t::TEXT), text(format!("@{}", person.username)).size(13).color(rgb(0x78848e))].spacing(3).width(FILL);
+                if let Some(note) = app.friend_notes.get(&person.id) { details = details.push(text(format!("\"{note}\"")).size(12).color(rgb(0xa9d8ee)).wrapping(text::Wrapping::WordOrGlyph)); }
+                let mut line = row![avatar(person_face(person), index, None, 35.0), details].spacing(11).align_y(Vertical::Center);
                 for action in actions { line = line.push(action); }
                 container(line).padding([8, 10]).into()
             };
@@ -1054,12 +1188,24 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
             }
             if !app.people.is_empty() { people = people.push(section("YOUR FRIENDS")); }
             for (index, person) in app.people.iter().enumerate() {
-                people = people.push(person_row(&person.name, &format!("@{}", person.username), index, app.avatar_dot(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x98a1a7))], Some(Msg::OpenPeer(Some(person.id.clone())))));
+                let mut folders: Vec<String> = vec![NO_FOLDER.to_owned()];
+                folders.extend(app.preferences.folders.iter().map(|f| f.name.clone()));
+                if !app.folder_name.trim().is_empty() { folders.push(NEW_FOLDER.to_owned()); }
+                let current = app.preferences.folders.iter().find(|f| f.people.contains(&person.id)).map_or(NO_FOLDER.to_owned(), |f| f.name.clone());
+                let (id, pin_id, block) = (person.id.clone(), person.id.clone(), person.clone());
+                people = people.push(row![
+                    container(person_row(person_face(person), &person.name, &format!("@{}", person.username), index, app.avatar_dot(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x98a1a7))], Some(Msg::OpenPeer(Some(person.id.clone()))))).width(FILL),
+                    icon_btn(Icon::Pin, 15.0, Some(Msg::TogglePinPerson(pin_id)), app.preferences.pinned_people.contains(&person.id)),
+                    pick_list(folders, Some(current), move |name: String| Msg::MoveToFolder(id.clone(), name)).text_size(11).padding([5, 4]).width(92).style(t::select()).menu_style(t::menu()),
+                    icon_btn(Icon::Ban, 15.0, Some(Msg::AskConfirm(Some(Confirm { action: "block".into(), member: Some(block), channel: None }))), false),
+                ].spacing(4).align_y(Vertical::Center));
             }
             if app.people.is_empty() && app.friend_requests.incoming.is_empty() && app.friend_requests.outgoing.is_empty() { people = people.push(body("No friends yet. Send a request to get started.", 15.0, rgb(0x929ca3), 1.8)); }
             column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Your people, a little closer."),
                 body("Add someone by their username. Once they accept, you can message and call each other.", 15.0, rgb(0x9099a0), 1.8),
                 container(row![container(row![t::icon(Icon::Search, 15.0, rgb(0x74808b)), text_input("Their username", &app.people_query).on_input(Msg::PeopleQuery).on_submit(Msg::SendFriendRequest).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0)), button(text("Send request").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 12]).style(t::primary()).on_press_maybe((!app.people_query.trim().is_empty()).then_some(Msg::SendFriendRequest))].spacing(10).align_y(Vertical::Center)).padding(Padding { top: 20.0, ..Padding::ZERO }),
+                container(text_input("Add a short note, like where you met (optional)", &app.friend_note).on_input(Msg::FriendNote).size(14).padding([9, 12]).style(t::card_input())).padding(Padding { top: 8.0, ..Padding::ZERO }),
+                container(text_input("Name a new folder, then choose it on a friend", &app.folder_name).on_input(Msg::FolderName).size(13).padding([7, 12]).style(t::card_input())).padding(Padding { top: 8.0, ..Padding::ZERO }),
                 scroll_area(people).height(Length::Shrink)].into()
         }
         Panel::Privacy => {
@@ -1127,6 +1273,26 @@ fn dialog_view(app: &App) -> E<'_> {
                 None => content = content.push(notice(if app.busy { "Creating your invite..." } else { "Unable to create an invite. Close and try again." })),
             }
         }
+        Dialog::Activity => {
+            content = content.push(modal_title("Who joined or left")).push(body("The latest 50 changes to this community's members.", 15.0, rgb(0x9099a0), 1.8));
+            content = match &app.activity {
+                None => content.push(notice("Loading...")),
+                Some(rows) if rows.is_empty() => content.push(notice("Nothing yet.")),
+                Some(rows) => rows.iter().fold(content, |content, row| content.push(container(iced::widget::row![
+                    text(row.name.clone()).size(15).font(t::semibold()).color(t::TEXT),
+                    text(row.action.clone()).size(15).color(rgb(0xb8bec2)).width(FILL),
+                    text(day(&row.at)).size(13).color(rgb(0x78848e)),
+                ].spacing(6).align_y(Vertical::Center)).padding([8, 0]))),
+            };
+        }
+        Dialog::Permissions => {
+            let name = app.permissions_for.as_ref().map_or_else(String::new, |m| m.name.clone());
+            content = content.push(modal_title(format!("What {name} can do"))).push(body("Moderators can do all of this until you switch something off.", 15.0, rgb(0x9099a0), 1.8)).push(v_space(14.0));
+            for (value, label) in [("pin", "Pin other people's messages"), ("delete", "Delete other people's messages"), ("remove", "Remove and ban members"), ("lock", "Lock voice rooms")] {
+                content = content.push(container(checkbox_row(label, !app.denied.iter().any(|d| d == value), move |on| Msg::Deny(value, on))).padding([5, 0]));
+            }
+            content = content.push(v_space(14.0)).push(primary("Save permissions", None, Some(Msg::SavePermissions)));
+        }
         Dialog::Bans => {
             content = content.push(modal_title("Community bans")).push(body("Banned accounts cannot use an invite to rejoin. Removing a ban revokes the current invite.", 15.0, rgb(0x9099a0), 1.8));
             content = match &app.bans {
@@ -1181,6 +1347,8 @@ fn confirm_view<'a>(app: &'a App, confirm: &'a Confirm) -> E<'a> {
     let member = confirm.member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
     let channel = confirm.channel.as_ref().map(|c| c.name.clone()).unwrap_or_default();
     let (title, note, label) = match confirm.action.as_str() {
+        "call" => (format!("Call {member}?"), "They will hear it ring right away.", "Call"),
+        "block" => (format!("Block {member}?"), "They cannot message, call or send you requests, and their server messages are hidden completely. They are not told.", "Block"),
         "delete-community" => (format!("Delete {community}?"), "This permanently deletes the community, its channels and stored messages, including pins, for everyone. Active voice rooms close. Copies and backups may remain.", "Delete community permanently"),
         "delete-channel" => (format!("Delete {channel}?"), "This permanently deletes the channel and its stored messages, including pins. Anyone in its voice room will be disconnected. Copies and backups may remain.", "Delete channel"),
         "leave" => (format!("Leave {community}?"), "You will lose access to channels and future messages. You will need a valid invite to rejoin. Messages you sent remain subject to the community retention rules.", "Leave community"),
@@ -1192,8 +1360,9 @@ fn confirm_view<'a>(app: &'a App, confirm: &'a Confirm) -> E<'a> {
         _ => (format!("Make {member} the owner?"), "They will control invites, channels, and membership. You will remain a member and lose owner controls. The current invite will be revoked.", "Transfer ownership"),
     };
     let label = if app.busy { "Updating membership..." } else { label };
+    let friendly = confirm.action == "call";
     let go = (!app.busy).then_some(Msg::ApplyConfirm);
-    let confirm_button = if matches!(confirm.action.as_str(), "transfer" | "promote") {
+    let confirm_button = if friendly || matches!(confirm.action.as_str(), "transfer" | "promote") {
         button(container(text(label).size(15).font(t::semibold()).color(rgb(0x1e2329))).center_x(FILL)).width(FILL).padding([13, 18]).style(t::primary()).on_press_maybe(go)
     } else {
         button(container(text(label).size(15).font(t::semibold()).color(Color::WHITE)).center_x(FILL)).width(FILL).padding([13, 18]).style(t::danger()).on_press_maybe(go)
@@ -1256,7 +1425,7 @@ fn checkbox_row<'a>(label: &'a str, checked: bool, on: impl Fn(bool) -> Msg + 'a
 fn settings_view(app: &App) -> E<'_> {
     let Some(session) = &app.session else { return space().into() };
     let close = Msg::OpenSettings(false);
-    let tabs = [(Tab::Profile, Icon::UserRound, "Your profile"), (Tab::Security, Icon::KeyRound, "Password & passkeys"), (Tab::Privacy, Icon::ShieldCheck, "Privacy & device"), (Tab::Voice, Icon::Headphones, "Voice & audio")];
+    let tabs = [(Tab::Profile, Icon::UserRound, "Your profile"), (Tab::Security, Icon::KeyRound, "Password & passkeys"), (Tab::Privacy, Icon::ShieldCheck, "Privacy & device"), (Tab::Voice, Icon::Headphones, "Voice & audio"), (Tab::Alerts, Icon::Bell, "Alerts & privacy")];
     let nav = tabs.iter().fold(Column::new(), |nav, (tab, icon, label)| {
         let selected = app.tab == *tab;
         let color = if selected { rgb(0xd0d7dc) } else { rgb(0x98a1a7) };
@@ -1265,7 +1434,7 @@ fn settings_view(app: &App) -> E<'_> {
     let navigation = container(column![
         t::eyebrow("YOUR SONAR", 11.0, t::EYEBROW),
         container(text("Make it yours.").size(23).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 9.0, bottom: 24.0, ..Padding::ZERO }),
-        tile(&session.account.full_name, rgb(0x39434e), rgb(0xd0d7dc), Some(rgb(0x74808b)), 65.0, 22.0, 24.0, None, t::presence_color("online")),
+        tile(own_face(app), rgb(0x39434e), rgb(0xd0d7dc), Some(rgb(0x74808b)), 65.0, 22.0, 24.0, None, t::presence_color("online")),
         container(text(session.account.full_name.clone()).size(16).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 12.0, ..Padding::ZERO }),
         container(text(format!("@{}", session.account.username)).size(13).color(rgb(0xd0d7dc))).padding(Padding { top: 5.0, ..Padding::ZERO }),
         container(text(session.account.email.clone()).size(13).color(rgb(0x7f8a94))).padding(Padding { top: 7.0, bottom: 24.0, ..Padding::ZERO }),
@@ -1279,7 +1448,51 @@ fn settings_view(app: &App) -> E<'_> {
         column![t::eyebrow(eyebrow, 11.0, t::EYEBROW), container(text(title).size(24).font(t::semibold()).color(t::TEXT)).padding([10, 0]), body(note, 15.0, rgb(0x9ba4aa), 1.8)]
     };
     let content: Column<Msg> = match app.tab {
+        Tab::Alerts => {
+            let volume = app.settings.alert_volume.unwrap_or(0.8);
+            let mut words = Row::new().spacing(6);
+            for word in &app.settings.keywords { words = words.push(button(text(format!("{word} ×")).size(13).color(rgb(0xd0d7dc))).padding([5, 9]).style(t::secondary()).on_press(Msg::RemoveKeyword(word.clone()))); }
+            let mut blocked = Column::new().spacing(6);
+            if app.preferences.blocked.is_empty() { blocked = blocked.push(text("Nobody is blocked.").size(13).color(rgb(0x78848f))); }
+            for person in &app.preferences.blocked {
+                blocked = blocked.push(row![avatar(person_face(person), 0, None, 35.0), column![text(person.name.clone()).size(15).font(t::semibold()).color(t::TEXT), text(format!("@{}", person.username)).size(13).color(rgb(0x78848e))].spacing(3).width(FILL), secondary("Unblock", None, Some(Msg::Unblock(person.id.clone())))].spacing(11).align_y(Vertical::Center));
+            }
+            let title = |value: &'static str| -> E<'_> { container(card_title(value)).padding(Padding { top: 24.0, bottom: 8.0, ..Padding::ZERO }).into() };
+            heading("ONLY WHAT MATTERS", "Alerts & privacy", "Choose what gets your attention, and who can reach you.")
+                .push(title("Alert volume"))
+                .push(row![slider(0.0..=1.0, volume, Msg::AlertVolume).step(0.05_f32), text(format!("{}%", (volume * 100.0).round() as u32)).size(13).color(rgb(0xd0d7dc))].spacing(12).align_y(Vertical::Center))
+                .push(small_note("Message sounds and the ringtone. Separate from call volume."))
+                .push(v_space(18.0))
+                .push(checkbox_row("Ask before starting a call", app.settings.confirm_calls, Msg::ConfirmCalls))
+                .push(v_space(10.0))
+                .push(checkbox_row("Turn off typing indicators (yours and everyone else's)", app.preferences.typing_hidden, Msg::TypingHidden))
+                .push(v_space(10.0))
+                .push(checkbox_row("Quit Sonar when I close the window, instead of keeping it in the tray", app.settings.quit_on_close, Msg::QuitOnClose))
+                .push(v_space(10.0))
+                .push(checkbox_row("Start Sonar with Windows", app.settings.start_with_windows, Msg::StartWithWindows))
+                .push(title("Keyword alerts"))
+                .push(small_note("Alert me when these words appear, even in muted servers. Matched on this device, so the server never sees them."))
+                .push(container(row![text_input("Add a word", &app.keyword_input).on_input(Msg::KeywordInput).on_submit(Msg::AddKeyword).size(14).padding([9, 12]).style(t::card_input()), button(text("Add").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 12]).style(t::primary()).on_press_maybe((!app.keyword_input.trim().is_empty()).then_some(Msg::AddKeyword))].spacing(10).align_y(Vertical::Center)).padding([8, 0]))
+                .push(words.wrap())
+                .push(title("Blocked people"))
+                .push(small_note("They cannot message, call or send you requests, and their server messages are hidden completely. They are not told."))
+                .push(v_space(8.0))
+                .push(blocked)
+        }
         Tab::Profile => heading("A FAMILIAR FACE", "Your profile", "The name your people see in conversations and communities.")
+            .push({
+                let current = t::animal_index(session.account.id.as_deref().unwrap_or_default(), session.account.animal.as_deref());
+                let mut grid = Column::new().spacing(8);
+                for line in t::ANIMALS.chunks(8) {
+                    let mut cells = Row::new().spacing(8);
+                    for (name, icon) in line {
+                        let chosen = t::ANIMALS[current].0 == *name;
+                        cells = cells.push(button(container(t::icon(*icon, 30.0, if chosen { rgb(0xd7f3ff) } else { rgb(0xcfd4d7) })).center_x(44).center_y(44)).padding(0).width(44).height(44).style(if chosen { t::person_row(true) } else { t::secondary() }).on_press_maybe((!chosen && !app.busy).then_some(Msg::SetAnimal(name))));
+                    }
+                    grid = grid.push(cells);
+                }
+                container(grid).padding(Padding { top: 14.0, ..Padding::ZERO })
+            })
             .push(container(field("Display name", dialog_input("", &app.profile_name, Msg::ProfileName, false), 10.0, 13.0, rgb(0xd0d7dc))).padding([22, 0]))
             .push(field("Username", dialog_input("", &app.profile_username, Msg::ProfileUsername, false), 10.0, 13.0, rgb(0xd0d7dc)))
             .push(container(text("People can find you with this. Letters, numbers, dots and underscores.").size(12).color(rgb(0x78848f))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))

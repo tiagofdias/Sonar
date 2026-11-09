@@ -1,3 +1,4 @@
+import { usePreferencesStore } from "../store/usePreferencesStore";
 import { useEffect, useRef, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "./axios";
@@ -24,7 +25,7 @@ function useRingtone(level) {
     if (!level) return undefined;
     const player = new Audio("/sounds/ringtone.wav");
     player.loop = true;
-    player.volume = level;
+    player.volume = Math.min(1, level * (usePreferencesStore.getState().alertVolume / 0.8));
     const play = () => player.play().catch(() => {});
     // Browsers block sound on a page nobody has touched yet: retry on first input.
     const retry = () => { play(); stopRetry(); };

@@ -255,8 +255,22 @@ icons! {
     ArrowLeft => "arrow-left", AudioLines => "audio-lines", RotateCcw => "rotate-ccw", CircleCheck => "circle-check",
     CircleX => "circle-x", Server => "server", Refresh => "refresh-cw", UserMinus => "user-minus", Ban => "ban",
     Crown => "crown", Shield => "shield", Pencil => "pencil", Speaker => "speaker", Play => "play", Square => "square",
-    Eye => "eye", EyeOff => "eye-off", Info => "info",
+    Eye => "eye", EyeOff => "eye-off", Info => "info", Bell => "bell", BellOff => "bell-off",
+    Whale => "../../../frontend/public/animals/whale", Shark => "../../../frontend/public/animals/shark", Turtle => "../../../frontend/public/animals/turtle", Dolphin => "../../../frontend/public/animals/dolphin",
+    Octopus => "../../../frontend/public/animals/octopus", Jellyfish => "../../../frontend/public/animals/jellyfish", Seahorse => "../../../frontend/public/animals/seahorse", Crab => "../../../frontend/public/animals/crab",
+    Pufferfish => "../../../frontend/public/animals/pufferfish", Manta => "../../../frontend/public/animals/manta", Orca => "../../../frontend/public/animals/orca", Seal => "../../../frontend/public/animals/seal",
+    Squid => "../../../frontend/public/animals/squid", Starfish => "../../../frontend/public/animals/starfish", Clownfish => "../../../frontend/public/animals/clownfish", Lobster => "../../../frontend/public/animals/lobster",
 }
+
+// Keep this list and its order the same in frontend/src/lib/animals.js and backend/src/lib/animals.js.
+pub const ANIMALS: [(&str, Icon); 16] = [("whale", Icon::Whale), ("shark", Icon::Shark), ("turtle", Icon::Turtle), ("dolphin", Icon::Dolphin), ("octopus", Icon::Octopus), ("jellyfish", Icon::Jellyfish), ("seahorse", Icon::Seahorse), ("crab", Icon::Crab), ("pufferfish", Icon::Pufferfish), ("manta", Icon::Manta), ("orca", Icon::Orca), ("seal", Icon::Seal), ("squid", Icon::Squid), ("starfish", Icon::Starfish), ("clownfish", Icon::Clownfish), ("lobster", Icon::Lobster)];
+/// Someone who has not chosen always gets the same animal, on every device.
+pub fn animal_index(id: &str, chosen: Option<&str>) -> usize {
+    if let Some(position) = chosen.and_then(|name| ANIMALS.iter().position(|(item, _)| *item == name)) { return position; }
+    let tail = &id[id.len().saturating_sub(8)..];
+    u32::from_str_radix(tail, 16).unwrap_or(0) as usize % ANIMALS.len()
+}
+pub fn animal_icon(id: &str, chosen: Option<&str>) -> Icon { ANIMALS[animal_index(id, chosen)].1 }
 
 fn handle(icon: Icon) -> svg::Handle {
     use std::collections::HashMap;
@@ -294,4 +308,17 @@ pub fn avatar_colors(index: usize) -> (Color, Color) {
 pub fn initials(name: &str) -> String {
     let value: String = name.split_whitespace().filter_map(|part| part.chars().next()).take(2).collect::<String>().to_uppercase();
     if value.is_empty() { "?".into() } else { value }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn animals_match_the_web() {
+        assert_eq!(ANIMALS[animal_index("507f1f77bcf86cd799439011", Some("orca"))].0, "orca");
+        assert_eq!(animal_index("507f1f77bcf86cd799439011", None), 1);
+        assert_eq!(ANIMALS[animal_index("0000000000000000000000ff", None)].0, "lobster");
+        assert_eq!(ANIMALS[animal_index("507f1f77bcf86cd799439011", Some("dragon"))].0, ANIMALS[1].0);
+        assert_eq!(ANIMALS[animal_index("", None)].0, "whale");
+    }
 }

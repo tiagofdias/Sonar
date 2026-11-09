@@ -47,12 +47,19 @@ function InviteCard({ token, onOpen }) {
   );
 }
 
+const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function highlighted(text, names) {
+  if (!text.includes("@") || !names.length) return text;
+  const pattern = new RegExp(`(@(?:everyone|${names.map(escape).join("|")}))`, "gi");
+  return text.split(pattern).map((part, index) => (index % 2 ? <span className="mention" key={index}>{part}</span> : part));
+}
+
 // A message's text, with community invite links shown as a joinable card.
-export default function MessageText({ text, onOpenCommunity }) {
+export default function MessageText({ text, onOpenCommunity, names = [] }) {
   const invite = findInvite(text);
   return (
     <>
-      {!invite?.only && <p>{text}</p>}
+      {!invite?.only && <p>{highlighted(text, names)}</p>}
       {invite && <InviteCard token={invite.token} onOpen={onOpenCommunity} />}
     </>
   );

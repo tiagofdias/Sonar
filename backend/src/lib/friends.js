@@ -1,6 +1,11 @@
 import Friendship from "../models/friendship.model.js";
 import Message from "../models/message.model.js";
 
+export const DISAPPEAR_OPTIONS = [0, 3600, 86400];
+export const disappearingExpiry = (seconds) => (seconds ? { expiresAt: new Date(Date.now() + seconds * 1000) } : {});
+export const pairDisappearAfter = async (a, b) =>
+  (await Friendship.findOne({ pair: pairKey(a, b), status: "accepted" }).select("disappearAfter").lean())?.disappearAfter || 0;
+
 export const pairKey = (a, b) => [String(a), String(b)].sort().join(":");
 
 export const areFriends = async (a, b) =>

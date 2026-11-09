@@ -27,6 +27,8 @@ pub struct Message {
     pub missed_call: bool,
     pub file: Option<message_content::FileMeta>,
     pub unreadable: bool,
+    pub edited: bool,
+    pub mentions: Vec<String>,
 }
 
 pub fn timestamp(value: &str) -> Option<i64> {
@@ -63,12 +65,15 @@ pub fn open(key: &SecretKey, peer_key: Option<&str>, envelope: &MessageEnvelope,
         reaction: None,
         missed_call: false, file: None,
         unreadable: false,
+        edited: envelope.edited_at.is_some(),
+        mentions: Vec::new(),
     };
     let plain = (|| {
         if !trusted { return None; }
         let context = crypto::context(&envelope.sender_id, &envelope.receiver_id, envelope.channel_id.as_deref()).ok()?;
         crypto::decrypt(key, peer_key?, &Envelope { iv: envelope.iv.clone(), ciphertext: envelope.ciphertext.clone() }, &context).ok()
     })();
+    if let Some(value) = &plain { message.mentions = message_content::mentions(value); }
     match plain.map(|plain| message_content::decode(&plain)) {
         Some(Content::Text { text, reply_to }) => { message.text = text; message.reply_to = reply_to; }
         Some(Content::Reaction { target, emoji, action }) => message.reaction = Some(Reaction { target, emoji, action }),
@@ -117,7 +122,7 @@ mod tests {
     use super::*;
     fn message(id: &str, sender: &str, created: i64, reaction: Option<(&str, &str, &str)>) -> Message {
         Message { id: id.into(), sender: sender.into(), receiver: "r".into(), channel: None, created_at: String::new(), created, expires: Some(i64::MAX), pinned: false, text: String::new(), reply_to: None,
-            reaction: reaction.map(|(target, emoji, action)| Reaction { target: target.into(), emoji: emoji.into(), action: action.into() }), missed_call: false, file: None, unreadable: false }
+            reaction: reaction.map(|(target, emoji, action)| Reaction { target: target.into(), emoji: emoji.into(), action: action.into() }), missed_call: false, file: None, unreadable: false, edited: false, mentions: Vec::new() }
     }
     #[test]
     fn merge_orders_and_replaces_like_the_web() {

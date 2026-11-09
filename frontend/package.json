@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test src/lib/crypto.test.js src/lib/matrixVerificationInbox.test.js src/lib/history.test.js src/lib/audioOutput.test.js src/lib/voiceConfigRefresh.test.js src/lib/voiceRelayTest.test.js src/store/useUnreadStore.test.js src/lib/messageContent.test.js src/lib/reactions.test.js src/lib/offlineUnread.test.js src/lib/invites.test.js"
+    "test": "node --test src/lib/animals.test.js src/lib/mentions.test.js src/lib/crypto.test.js src/lib/matrixVerificationInbox.test.js src/lib/history.test.js src/lib/audioOutput.test.js src/lib/voiceConfigRefresh.test.js src/lib/voiceRelayTest.test.js src/store/useUnreadStore.test.js src/lib/messageContent.test.js src/lib/reactions.test.js src/lib/offlineUnread.test.js src/lib/invites.test.js"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.3.0",

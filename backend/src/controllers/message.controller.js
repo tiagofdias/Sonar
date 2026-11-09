@@ -3,7 +3,9 @@ import User from "../models/user.model.js";
 import Message, { WEEK } from "../models/message.model.js";
 import { io } from "../lib/socket.js";
 import { historyQuery, historyPage, pinUpdate } from "../lib/history.js";
-import { areFriends, friendIds } from "../lib/friends.js";
+import { areFriends, disappearingExpiry, pairDisappearAfter } from "../lib/friends.js";
+import Friendship from "../models/friendship.model.js";
+import { pushTo } from "../lib/push.js";
 const live = () => ({
   $or: [{ pinned: true }, { expiresAt: { $gt: new Date() } }],
 });
@@ -30,11 +32,10 @@ export const getUnreadCandidates = async (req, res) => {
 };
 export const getUsersForSidebar = async (req, res) => {
   try {
-    res.json(
-      await User.find({ _id: { $in: await friendIds(req.user._id) } }).select(
-        "fullName username profilePic encryptionKey",
-      ),
-    );
+    const rows = await Friendship.find({ users: req.user._id, status: "accepted" }).select("users disappearAfter").lean();
+    const after = new Map(rows.map((row) => [String(row.users.find((id) => String(id) !== String(req.user._id))), row.disappearAfter || 0]));
+    const people = await User.find({ _id: { $in: [...after.keys()] } }).select("fullName username profilePic encryptionKey animal").lean();
+    res.json(people.map((person) => ({ ...person, disappearAfter: after.get(String(person._id)) || 0 })));
   } catch {
     res.status(500).json({ message: "Could not load people" });
   }
@@ -104,13 +105,33 @@ export const sendMessage = async (req, res) => {
       ciphertext,
       iv,
       version,
+      ...disappearingExpiry(await pairDisappearAfter(req.user._id, recipient._id)),
     });
+    pushTo(recipient._id, "message", { sender: req.user._id });
     io.to(String(recipient._id))
       .to(String(req.user._id))
       .emit("newMessage", message);
     res.status(201).json(message);
   } catch {
     res.status(500).json({ message: "Message could not be sent" });
+  }
+};
+export const editMessage = async (req, res) => {
+  const { ciphertext, iv, version } = req.body;
+  if (version !== 1 || typeof ciphertext !== "string" || ciphertext.length < 24 || ciphertext.length > 24000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(ciphertext) ||
+      typeof iv !== "string" || !/^[A-Za-z0-9+/]{16}$/.test(iv) || !mongoose.isValidObjectId(req.params.id))
+    return res.status(400).json({ message: "Only encrypted message envelopes are accepted" });
+  try {
+    const message = await Message.findOneAndUpdate(
+      { _id: req.params.id, senderId: req.user._id, ...live() },
+      { $set: { ciphertext, iv, version, editedAt: new Date() } },
+      { new: true },
+    );
+    if (!message) return res.status(404).json({ message: "Message unavailable" });
+    io.to(String(message.senderId)).to(String(message.receiverId)).emit("messageUpdated", message);
+    res.json(message);
+  } catch {
+    res.status(500).json({ message: "Could not edit the message" });
   }
 };
 export const pinMessage = async (req, res) => {
@@ -120,6 +141,11 @@ export const pinMessage = async (req, res) => {
   )
     return res.status(400).json({ message: "Invalid pin request" });
   try {
+    if (req.body.pinned) {
+      const existing = await Message.findById(req.params.id).select("senderId receiverId").lean();
+      if (existing && await pairDisappearAfter(existing.senderId, existing.receiverId))
+        return res.status(409).json({ message: "Messages cannot be pinned while disappearing messages are on" });
+    }
     const message = await Message.findOneAndUpdate(
       {
         _id: req.params.id,

@@ -9,6 +9,9 @@ import { installCalls } from "./calls.js";
 import { installVoiceRooms } from "./voiceRooms.js";
 import { voiceRoomUsers } from "./voiceActivity.js";
 import { watchSocketSession } from "./socketSession.js";
+import { areFriends } from "./friends.js";
+import { connection } from "./push.js";
+import Community from "../models/community.model.js";
 const app = express();
 const server = http.createServer(app);
 export const allowedOrigins =
@@ -54,6 +57,8 @@ io.use(async (socket, next) => {
     next(new Error("Authentication required"));
   }
 });
+connection.isOnline = (id) => (io.sockets.adapter.rooms.get(String(id))?.size || 0) > 0;
+const objectId = (value) => typeof value === "string" && /^[a-f0-9]{24}$/i.test(value);
 // Each account's chosen status. "offline" hides a connected account from everyone.
 const chosenPresence = new Map();
 function broadcast() {
@@ -95,6 +100,22 @@ io.on("connection", (socket) => {
   broadcast();
   connectCalls(socket);
   connectVoiceRooms(socket);
+  // Who is typing is passed along and never stored.
+  let lastTyping = 0;
+  socket.on("typing", async (data) => {
+    const now = Date.now();
+    if (now - lastTyping < 1500) return;
+    lastTyping = now;
+    try {
+      if (objectId(data?.to)) {
+        if (await areFriends(socket.userId, data.to)) io.to(data.to).emit("typing", { from: socket.userId });
+      } else if (objectId(data?.communityId) && objectId(data?.channelId)) {
+        const community = await Community.findOne({ _id: data.communityId, members: socket.userId, "channels._id": data.channelId }).select("members").lean();
+        for (const member of community?.members || [])
+          if (String(member) !== socket.userId) io.to(String(member)).emit("typing", { from: socket.userId, communityId: data.communityId, channelId: data.channelId });
+      }
+    } catch { /* Typing is only a courtesy. */ }
+  });
   socket.on("disconnect", () => {
     broadcast();
   });

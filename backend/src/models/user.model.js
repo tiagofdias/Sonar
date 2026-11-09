@@ -31,6 +31,22 @@ const userSchema = new mongoose.Schema(
     },
     // Unique public handle; see lib/usernames.js.
     username: { type: String, unique: true, sparse: true },
+    // A sea animal the person chose. Without one, apps pick one from the account id.
+    animal: { type: String, default: null },
+    preferences: {
+      type: new mongoose.Schema(
+        {
+          mutedCommunities: [{ type: mongoose.Schema.Types.ObjectId }],
+          pinnedPeople: [{ type: mongoose.Schema.Types.ObjectId }],
+          folders: [{ _id: false, name: String, people: [{ type: mongoose.Schema.Types.ObjectId }] }],
+          typingHidden: { type: Boolean, default: false },
+        },
+        { _id: false },
+      ),
+      default: () => ({}),
+      select: false,
+    },
+    blocked: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }], default: [], select: false },
     presence: { type: String, enum: ["online", "away", "busy", "offline"], default: "online" },
     fullName: {
       type: String,

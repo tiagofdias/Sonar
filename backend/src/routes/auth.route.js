@@ -82,7 +82,7 @@ router.put("/encryption-key", protectRoute, async (req, res) => {
         : { _id: req.user._id, $or: [{ encryptionKey: null }, { encryptionKey: publicKey }] },
       { $set: { encryptionKey: publicKey, ...(parsed ? { keyBackup: parsed, recoveryVerifier: recoveryVerifier ?? null } : {}) } },
       { new: true },
-    ).select("_id fullName username presence email profilePic encryptionKey");
+    ).select("_id fullName username presence email profilePic encryptionKey animal");
     if (!user)
       return res.status(409).json({
         message:
@@ -126,7 +126,7 @@ router.post("/encryption-key/rotate", protectRoute, passwordRateLimit, async (re
       { _id: user._id, encryptionKey: user.encryptionKey ?? null },
       { $set: { encryptionKey: publicKey, keyBackup: parsed, recoveryVerifier: recoveryVerifier ?? null } },
       { new: true },
-    ).select("_id fullName username presence email profilePic encryptionKey");
+    ).select("_id fullName username presence email profilePic encryptionKey animal");
     if (!updated)
       return res.status(409).json({ message: "Your encryption key changed on another device. Sign in again." });
     res.json(updated);
@@ -179,12 +179,12 @@ router.post("/recover", loginRateLimit, async (req, res) => {
       { _id: user._id, password: user.password },
       { $set: { password }, $inc: { sessionVersion: 1 } },
       { new: true },
-    ).select("_id fullName username presence email profilePic encryptionKey sessionVersion");
+    ).select("_id fullName username presence email profilePic encryptionKey animal sessionVersion");
     if (!changed) return res.status(409).json({ message: "Please try again." });
     io.to(String(changed._id)).emit("sessionRevoked");
     io.in(String(changed._id)).disconnectSockets(true);
     await generateToken(changed._id, res, changed.sessionVersion || 0);
-    res.json({ _id: changed._id, fullName: changed.fullName, username: changed.username, presence: changed.presence, email: changed.email, profilePic: changed.profilePic, encryptionKey: changed.encryptionKey });
+    res.json({ _id: changed._id, fullName: changed.fullName, username: changed.username, presence: changed.presence, email: changed.email, profilePic: changed.profilePic, animal: changed.animal || null, encryptionKey: changed.encryptionKey });
   } catch {
     res.status(503).json({ message: "Could not reset the password" });
   }

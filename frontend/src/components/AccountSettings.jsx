@@ -1,4 +1,6 @@
-import { initials } from "../lib/initials";
+import { AnimalFace } from "./Avatar";
+import AlertSettings from "./AlertSettings";
+import { ANIMALS, animalName, animalOf } from "../lib/animals";
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
@@ -10,6 +12,7 @@ import {
   UserRound,
   X,
   Headphones,
+  Bell,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useAuthStore } from "../store/useAuthStore";
@@ -179,7 +182,7 @@ export default function AccountSettings() {
           <span className="eyebrow">YOUR SONAR</span>
           <h2 id="account-settings-title">Make it yours.</h2>
           <div className="settings-avatar">
-            {initials(authUser.fullName)}
+            <AnimalFace animal={animalOf(authUser)} />
           </div>
           <strong className="settings-user-name">{authUser.fullName}</strong>
           {authUser.username && <span className="settings-user-handle">@{authUser.username}</span>}
@@ -190,6 +193,7 @@ export default function AccountSettings() {
               ["security", KeyRound, "Password & passkeys"],
               ["privacy", ShieldCheck, "Privacy & device"],
               ["voice", Headphones, "Voice & audio"],
+              ["alerts", Bell, "Alerts & privacy"],
             ].map(([value, Icon, label]) => (
               <button
                 key={value}
@@ -227,6 +231,14 @@ export default function AccountSettings() {
               <span className="eyebrow">A FAMILIAR FACE</span>
               <h3>Your profile</h3>
               <p>The name your people see in conversations and communities.</p>
+              <div className="animal-picker" role="group" aria-label="Your animal">
+                {ANIMALS.map((animal) => (
+                  <button key={animal} type="button" title={animalName(animal)} aria-label={animalName(animal)} aria-pressed={animal === animalOf(authUser)} disabled={busy} className={animal === animalOf(authUser) ? "chosen" : ""}
+                    onClick={() => animal !== animalOf(authUser) && updateProfile({ fullName: authUser.fullName, animal })}>
+                    <AnimalFace animal={animal} />
+                  </button>
+                ))}
+              </div>
               <form onSubmit={saveName}>
                 <label className="dialog-field">
                   Display name
@@ -346,6 +358,8 @@ export default function AccountSettings() {
                 </div>
               </section>
             </>
+          ) : tab === "alerts" ? (
+            <AlertSettings />
           ) : tab === "voice" ? (
             <VoiceSettings />
           ) : (

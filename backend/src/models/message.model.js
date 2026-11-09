@@ -16,6 +16,7 @@ const schema = new mongoose.Schema(
     iv: { type: String, required: true },
     version: { type: Number, default: 1, enum: [1] },
     pinned: { type: Boolean, default: false },
+    editedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: () => new Date(Date.now() + WEEK) },
   },
   { timestamps: true },

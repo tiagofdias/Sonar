@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 const community = new mongoose.Schema(
   {
     name: { type: String, required: true, maxlength: 60 },
+    // A group chat between friends uses the same encrypted channels as a server.
+    kind: { type: String, enum: ["server", "group"], default: "server" },
+    moderatorLimits: [{ _id: false, userId: mongoose.Schema.Types.ObjectId, denied: [String] }],
+    activity: { type: [{ _id: false, name: String, action: String, at: Date }], select: false, default: [] },
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -17,6 +21,7 @@ const community = new mongoose.Schema(
         name: { type: String, required: true, maxlength: 40 },
         type: { type: String, enum: ["text", "voice"], default: "text" },
         locked: { type: Boolean, default: false },
+        disappearAfter: { type: Number, default: 0 },
       },
     ],
     inviteHash: { type: String, select: false },

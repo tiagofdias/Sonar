@@ -20,6 +20,7 @@ const message = new mongoose.Schema(
     },
     envelopes: { type: [envelope], required: true },
     pinned: { type: Boolean, default: false },
+    editedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: () => new Date(Date.now() + WEEK) },
   },
   { timestamps: true },

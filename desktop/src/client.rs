@@ -1,7 +1,7 @@
 //! REST calls used by the desktop interface. Errors carry the server's own
 //! message where it provides one, so the desktop shows exactly what the web
 //! client shows. Plaintext is never sent: messages leave as AES-GCM envelopes.
-use crate::api::{Account, Community, CreatedInvite, InvitePreview, MessageEnvelope, MessagePage, Passkey, Person, Session, Sessions};
+use crate::api::{Account, ActivityRow, Community, CreatedInvite, InvitePreview, MessageEnvelope, MessagePage, Passkey, Person, Preferences, Session, Sessions};
 use crate::key_backup::Backup;
 use reqwest::{header, redirect::Policy, Client, Method, Response};
 use serde::{de::DeserializeOwned, Deserialize};
@@ -131,8 +131,38 @@ impl Session {
     }
     pub async fn delete_file(&self, id: &str) -> Result<(), String> { self.send(Method::DELETE, &format!("api/attachments/{}", check_id(id)?), None, "Could not delete the file").await.map(|_| ()) }
     pub async fn friend_requests(&self) -> Result<crate::api::FriendRequests, String> { self.call(Method::GET, "api/friends", None, "Could not load friend requests").await }
-    pub async fn send_friend_request(&self, username: &str) -> Result<(), String> {
-        self.send(Method::POST, "api/friends/request", Some(json!({ "username": username })), "Could not send the friend request").await.map(|_| ())
+    pub async fn send_friend_request(&self, username: &str, note: Option<crate::crypto::Envelope>) -> Result<(), String> {
+        let mut body = json!({ "username": username });
+        if let Some(note) = note { body["note"] = json!({ "version": 1, "iv": note.iv, "ciphertext": note.ciphertext }); }
+        self.send(Method::POST, "api/friends/request", Some(body), "Could not send the friend request").await.map(|_| ())
+    }
+    pub async fn friend_key(&self, username: &str) -> Result<Person, String> {
+        let name = url::form_urlencoded::byte_serialize(username.trim_start_matches('@').as_bytes()).collect::<String>();
+        self.call(Method::GET, &format!("api/friends/key/{name}"), None, "Could not find that person").await
+    }
+    pub async fn preferences(&self) -> Result<Preferences, String> { self.call(Method::GET, "api/preferences", None, "Could not load your preferences").await }
+    pub async fn save_preferences(&self, body: Value) -> Result<Preferences, String> { self.call(Method::PUT, "api/preferences", Some(body), "That could not be saved").await }
+    pub async fn block(&self, id: &str) -> Result<Preferences, String> { self.call(Method::POST, &format!("api/preferences/block/{}", check_id(id)?), None, "Could not block that person").await }
+    pub async fn unblock(&self, id: &str) -> Result<Preferences, String> { self.call(Method::DELETE, &format!("api/preferences/block/{}", check_id(id)?), None, "Could not unblock that person").await }
+    pub async fn set_animal(&self, name: &str, animal: &str) -> Result<Account, String> { self.call(Method::PUT, "api/auth/update-profile", Some(json!({ "fullName": name, "animal": animal })), "Could not save your animal").await }
+    pub async fn edit_direct(&self, id: &str, envelope: crate::crypto::Envelope) -> Result<MessageEnvelope, String> {
+        self.call(Method::PATCH, &format!("api/messages/{}", check_id(id)?), Some(json!({ "version": 1, "iv": envelope.iv, "ciphertext": envelope.ciphertext })), "Could not edit the message").await
+    }
+    pub async fn edit_channel(&self, community: &str, channel: &str, id: &str, revision: u64, envelopes: Vec<Value>) -> Result<MessageEnvelope, String> {
+        self.call(Method::PATCH, &format!("api/communities/{}/channels/{}/messages/{}", check_id(community)?, check_id(channel)?, check_id(id)?), Some(json!({ "revision": revision, "envelopes": envelopes })), "Could not edit the message").await
+    }
+    pub async fn disappear_direct(&self, peer: &str, seconds: u32) -> Result<(), String> {
+        self.send(Method::PUT, &format!("api/friends/{}/disappear", check_id(peer)?), Some(json!({ "seconds": seconds })), "Could not change disappearing messages").await.map(|_| ())
+    }
+    pub async fn disappear_channel(&self, community: &str, channel: &str, seconds: u32) -> Result<(), String> {
+        self.send(Method::PATCH, &format!("api/communities/{}/channels/{}/disappear", check_id(community)?, check_id(channel)?), Some(json!({ "seconds": seconds })), "Could not change disappearing messages").await.map(|_| ())
+    }
+    pub async fn activity(&self, community: &str) -> Result<Vec<ActivityRow>, String> { self.call(Method::GET, &format!("api/communities/{}/activity", check_id(community)?), None, "Could not load this").await }
+    pub async fn set_moderator_limits(&self, community: &str, member: &str, denied: Vec<String>) -> Result<(), String> {
+        self.send(Method::PUT, &format!("api/communities/{}/members/{}/permissions", check_id(community)?, check_id(member)?), Some(json!({ "denied": denied })), "Could not change permissions").await.map(|_| ())
+    }
+    pub async fn create_group(&self, member_ids: Vec<String>, name: String) -> Result<Community, String> {
+        self.call(Method::POST, "api/communities/group", Some(json!({ "memberIds": member_ids, "name": name })), "Could not create the group").await
     }
     pub async fn answer_friend_request(&self, id: &str, accept: bool) -> Result<(), String> {
         let id = check_id(id)?;

@@ -7,6 +7,7 @@ import { encrypt, decrypt } from "../lib/crypto";
 import { mergeHistory, withoutExpired } from "../lib/history";
 import { encodeFile, encodeMessage, encodeReaction } from "../lib/messageContent";
 import { useDraftStore } from "./useDraftStore";
+import { searchHistory } from "../lib/search";
 import { useUnreadStore } from "./useUnreadStore";
 import { candidatePosition, newer, readChannelPosition, rememberChannelPosition } from "../lib/offlineUnread";
 const fail = (error) =>
@@ -14,6 +15,7 @@ const fail = (error) =>
 const base = (community) => `/communities/${community._id}`;
 const upsert = (items, item) => visibleMessages(mergeHistory(items, [item]));
 let generation = 0;
+const detailsCache = new Map();
 const deleted = new Set();
 const visibleMessages = (messages) => withoutExpired(messages).filter(message => !deleted.has(message._id));
 export const useCommunityStore = create((set, get) => ({
@@ -367,7 +369,75 @@ export const useCommunityStore = create((set, get) => ({
       if (token === generation) set({ loadingOlder: false });
     }
   },
-  send: async (text, replyTo, reaction, file) => {
+  createGroup: async (memberIds, name) => {
+    try {
+      const { data } = await api.post("/communities/group", { memberIds, name });
+      await get().load();
+      await get().select(data._id);
+      return true;
+    } catch (error) { fail(error); return false; }
+  },
+  setDisappearAfter: async (channelId, seconds) => {
+    const community = get().community;
+    if (!community) return false;
+    try {
+      await api.patch(`${base(community)}/channels/${channelId}/disappear`, { seconds });
+      if (get().community?._id === community._id) await get().refresh();
+      return true;
+    } catch (error) { fail(error); return false; }
+  },
+  setModeratorLimits: async (memberId, denied) => {
+    const community = get().community;
+    if (!community) return false;
+    try {
+      await api.put(`${base(community)}/members/${memberId}/permissions`, { denied });
+      if (get().community?._id === community._id) await get().refresh();
+      return true;
+    } catch (error) { fail(error); return false; }
+  },
+  getActivity: async () => {
+    const community = get().community;
+    if (!community) return null;
+    try { return (await api.get(`${base(community)}/activity`)).data; }
+    catch (error) { fail(error); return null; }
+  },
+  searchAll: async (query, stillWanted) => {
+    const { community, channel } = get(), me = useAuthStore.getState().authUser._id;
+    const people = [...community.memberDetails, ...(community.historyAuthors || [])];
+    return searchHistory(
+      async (before) => (await api.get(`${base(community)}/channels/${channel._id}/messages`, { params: { page: true, ...(before ? { before } : {}) } })).data,
+      (message) => decrypt(me, people.find((person) => person._id === message.senderId), message), query, stillWanted,
+    ).catch((error) => { fail(error); return []; });
+  },
+  edit: async (message, text, mentions = []) => {
+    try {
+      if (!(await get().refresh())) return false;
+      const { community, channel } = get();
+      if (!community || channel?._id !== message.channelId) return false;
+      const me = useAuthStore.getState().authUser._id;
+      const content = encodeMessage(text, message.replyTo, mentions);
+      const envelopes = await Promise.all(community.memberDetails.map(async (peer) => ({ recipientId: peer._id, ...(await encrypt(me, peer, content, channel._id)) })));
+      const { data } = await api.patch(`${base(community)}/channels/${channel._id}/messages/${message._id}`, { revision: community.revision, envelopes });
+      if (get().channel?._id === channel._id)
+        set({ messages: upsert(get().messages, { ...data, text, ...(message.replyTo ? { replyTo: message.replyTo } : {}), ...(mentions.length ? { mentions } : {}) }) });
+      return true;
+    } catch (error) { fail(error); return false; }
+  },
+  // Opens a message from any community, for deciding whether a muted server should still alert.
+  openForAlert: async (message) => {
+    try {
+      let details = detailsCache.get(message.communityId);
+      if (!details || !details.memberDetails.some((person) => person._id === message.senderId)) {
+        details = (await api.get(`/communities/${message.communityId}`)).data;
+        detailsCache.set(message.communityId, details);
+      }
+      const sender = details.memberDetails.find((person) => person._id === message.senderId);
+      const decoded = await decrypt(useAuthStore.getState().authUser?._id, sender, message);
+      const canEveryone = details.ownerId === message.senderId || details.moderators?.includes(message.senderId);
+      return { decoded, canEveryone };
+    } catch { return null; }
+  },
+  send: async (text, replyTo, reaction, file, mentions = []) => {
     try {
       const target = get().channel?._id;
       if (!(await get().refresh())) return false;
@@ -377,7 +447,7 @@ export const useCommunityStore = create((set, get) => ({
       const envelopes = await Promise.all(
         community.memberDetails.map(async (peer) => ({
           recipientId: peer._id,
-          ...(await encrypt(me, peer, file ? encodeFile(file) : reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo), channel._id)),
+          ...(await encrypt(me, peer, file ? encodeFile(file) : reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo, mentions), channel._id)),
         })),
       );
       const { data } = await api.post(
@@ -385,7 +455,7 @@ export const useCommunityStore = create((set, get) => ({
         { revision: community.revision, envelopes },
       );
       if (get().channel?._id === channel._id && !get().pinnedOnly)
-        set({ messages: upsert(get().messages, { ...data, ...(file ? { file } : {}), text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}) }) });
+        set({ messages: upsert(get().messages, { ...data, ...(file ? { file } : {}), text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}), ...(mentions.length ? { mentions } : {}) }) });
       return true;
     } catch (error) {
       fail(error);

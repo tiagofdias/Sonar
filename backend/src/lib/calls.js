@@ -1,6 +1,7 @@
 // Transient signaling state only. No audio or call history is stored.
 import { directCallUsers, voiceRoomUsers } from "./voiceActivity.js";
 import { areFriends } from "./friends.js";
+import { pushTo } from "./push.js";
 export function validScreenSignal(signal) {
   if (signal.type === "screen-stop") return true;
   if (signal.type === "screen-ice")
@@ -54,6 +55,7 @@ export function installCalls(io) {
           return reply({ error: "Invalid call offer" });
         const friends = await areFriends(socket.userId, to).catch(() => false);
         if (!friends) return reply({ error: "You can only call your friends" });
+        pushTo(to, "call", { sender: socket.userId });
         // Someone in an answered call or a voice room can be offered one call to swap to.
         const canWait = (Boolean(calls.get(active.get(to))?.calleeSocket) || (voiceRoomUsers.has(to) && !active.has(to))) && !waiting.has(to);
         if (

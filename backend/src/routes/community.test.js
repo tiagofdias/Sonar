@@ -130,7 +130,7 @@ test("community authorization, invitation, encrypted history and retention", asy
       assert.equal((await request(friend, path, "PATCH", { name: "no" })).status, 403);
       assert.equal((await request(owner, path, "PATCH", { name: "../bad" })).status, 400);
       assert.equal((await request(owner, path, "PATCH", { name: "General Chat" })).status, 200);
-      assert.equal((await request(friend, root)).data.channels[0].name, "general-chat");
+      assert.equal((await request(friend, root)).data.channels[0].name, "General Chat");
       assert.equal((await request(owner, path, "PATCH", { name: "general" })).status, 200);
       assert.equal((await request(owner, `${root}/channels/000000000000000000000000`, "PATCH", { name: "x" })).status, 404);
     });
@@ -252,7 +252,7 @@ test("community authorization, invitation, encrypted history and retention", asy
       "pin preserves history; expiry hides records and prevents revival",
       async () => {
         const pinned = await request(
-          friend,
+          owner,
           `${path()}/${sent._id}/pin`,
           "PATCH",
           { pinned: true },

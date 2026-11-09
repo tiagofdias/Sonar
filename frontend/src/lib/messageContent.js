@@ -6,10 +6,12 @@ export const MISSED_CALL_TEXT = "Missed voice call";
 export const REACTION_EMOJI = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}"];
 const messageId = /^[a-f0-9]{24}$/i;
 // Only the reply target ID is carried inside encrypted content. No copied quote is stored.
-export function encodeMessage(text, replyTo = null) {
+const validMentions = (list) => Array.isArray(list) && list.length <= 32 && list.every((item) => item === "everyone" || (typeof item === "string" && messageId.test(item)));
+export function encodeMessage(text, replyTo = null, mentions = []) {
   if (replyTo && !messageId.test(replyTo)) throw new Error("Invalid reply target");
-  if (replyTo || text.startsWith(PREFIX) || text.startsWith(REACTION_PREFIX) || text.startsWith(CALL_PREFIX) || text.startsWith(FILE_PREFIX))
-    return PREFIX + JSON.stringify({ text, ...(replyTo ? { replyTo } : {}) });
+  const named = mentions.length && validMentions(mentions) ? { mentions } : {};
+  if (named.mentions || replyTo || text.startsWith(PREFIX) || text.startsWith(REACTION_PREFIX) || text.startsWith(CALL_PREFIX) || text.startsWith(FILE_PREFIX))
+    return PREFIX + JSON.stringify({ text, ...(replyTo ? { replyTo } : {}), ...named });
   return text;
 }
 // A call that rang and was never answered, sent by the caller's app.
@@ -60,7 +62,7 @@ export function decodeMessage(value) {
     const data = JSON.parse(value.slice(PREFIX.length));
     if (typeof data?.text === "string" && data.text.length <= 4000 &&
         (data.replyTo === undefined || (typeof data.replyTo === "string" && messageId.test(data.replyTo))))
-      return { text: data.text, ...(data.replyTo ? { replyTo: data.replyTo } : {}) };
+      return { text: data.text, ...(data.replyTo ? { replyTo: data.replyTo } : {}), ...(validMentions(data.mentions) && data.mentions.length ? { mentions: data.mentions } : {}) };
   } catch { /* Treat legacy or malformed content as text. */ }
   return { text: value };
 }

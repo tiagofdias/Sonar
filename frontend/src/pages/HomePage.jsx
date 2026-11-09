@@ -15,6 +15,9 @@ import {
   Pin,
   Search,
   Reply,
+  Pencil,
+  Plus,
+  Ban,
   Send,
   Settings,
   ShieldCheck,
@@ -30,12 +33,16 @@ import { useUnreadStore } from "../store/useUnreadStore";
 import { useVoiceCall } from "../lib/useVoiceCall";
 import { useVoiceRoom } from "../lib/useVoiceRoom";
 import VoiceRoomBanner from "../components/VoiceRoomBanner";
-import { fingerprint, contactKeyStatus, acceptVerifiedContactKey } from "../lib/crypto";
+import { decrypt, fingerprint, contactKeyStatus, acceptVerifiedContactKey } from "../lib/crypto";
 import VoiceCallBanner from "../components/VoiceCallBanner";
 import ReactionBar from "../components/ReactionBar";
 import MessageText from "../components/MessageText";
 import CallNotice from "../components/CallNotice";
-import { initials } from "../lib/initials";
+import Avatar from "../components/Avatar";
+import SearchPanel from "../components/SearchPanel";
+import { usePreferencesStore, matchesKeyword } from "../store/usePreferencesStore";
+import { useTyping, typingText } from "../lib/useTyping";
+import { mentionsMe } from "../lib/mentions";
 import toast from "react-hot-toast";
 import { messageAlert } from "../lib/messageAlert";
 import ComposerTools, { FileCard } from "../components/ComposerTools";
@@ -46,14 +53,14 @@ import ExperimentalContactVerification from "../components/ExperimentalContactVe
 import ExperimentalMatrixChat from "../components/ExperimentalMatrixChat";
 import { useConversationDraft } from "../store/useDraftStore";
 import { useHistoryScroll } from "../lib/useHistoryScroll";
-function Avatar({ user, online, large }) {
-  const status = useAuthStore((state) => state.presence[user?._id]);
-  return (
-    <span className={`avatar-tile ${large ? "large" : ""}`}>
-      {initials(user?.fullName)}
-      {online && <i className={status ? `status-${status}` : undefined} />}
-    </span>
-  );
+function FriendNote({ me, person }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    let active = true;
+    decrypt(me, person, { ...person.note, senderId: person._id, receiverId: me, channelId: "000000000000000000000001" }).then((value) => { if (active && !value.unreadable) setText(value.text); });
+    return () => { active = false; };
+  }, [me, person]);
+  return text ? <em className="friend-note">{`"${text}"`}</em> : null;
 }
 const matches = (user, text) => {
   const value = text.trim().replace(/^@/, "").toLowerCase();
@@ -89,6 +96,10 @@ export default function HomePage() {
   const messageBox = useRef(null);
   const [query, setQuery] = useState(""),
     [peopleQuery, setPeopleQuery] = useState(""),
+    [friendNote, setFriendNote] = useState(""),
+    [editing, setEditing] = useState(null),
+    [groupPicks, setGroupPicks] = useState([]),
+    [groupName, setGroupName] = useState(""),
     [sending, setSending] = useState(false),
     [panel, setPanel] = useState(null),
     [onlyPins, setOnlyPins] = useState(false),
@@ -102,6 +113,9 @@ export default function HomePage() {
   const { text, setText, clearSent } = useConversationDraft(
     peer ? `dm:${peer._id}` : null,
   );
+  const preferences = usePreferencesStore();
+  const groups = useCommunityStore((state) => state.communities).filter((item) => item.kind === "group");
+  const { typing, typed } = useTyping(socket, peer ? { to: peer._id } : null);
   const unread = useUnreadStore(state => state.direct);
   const hasUnread = Object.keys(unread).length > 0;
   const unreadChannels = useUnreadStore(state => state.channels);
@@ -127,6 +141,7 @@ export default function HomePage() {
       if (!useChatStore.getState().users.length) setPanel("people");
     });
     useCommunityStore.getState().load();
+    usePreferencesStore.getState().load();
     const timer = setInterval(() => {
       getUsers();
       getFriendRequests();
@@ -144,9 +159,18 @@ export default function HomePage() {
     if (!socket) return;
     const refresh = () => { getUsers(); useChatStore.getState().getFriendRequests(); };
     const asked = ({ fullName }) => toast(`${fullName} sent you a friend request`);
+    const reloadPreferences = () => usePreferencesStore.getState().load();
+    const animalChanged = ({ userId, animal }) => {
+      const patch = (person) => (person?._id === userId ? { ...person, animal } : person);
+      const chat = useChatStore.getState(), community = useCommunityStore.getState().community;
+      useChatStore.setState({ users: chat.users.map(patch), selectedUser: patch(chat.selectedUser) });
+      if (community) useCommunityStore.setState({ community: { ...community, memberDetails: community.memberDetails.map(patch), historyAuthors: (community.historyAuthors || []).map(patch) } });
+    };
     socket.on("friendsChanged", refresh);
     socket.on("friendRequest", asked);
-    return () => { socket.off("friendsChanged", refresh); socket.off("friendRequest", asked); };
+    socket.on("preferencesChanged", reloadPreferences);
+    socket.on("profileChanged", animalChanged);
+    return () => { socket.off("friendsChanged", refresh); socket.off("friendRequest", asked); socket.off("preferencesChanged", reloadPreferences); socket.off("profileChanged", animalChanged); };
   }, [socket, getUsers]);
   useEffect(() => {
     const update = () => {
@@ -160,6 +184,7 @@ export default function HomePage() {
   useEffect(() => {
     setOnlyPins(false);
     setReplyTo(null);
+    setEditing(null);
   }, [peer?._id]);
   useEffect(() => {
     setReplyTo(current => current && !messages.some(message => message._id === current._id) ? null : current);
@@ -173,8 +198,16 @@ export default function HomePage() {
   }, [socket, subscribeToMessages, unsubscribeFromMessages]);
   useEffect(() => {
     if (!socket) return;
-    const newChannelMessage = (message) => {
-      if (message.senderId === useAuthStore.getState().authUser?._id) return;
+    const newChannelMessage = async (message) => {
+      const me = useAuthStore.getState().authUser?._id;
+      if (message.senderId === me) return;
+      const settings = usePreferencesStore.getState();
+      if (settings.isBlocked(message.senderId)) return;
+      if (settings.isMuted(message.communityId)) {
+        // A muted server stays silent unless you were named or a keyword of yours appears.
+        const opened = await useCommunityStore.getState().openForAlert(message);
+        if (!opened || !(mentionsMe(opened.decoded, me, opened.canEveryone) || matchesKeyword(opened.decoded.text, settings.keywords))) return;
+      }
       const key = `${message.communityId}:${message.channelId}`;
       useUnreadStore.getState().markChannel(key);
       if (useUnreadStore.getState().activeChannel !== key) {
@@ -227,6 +260,11 @@ export default function HomePage() {
     if (!text.trim() || sending) return;
     setSending(true);
     const draft = text;
+    if (editing) {
+      if (await useChatStore.getState().editMessage(editing, draft.trim())) { clearSent(draft); setEditing(null); }
+      setSending(false);
+      return;
+    }
     const target = replyTo?._id;
     if (await sendMessage({ text: draft.trim(), replyTo: target })) {
       clearSent(draft);
@@ -346,29 +384,37 @@ export default function HomePage() {
             {isUsersLoading && !users.length && (
               <p className="muted small">Loading people...</p>
             )}
-            {users
-              .filter((u) =>
-                matches(u, query),
-              )
-              .map((user) => (
-                <button
-                  key={user._id}
-                  className={`person ${peer?._id === user._id ? "chosen" : ""}`}
-                  onClick={() => setSelectedUser(user)}
-                >
-                  <Avatar user={user} online={onlineUsers.includes(user._id)} />
-                  <span>
-                    <strong>{user.fullName}</strong>
-                    <small>
-                      {statusText(user._id, "Around now")}
-                    </small>
-                  </span>
-                  {unread[user._id] && <span className="unread-dot" aria-label="New messages" title="New messages" />}
-                  {user.encryptionKey && (
-                    <LockKeyhole size={12} className="person-lock" />
-                  )}
-                </button>
-              ))}
+            {[
+              { title: preferences.pinnedPeople.length ? "PINNED" : null, people: users.filter((u) => preferences.pinnedPeople.includes(u._id)) },
+              ...preferences.folders.map((folder) => ({ title: folder.name.toUpperCase(), people: users.filter((u) => folder.people.includes(u._id) && !preferences.pinnedPeople.includes(u._id)) })),
+              { title: preferences.pinnedPeople.length || preferences.folders.length ? "EVERYONE ELSE" : null, people: users.filter((u) => !preferences.pinnedPeople.includes(u._id) && !preferences.folders.some((folder) => folder.people.includes(u._id))) },
+            ].map((section, index) => {
+              const shown = section.people.filter((u) => matches(u, query));
+              return shown.length > 0 && (
+                <div key={section.title || index}>
+                  {section.title && <div className="folder-label">{section.title}</div>}
+                  {shown.map((user) => (
+                    <button
+                      key={user._id}
+                      className={`person ${peer?._id === user._id ? "chosen" : ""}`}
+                      onClick={() => setSelectedUser(user)}
+                    >
+                      <Avatar user={user} dot={onlineUsers.includes(user._id)} />
+                      <span>
+                        <strong>{user.fullName}</strong>
+                        <small>
+                          {statusText(user._id, "Around now")}
+                        </small>
+                      </span>
+                      {unread[user._id] && <span className="unread-dot" aria-label="New messages" title="New messages" />}
+                      {user.encryptionKey && (
+                        <LockKeyhole size={12} className="person-lock" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
             {!isUsersLoading && !users.length && (
               <p className="empty-people">
                 Your space starts with a hello. Go to People and add someone by
@@ -376,6 +422,19 @@ export default function HomePage() {
               </p>
             )}
           </div>
+          <div className="sidebar-section">
+            <span>GROUPS</span>
+            <button title="New group" aria-label="New group" className="icon-button" onClick={() => { setGroupPicks([]); setGroupName(""); setPanel("group"); }}>
+              <Plus size={15} />
+            </button>
+          </div>
+          {groups.map((group) => (
+            <button key={group._id} className="person" onClick={async () => { await useCommunityStore.getState().select(group._id); setCommunityMode(true); }}>
+              <span className="avatar-tile"><Users size={18} /></span>
+              <span><strong>{group.name}</strong><small>{group.members.length} people</small></span>
+              {Object.keys(unreadChannels).some((key) => key.startsWith(`${group._id}:`)) && <span className="unread-dot" aria-label="New messages" />}
+            </button>
+          ))}
         </div>
         <div className="privacy-mini">
           <ShieldCheck size={19} />
@@ -404,7 +463,7 @@ export default function HomePage() {
             )}
             {peer ? (
               <>
-                <Avatar user={peer} online={onlineUsers.includes(peer._id)} />
+                <Avatar user={peer} dot={onlineUsers.includes(peer._id)} />
                 <div>
                   <strong>{peer.fullName}</strong>
                   <small>
@@ -442,9 +501,12 @@ export default function HomePage() {
                     !!voice.call ||
                     !!voiceRoom.room
                   }
-                  onClick={() => voice.start(peer)}
+                  onClick={() => { if (!preferences.confirmCalls || window.confirm(`Call ${peer.fullName}?`)) voice.start(peer); }}
                 >
                   <Phone size={19} />
+                </button>
+                <button title="Search messages" aria-label="Search messages" className="icon-button" onClick={() => setPanel("search")}>
+                  <Search size={19} />
                 </button>
                 <button
                   title="Pinned messages"
@@ -467,9 +529,17 @@ export default function HomePage() {
         <div className="retention-banner">
           <Timer size={14} />
           <span>
-            A conversation, not a permanent record. Messages disappear after 7
-            days.
+            {peer?.disappearAfter
+              ? `Disappearing messages are on. New messages vanish after ${peer.disappearAfter === 3600 ? "1 hour" : "1 day"}.`
+              : "A conversation, not a permanent record. Messages disappear after 7 days."}
           </span>
+          {peer && (
+            <select aria-label="Disappearing messages" title="Disappearing messages" className="disappear-select" value={peer.disappearAfter || 0} onChange={(event) => useChatStore.getState().setDisappearAfter(peer._id, Number(event.target.value))}>
+              <option value={0}>7 days</option>
+              <option value={3600}>1 hour</option>
+              <option value={86400}>1 day</option>
+            </select>
+          )}
           <button onClick={() => setPanel("privacy")}>
             How it works <ArrowUpRight size={12} />
           </button>
@@ -582,6 +652,7 @@ export default function HomePage() {
                               { hour: "2-digit", minute: "2-digit" },
                             )}
                           </time>
+                          {message.editedAt && <span className="edited-label">(edited)</span>}
                           {message.pinned && (
                             <span className="pin-label">
                               <Pin size={11} />
@@ -594,6 +665,9 @@ export default function HomePage() {
                         {!onlyPins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => sendMessage({ reaction })} />}
                       </div>
                       <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>
+                      {message.senderId === authUser._id && !message.file && !message.call && !message.unreadable && (
+                        <button className="pin-action" title="Edit message" aria-label="Edit message" onClick={() => { setReplyTo(null); setEditing(message); setText(message.text); messageBox.current?.focus(); }}><Pencil size={14} /></button>
+                      )}
                       {message.senderId === authUser._id && (
                         <button className="pin-action" title="Delete message" aria-label="Delete message"
                           onClick={() => {
@@ -619,6 +693,7 @@ export default function HomePage() {
         {peer && (
           <div className="composer-area">
             {replyTo && <div className="reply-composer"><span>Replying to: {replyTo.text}</span><button className="icon-button" aria-label="Cancel reply" onClick={() => setReplyTo(null)}><X size={16} /></button></div>}
+            {editing && <div className="reply-composer"><span>Editing your message</span><button className="icon-button" aria-label="Cancel edit" onClick={() => { setEditing(null); setText(""); }}><X size={16} /></button></div>}
             <form className="composer" onSubmit={submit}>
               <LockKeyhole size={18} />
               <textarea
@@ -629,7 +704,7 @@ export default function HomePage() {
                 placeholder={peer.encryptionKey ? `Message ${peer.fullName.split(" ")[0]}...` : `${peer.fullName.split(" ")[0]} needs to sign in to Sonar first`}
                 value={text}
                 disabled={!peer.encryptionKey}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => { setText(e.target.value); if (e.target.value) typed(); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -655,8 +730,7 @@ export default function HomePage() {
             </form>
             <div className="composer-hint">
               <span>
-                <LockKeyhole size={11} /> Only your devices hold the message
-                keys
+                {typing.length ? typingText([peer.fullName.split(" ")[0]]) : <><LockKeyhole size={11} /> Only your devices hold the message keys</>}
               </span>
               <span>
                 Enter to send <span>·</span> Shift + Enter for a new line
@@ -671,7 +745,10 @@ export default function HomePage() {
           <span>Always free. Always ad-free.</span>
         </footer>
       </main>
-      {panel && (
+      {panel === "search" && peer && (
+        <SearchPanel search={useChatStore.getState().searchAll} senderName={(message) => (message.senderId === authUser._id ? "You" : peer.fullName)} onClose={() => setPanel(null)} />
+      )}
+      {panel && panel !== "search" && (
         <div className="modal-backdrop" onClick={() => setPanel(null)}>
           <section
             className="detail-modal"
@@ -687,7 +764,31 @@ export default function HomePage() {
             >
               <X size={20} />
             </button>
-            {panel === "people" ? (
+            {panel === "group" ? (
+              <>
+                <Users className="accent" size={28} />
+                <h2>Bring a few friends together.</h2>
+                <p>Pick 2 to 9 friends. Group chats are encrypted for each person and have a voice room.</p>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (await useCommunityStore.getState().createGroup(groupPicks, groupName)) { setPanel(null); setCommunityMode(true); }
+                }}>
+                  <label className="dialog-field">Group name (optional)
+                    <input maxLength={60} value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+                  </label>
+                  <div className="modal-people">
+                    {users.map((user) => (
+                      <label className="settings-checkbox" key={user._id}>
+                        <input type="checkbox" checked={groupPicks.includes(user._id)} disabled={!groupPicks.includes(user._id) && groupPicks.length >= 9} onChange={(e) => setGroupPicks(e.target.checked ? [...groupPicks, user._id] : groupPicks.filter((id) => id !== user._id))} />
+                        <Avatar user={user} /> {user.fullName}
+                      </label>
+                    ))}
+                    {!users.length && <p>Add some friends first.</p>}
+                  </div>
+                  <button className="primary" disabled={groupPicks.length < 2}>Create group <Check size={16} /></button>
+                </form>
+              </>
+            ) : panel === "people" ? (
               <>
                 <Users className="accent" size={28} />
                 <h2>Your people, a little closer.</h2>
@@ -699,7 +800,7 @@ export default function HomePage() {
                   className="friend-add"
                   onSubmit={async (e) => {
                     e.preventDefault();
-                    if (peopleQuery.trim() && await useChatStore.getState().sendFriendRequest(peopleQuery)) setPeopleQuery("");
+                    if (peopleQuery.trim() && await useChatStore.getState().sendFriendRequest(peopleQuery, friendNote)) { setPeopleQuery(""); setFriendNote(""); }
                   }}
                 >
                   <label className="search-box modal-search">
@@ -713,6 +814,7 @@ export default function HomePage() {
                   </label>
                   <button className="primary compact" disabled={!peopleQuery.trim()}>Send request</button>
                 </form>
+                <input className="friend-note-input" aria-label="Note to include" placeholder="Add a short note, like where you met (optional)" maxLength={200} value={friendNote} onChange={(e) => setFriendNote(e.target.value)} />
                 <div className="modal-people">
                   {friendRequests.incoming.length > 0 && <span className="eyebrow">FRIEND REQUESTS</span>}
                   {friendRequests.incoming.map((user) => (
@@ -721,6 +823,7 @@ export default function HomePage() {
                       <span>
                         <strong>{user.fullName}</strong>
                         <small>@{user.username}</small>
+                        {user.note && <FriendNote me={authUser._id} person={user} />}
                       </span>
                       <button className="primary compact" onClick={() => useChatStore.getState().answerFriendRequest(user._id, true)}>Accept</button>
                       <button className="secondary compact" onClick={() => useChatStore.getState().answerFriendRequest(user._id, false)}>Decline</button>
@@ -739,21 +842,32 @@ export default function HomePage() {
                   ))}
                   {users.length > 0 && <span className="eyebrow">YOUR FRIENDS</span>}
                   {users.map((user) => (
-                    <button
-                      className="person"
-                      key={user._id}
-                      onClick={() => {
-                        setSelectedUser(user);
-                        setPanel(null);
-                      }}
-                    >
-                      <Avatar user={user} online={onlineUsers.includes(user._id)} />
-                      <span>
-                        <strong>{user.fullName}</strong>
-                        {user.username && <small>@{user.username}</small>}
-                      </span>
-                      <ArrowUpRight size={17} />
-                    </button>
+                    <div className="friend-row" key={user._id}>
+                      <button
+                        className="person"
+                        onClick={() => {
+                          setSelectedUser(user);
+                          setPanel(null);
+                        }}
+                      >
+                        <Avatar user={user} dot={onlineUsers.includes(user._id)} />
+                        <span>
+                          <strong>{user.fullName}</strong>
+                          {user.username && <small>@{user.username}</small>}
+                        </span>
+                        <ArrowUpRight size={17} />
+                      </button>
+                      <button className={`icon-button ${preferences.pinnedPeople.includes(user._id) ? "accent" : ""}`} title="Pin to the top" aria-label={`Pin ${user.fullName}`} onClick={() => preferences.togglePinned(user._id)}><Pin size={15} /></button>
+                      <select className="member-actions" aria-label={`Folder for ${user.fullName}`} value={preferences.folders.find((folder) => folder.people.includes(user._id))?.name || ""} onChange={(e) => {
+                        const name = e.target.value === "__new" ? window.prompt("Folder name")?.trim().slice(0, 30) : e.target.value;
+                        if (name !== undefined) preferences.moveToFolder(user._id, name);
+                      }}>
+                        <option value="">No folder</option>
+                        {preferences.folders.map((folder) => <option key={folder.name} value={folder.name}>{folder.name}</option>)}
+                        <option value="__new">New folder...</option>
+                      </select>
+                      <button className="icon-button" title="Block" aria-label={`Block ${user.fullName}`} onClick={() => { if (window.confirm(`Block ${user.fullName}? They will not be told.`)) preferences.block(user._id); }}><Ban size={15} /></button>
+                    </div>
                   ))}
                   {!users.length && !friendRequests.incoming.length && !friendRequests.outgoing.length && (
                     <p>No friends yet. Send a request to get started.</p>
