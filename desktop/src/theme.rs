@@ -15,21 +15,21 @@ pub fn rgba(hex: u32) -> Color {
     Color { a: (hex & 0xff) as f32 / 255.0, ..base }
 }
 
-pub const PAGE: Color = rgb(0x141518);
-pub const TEXT: Color = rgb(0xdfdfe4);
-pub const RAIL: Color = rgb(0x111215);
-pub const SIDEBAR: Color = rgb(0x1a1b20);
-pub const CONVERSATION: Color = rgb(0x1e1f24);
-pub const FOOTER_BG: Color = rgb(0x16171b);
-pub const LINE: Color = rgb(0x292a30);
-pub const LINE_SIDEBAR: Color = rgb(0x2b2c32);
-pub const LINE_CHAT: Color = rgb(0x303037);
-pub const ACCENT: Color = rgb(0xbba0fc);
-pub const MUTED: Color = rgb(0x8d8d99);
-pub const EYEBROW: Color = rgb(0xa99ac8);
+pub const PAGE: Color = rgb(0x111417);
+pub const TEXT: Color = rgb(0xdfe2e4);
+pub const RAIL: Color = rgb(0x0e1114);
+pub const SIDEBAR: Color = rgb(0x161a1e);
+pub const CONVERSATION: Color = rgb(0x191d22);
+pub const FOOTER_BG: Color = rgb(0x12161a);
+pub const LINE: Color = rgb(0x22282e);
+pub const LINE_SIDEBAR: Color = rgb(0x232a31);
+pub const LINE_CHAT: Color = rgb(0x272e36);
+pub const ACCENT: Color = rgb(0x75ebfb);
+pub const MUTED: Color = rgb(0x8a949c);
+pub const EYEBROW: Color = rgb(0xd0d7dc);
 pub const GREEN: Color = rgb(0x8fc3a3);
-pub const OFFLINE: Color = rgb(0x7a7b86);
-pub const UNREAD: Color = rgb(0xc7a8ff);
+pub const OFFLINE: Color = rgb(0x75818b);
+pub const UNREAD: Color = rgb(0x70eeff);
 pub const DANGER: Color = rgb(0xa2485d);
 
 pub fn font(weight: Weight) -> Font { Font { weight, ..REGULAR } }
@@ -113,46 +113,63 @@ fn btn(background: Option<Color>, hover: Option<Color>, color: Color, hover_colo
         style
     })
 }
-pub fn primary() -> ButtonStyle { btn(Some(rgb(0xbba1e8)), Some(rgb(0xccb4f4)), rgb(0x251c31), rgb(0x251c31), None, 7.0) }
-pub fn secondary() -> ButtonStyle { btn(Some(rgb(0x2b2633)), Some(rgb(0x362b42)), rgb(0xc1b0d0), rgb(0xc1b0d0), Some(rgb(0x4a3b55)), 7.0) }
+/// The main action color: a current running from aqua into deep blue.
+fn current(r: f32) -> ButtonStyle {
+    Box::new(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let alpha = if matches!(status, button::Status::Disabled) { 0.4 } else { 1.0 };
+        let (from, to) = if hovered { (rgb(0x8ff7f8), rgb(0x62b4ff)) } else { (rgb(0x6ff3f5), rgb(0x3f9dff)) };
+        button::Style {
+            background: Some(Background::Gradient(Gradient::Linear(Linear::new(Degrees(120.0)).add_stop(0.0, Color { a: alpha, ..from }).add_stop(1.0, Color { a: alpha, ..to })))),
+            text_color: Color { a: alpha, ..rgb(0x15191d) },
+            border: border(Color::TRANSPARENT, 0.0, r),
+            ..Default::default()
+        }
+    })
+}
+pub fn primary() -> ButtonStyle { current(7.0) }
+pub fn secondary() -> ButtonStyle { btn(Some(rgb(0x22282e)), Some(rgb(0x2a313a)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0x38424d)), 7.0) }
 pub fn danger() -> ButtonStyle { btn(Some(DANGER), Some(rgb(0xb05269)), Color::WHITE, Color::WHITE, Some(rgb(0xc1687c)), 7.0) }
 pub fn icon_button(active: bool) -> ButtonStyle {
-    if active { btn(None, Some(rgba(0xffffff08)), ACCENT, ACCENT, None, 7.0) } else { btn(None, Some(rgba(0xffffff08)), rgb(0x8e8e9b), rgb(0xddd4ee), None, 7.0) }
+    if active { btn(None, Some(rgba(0xffffff08)), ACCENT, ACCENT, None, 7.0) } else { btn(None, Some(rgba(0xffffff08)), rgb(0x8c969d), rgb(0xd0d7dc), None, 7.0) }
 }
 pub fn rail_button(active: bool) -> ButtonStyle {
-    if active { btn(Some(rgb(0x30283f)), Some(rgb(0x30283f)), rgb(0xc9b0ff), rgb(0xc9b0ff), None, 13.0) } else { btn(None, Some(rgb(0x222329)), rgb(0x7b7c88), rgb(0xc9bcdf), None, 13.0) }
+    if active { btn(Some(rgb(0x282f37)), Some(rgb(0x282f37)), rgb(0x70eeff), rgb(0x70eeff), None, 13.0) } else { btn(None, Some(rgb(0x1c2127)), rgb(0x76828d), rgb(0xd0d7dc), None, 13.0) }
 }
 pub fn nav_row(selected: bool) -> ButtonStyle {
-    if selected { btn(Some(rgb(0x30283e)), Some(rgb(0x29252f)), rgb(0xd3bdf6), rgb(0xd3bdf6), None, 7.0) } else { btn(None, Some(rgb(0x29252f)), rgb(0x9999a6), rgb(0x9999a6), None, 7.0) }
+    if selected { btn(Some(rgb(0x272e37)), Some(rgb(0x20252c)), rgb(0xd0d7dc), rgb(0xd0d7dc), None, 7.0) } else { btn(None, Some(rgb(0x20252c)), rgb(0x98a1a7), rgb(0x98a1a7), None, 7.0) }
 }
-pub fn danger_row() -> ButtonStyle { btn(None, Some(rgb(0x29252f)), rgb(0xc28b98), rgb(0xc28b98), None, 7.0) }
+pub fn danger_row() -> ButtonStyle { btn(None, Some(rgb(0x20252c)), rgb(0xc28b98), rgb(0xc28b98), None, 7.0) }
 pub fn person_row(chosen: bool) -> ButtonStyle {
-    if chosen { btn(Some(rgb(0x292532)), Some(rgb(0x292532)), TEXT, TEXT, None, 8.0) } else { btn(None, Some(rgb(0x23242b)), TEXT, TEXT, None, 8.0) }
+    if chosen { btn(Some(rgb(0x21272d)), Some(rgb(0x21272d)), TEXT, TEXT, None, 8.0) } else { btn(None, Some(rgb(0x1d2329)), TEXT, TEXT, None, 8.0) }
 }
 pub fn plain(color: Color, hover: Color) -> ButtonStyle { btn(None, None, color, hover, None, 0.0) }
 pub fn community_icon(active: bool) -> ButtonStyle {
-    if active { btn(Some(rgb(0x67517f)), Some(rgb(0x67517f)), rgb(0xf3e9ff), rgb(0xf3e9ff), Some(rgb(0x987bb9)), 12.0) } else { btn(Some(rgb(0x34303f)), Some(rgb(0x67517f)), rgb(0xc6b5de), rgb(0xf3e9ff), Some(rgb(0x494050)), 15.0) }
+    if active { btn(Some(rgb(0x74808b)), Some(rgb(0x74808b)), rgb(0x70eeff), rgb(0x70eeff), Some(rgb(0xd0d7dc)), 12.0) } else { btn(Some(rgb(0x2a313a)), Some(rgb(0x74808b)), rgb(0xd0d7dc), rgb(0x70eeff), Some(rgb(0x37404b)), 15.0) }
 }
-pub fn add_community() -> ButtonStyle { btn(Some(rgb(0x27312b)), Some(rgb(0x2d3a32)), rgb(0xb4c9b7), rgb(0xb4c9b7), Some(rgb(0x536150)), 13.0) }
+pub fn add_community() -> ButtonStyle { btn(Some(rgb(0x21272e)), Some(rgb(0x272e36)), rgb(0xb9bfc4), rgb(0xb9bfc4), Some(rgb(0x74808b)), 13.0) }
 pub fn reaction(selected: bool) -> ButtonStyle {
-    if selected { btn(Some(rgb(0x3d3050)), Some(rgb(0x3d3050)), rgb(0xe6d9f2), rgb(0xe6d9f2), Some(rgb(0xb99cde)), 8.0) } else { btn(Some(rgb(0x28232f)), Some(rgb(0x312a3a)), rgb(0xe6d9f2), rgb(0xe6d9f2), Some(rgb(0x494153)), 8.0) }
+    if selected { btn(Some(rgb(0x313a44)), Some(rgb(0x313a44)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0xd0d7dc)), 8.0) } else { btn(Some(rgb(0x1f252b)), Some(rgb(0x262d34)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0x38424d)), 8.0) }
 }
-pub fn load_older() -> ButtonStyle { btn(Some(rgb(0x2b2433)), Some(rgb(0x382b43)), rgb(0xbca0d3), rgb(0xd9bdec), Some(rgb(0x4a3a59)), 8.0) }
+pub fn load_older() -> ButtonStyle { btn(Some(rgb(0x22282e)), Some(rgb(0x2a323b)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0x39434e)), 8.0) }
 pub fn volume_slider() -> impl Fn(&Theme, iced::widget::slider::Status) -> iced::widget::slider::Style {
     use iced::widget::slider::{Handle, HandleShape, Rail, Style};
     |_, _| Style {
-        rail: Rail { backgrounds: (rgb(0xbba1e8).into(), rgb(0x44404c).into()), width: 4.0, border: border(Color::TRANSPARENT, 0.0, 2.0) },
-        handle: Handle { shape: HandleShape::Circle { radius: 6.0 }, background: rgb(0xbba1e8).into(), border_width: 0.0, border_color: Color::TRANSPARENT },
+        rail: Rail { backgrounds: (rgb(0xd0d7dc).into(), rgb(0x353e49).into()), width: 4.0, border: border(Color::TRANSPARENT, 0.0, 2.0) },
+        handle: Handle { shape: HandleShape::Circle { radius: 6.0 }, background: rgb(0xd0d7dc).into(), border_width: 0.0, border_color: Color::TRANSPARENT },
     }
 }
+pub fn presence_color(status: &str) -> Color {
+    match status { "away" => rgb(0xe5b567), "busy" => rgb(0xe0707c), "offline" => OFFLINE, _ => rgb(0x88c7a3) }
+}
 pub fn mic_speaking() -> ButtonStyle { btn(Some(rgb(0x2c4634)), Some(rgb(0x2c4634)), rgb(0x7fdc9a), rgb(0x7fdc9a), Some(rgb(0x5fc784)), 7.0) }
-pub fn send_button() -> ButtonStyle { btn(Some(rgb(0xb69bdc)), Some(rgb(0xc5aee6)), rgb(0x21182e), rgb(0x21182e), None, 8.0) }
+pub fn send_button() -> ButtonStyle { current(8.0) }
 pub fn end_call() -> ButtonStyle { btn(Some(rgb(0x9c4b54)), Some(rgb(0xad5560)), Color::WHITE, Color::WHITE, None, 8.0) }
-pub fn community_invite() -> ButtonStyle { btn(Some(rgb(0x30283e)), Some(rgb(0x382e48)), rgb(0xcbb2ea), rgb(0xcbb2ea), Some(rgb(0x493855)), 7.0) }
-pub fn fingerprint_button() -> ButtonStyle { btn(Some(rgb(0x32263e)), Some(rgb(0x3b2d49)), rgb(0xe9dcf5), rgb(0xe9dcf5), Some(rgb(0x69537b)), 6.0) }
-pub fn text_button() -> ButtonStyle { btn(None, None, rgb(0xb49cc4), rgb(0xdcc8ec), None, 0.0) }
-pub fn self_avatar() -> ButtonStyle { btn(Some(rgb(0x8a755d)), Some(rgb(0x96816a)), rgb(0xf8e2c9), rgb(0xf8e2c9), None, 12.0) }
-pub fn brand() -> ButtonStyle { btn(Some(rgb(0x2c253c)), Some(rgb(0x342b47)), TEXT, TEXT, None, 14.0) }
+pub fn community_invite() -> ButtonStyle { btn(Some(rgb(0x272e37)), Some(rgb(0x2e363f)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0x36404b)), 7.0) }
+pub fn fingerprint_button() -> ButtonStyle { btn(Some(rgb(0x272e35)), Some(rgb(0x2e363f)), rgb(0xd0d7dc), rgb(0xd0d7dc), Some(rgb(0x74808b)), 6.0) }
+pub fn text_button() -> ButtonStyle { btn(None, None, rgb(0xd0d7dc), rgb(0xd0d7dc), None, 0.0) }
+pub fn self_avatar() -> ButtonStyle { btn(Some(rgb(0x74808b)), Some(rgb(0x75818b)), rgb(0xf8e2c9), rgb(0xf8e2c9), None, 12.0) }
+pub fn brand() -> ButtonStyle { btn(Some(rgb(0x252c34)), Some(rgb(0x2c333c)), TEXT, TEXT, None, 14.0) }
 
 // ----- Inputs -----------------------------------------------------------
 
@@ -160,37 +177,37 @@ pub fn input(background: Color, line: Color, focus: Color, r: f32) -> impl Fn(&T
     move |_, status| text_input::Style {
         background: background.into(),
         border: border(if matches!(status, text_input::Status::Focused { .. }) { focus } else { line }, 1.0, r),
-        icon: rgb(0x676977),
-        placeholder: rgb(0x71717e),
-        value: rgb(0xeeeeee),
-        selection: rgba(0xb69bdc66),
+        icon: rgb(0x74808b),
+        placeholder: rgb(0x74808b),
+        value: rgb(0xedeeef),
+        selection: rgba(0xd0d7dc66),
     }
 }
-pub fn auth_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x24242b), rgb(0x3c3744), rgb(0xb79bd9), 7.0) }
-pub fn dialog_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x1b191f), rgb(0x4d3e58), rgb(0xb59ad0), 7.0) }
-pub fn card_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x1d1b22), rgb(0x4b3d55), rgb(0xb59ad0), 7.0) }
+pub fn auth_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x1e2329), rgb(0x2f3740), rgb(0xd0d7dc), 7.0) }
+pub fn dialog_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x15191e), rgb(0x3a4450), rgb(0xd0d7dc), 7.0) }
+pub fn card_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style { input(rgb(0x171b20), rgb(0x37414c), rgb(0xd0d7dc), 7.0) }
 pub fn bare_input() -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
-    |_, _| text_input::Style { background: Color::TRANSPARENT.into(), border: border(Color::TRANSPARENT, 0.0, 0.0), icon: rgb(0x676977), placeholder: rgb(0x71717e), value: rgb(0xdddddd), selection: rgba(0xb69bdc66) }
+    |_, _| text_input::Style { background: Color::TRANSPARENT.into(), border: border(Color::TRANSPARENT, 0.0, 0.0), icon: rgb(0x74808b), placeholder: rgb(0x74808b), value: rgb(0xdadde0), selection: rgba(0xd0d7dc66) }
 }
 pub fn composer_editor() -> impl Fn(&Theme, text_editor::Status) -> text_editor::Style {
-    |_, _| text_editor::Style { background: Color::TRANSPARENT.into(), border: border(Color::TRANSPARENT, 0.0, 0.0), placeholder: rgb(0x807c8b), value: rgb(0xded9e7), selection: rgba(0xb69bdc66) }
+    |_, _| text_editor::Style { background: Color::TRANSPARENT.into(), border: border(Color::TRANSPARENT, 0.0, 0.0), placeholder: rgb(0x78848f), value: rgb(0xd0d7dc), selection: rgba(0xd0d7dc66) }
 }
 pub fn select() -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
     |_, status| pick_list::Style {
-        text_color: rgb(0xd2bedf),
-        placeholder_color: rgb(0x8f7e9d),
-        handle_color: rgb(0xb49cc4),
-        background: rgb(0x1d1b22).into(),
-        border: border(if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) { rgb(0x6a5580) } else { rgb(0x4b3d55) }, 1.0, 7.0),
+        text_color: rgb(0xd0d7dc),
+        placeholder_color: rgb(0x848f97),
+        handle_color: rgb(0xd0d7dc),
+        background: rgb(0x171b20).into(),
+        border: border(if matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. }) { rgb(0x74808b) } else { rgb(0x37414c) }, 1.0, 7.0),
     }
 }
 pub fn menu() -> impl Fn(&Theme) -> iced::overlay::menu::Style {
     |_| iced::overlay::menu::Style {
-        background: rgb(0x24212b).into(),
-        border: border(rgb(0x4b3d55), 1.0, 7.0),
-        text_color: rgb(0xd2bedf),
-        selected_text_color: rgb(0xf3e9ff),
-        selected_background: rgb(0x3d3050).into(),
+        background: rgb(0x1d2227).into(),
+        border: border(rgb(0x37414c), 1.0, 7.0),
+        text_color: rgb(0xd0d7dc),
+        selected_text_color: rgb(0x70eeff),
+        selected_background: rgb(0x313a44).into(),
         shadow: Shadow::default(),
     }
 }
@@ -200,14 +217,14 @@ pub fn scroll() -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
         let rail = scrollable::Rail {
             background: None,
             border: border(Color::TRANSPARENT, 0.0, 4.0),
-            scroller: scrollable::Scroller { background: (if active { rgb(0x4a4652) } else { rgb(0x39363f) }).into(), border: border(Color::TRANSPARENT, 0.0, 4.0) },
+            scroller: scrollable::Scroller { background: (if active { rgb(0x3a444f) } else { rgb(0x2d343d) }).into(), border: border(Color::TRANSPARENT, 0.0, 4.0) },
         };
         scrollable::Style {
             container: container::Style::default(),
             vertical_rail: rail,
             horizontal_rail: rail,
             gap: None,
-            auto_scroll: scrollable::AutoScroll { background: rgb(0x28232f).into(), border: border(rgb(0x494153), 1.0, 12.0), shadow: Shadow::default(), icon: rgb(0xe6d9f2) },
+            auto_scroll: scrollable::AutoScroll { background: rgb(0x1f252b).into(), border: border(rgb(0x38424d), 1.0, 12.0), shadow: Shadow::default(), icon: rgb(0xd0d7dc) },
         }
     }
 }
@@ -227,7 +244,7 @@ macro_rules! icons {
 icons! {
     MessageCircle => "message-circle", Users => "users", ShieldCheck => "shield-check", ChevronDown => "chevron-down",
     ChevronLeft => "chevron-left", ArrowUpRight => "arrow-up-right", Search => "search", LockKeyhole => "lock-keyhole",
-    LogOut => "log-out", Phone => "phone", PhoneOff => "phone-off", PhoneIncoming => "phone-incoming", PhoneMissed => "phone-missed", ScreenShare => "screen-share", ScreenShareOff => "screen-share-off", Maximize => "maximize", Minimize => "minimize", Pin => "pin",
+    LogOut => "log-out", Phone => "phone", PhoneOff => "phone-off", PhoneIncoming => "phone-incoming", PhoneMissed => "phone-missed", Settings => "settings", Smile => "smile", Paperclip => "paperclip", File => "file", ScreenShare => "screen-share", ScreenShareOff => "screen-share-off", Maximize => "maximize", Minimize => "minimize", Pin => "pin",
     Ellipsis => "ellipsis", Timer => "timer", Headphones => "headphones", HeadphoneOff => "headphone-off", Check => "check",
     Reply => "reply", Trash => "trash-2", Send => "send", X => "x", SmilePlus => "smile-plus", Mic => "mic",
     MicOff => "mic-off", Plus => "plus", Hash => "hash", Volume => "volume-2", KeyRound => "key-round",
@@ -256,6 +273,12 @@ pub fn sonar_mark<'a, M: 'a>(scale: f32) -> Element<'a, M> {
     let handle = MARK.get_or_init(|| svg::Handle::from_memory(include_bytes!("../assets/sonar-mark.svg").as_slice())).clone();
     svg(handle).width(43.0 * scale).height(43.0 * scale).into()
 }
+pub fn waves<'a, M: 'a>() -> Element<'a, M> {
+    static WAVES: std::sync::OnceLock<svg::Handle> = std::sync::OnceLock::new();
+    svg(WAVES.get_or_init(|| svg::Handle::from_memory(include_bytes!("../assets/waves.svg").as_slice())).clone()).width(Length::Fill).into()
+}
+/// Milliseconds driving the welcome screen's sonar pulse.
+pub static PULSE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub fn orbit<'a, M: 'a>() -> svg::Svg<'a> {
     static ORBIT: std::sync::OnceLock<svg::Handle> = std::sync::OnceLock::new();
     svg(ORBIT.get_or_init(|| svg::Handle::from_memory(include_bytes!("../assets/orbit.svg").as_slice())).clone()).width(186).height(186)
@@ -263,7 +286,7 @@ pub fn orbit<'a, M: 'a>() -> svg::Svg<'a> {
 
 /// Avatar tile colors rotate like `.person:nth-child(3n+...)` on the web.
 pub fn avatar_colors(index: usize) -> (Color, Color) {
-    match index % 3 { 1 => (rgb(0x4c3e49), rgb(0xdec3d2)), 2 => (rgb(0x354840), rgb(0xb8d2c2)), _ => (rgb(0x414452), rgb(0xc8ccde)) }
+    match index % 3 { 1 => (rgb(0x343d48), rgb(0xd0d7dc)), 2 => (rgb(0x2f3741), rgb(0xb8d2c2)), _ => (rgb(0x38424d), rgb(0xcfd4d7)) }
 }
 pub fn initials(name: &str) -> String {
     let value: String = name.split_whitespace().filter_map(|part| part.chars().next()).take(2).collect::<String>().to_uppercase();

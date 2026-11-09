@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   ArrowUpRight,
+  Download,
   LockKeyhole,
   ShieldCheck,
   Timer,
@@ -151,6 +152,11 @@ export default function AuthPage({ signup = false, recover = false }) {
                   ? "Use a passkey you previously added in account settings."
                   : "Passkeys require a supported browser and HTTPS or localhost."}
               </p>
+              <a className="secondary desktop-download" href="/downloads/Sonar-Desktop-windows-x64.zip" download>
+                <Download size={17} />
+                Download for Windows
+              </a>
+              <p className="passkey-login-caption">The desktop app uses the same account and conversations.</p>
             </>
           )}
           <p className="auth-switch">

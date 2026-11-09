@@ -101,10 +101,6 @@ export default function VoiceRoomList({
           </div>
         );
       })}
-      <p className="voice-room-privacy">
-        Joining shares your audio with everyone in the room. Up to 6 people. No
-        recordings. Locking stops new joins; it does not disconnect people already in the room.
-      </p>
     </div>
   );
 }

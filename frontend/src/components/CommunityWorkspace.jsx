@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import PresenceControl from "./PresenceControl";
+import { useEffect, useState, useRef } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -12,6 +13,8 @@ import {
   Plus,
   Send,
   Reply,
+  ChevronDown,
+  Settings,
   ShieldCheck,
   Timer,
   Trash2,
@@ -23,6 +26,8 @@ import { useAuthStore } from "../store/useAuthStore";
 import { useCommunityStore } from "../store/useCommunityStore";
 import { useUnreadStore } from "../store/useUnreadStore";
 import MessageText from "./MessageText";
+import ComposerTools, { FileCard } from "./ComposerTools";
+import { fileLabel } from "../lib/messageContent";
 import { useConversationDraft } from "../store/useDraftStore";
 import VoiceCallBanner from "./VoiceCallBanner";
 import ReactionBar from "./ReactionBar";
@@ -45,8 +50,10 @@ export default function CommunityWorkspace({
   voiceRoom,
   hasUnreadDirect,
 }) {
-  const { authUser, socket, onlineUsers, logout } = useAuthStore();
+  const { authUser, socket, onlineUsers, presence, logout } = useAuthStore();
   const store = useCommunityStore();
+  const messageBox = useRef(null);
+  const [manageOpen, setManageOpen] = useState(false);
   const { communities, community, channel, messages, loading } = store;
   const unreadChannels = useUnreadStore(state => state.channels);
   const [dialog, setDialog] = useState(null),
@@ -297,13 +304,13 @@ export default function CommunityWorkspace({
           <Plus size={22} />
         </button>
         <div className="rail-bottom">
-          <span className="free-badge">FREE</span>
           <button
-            className="self-avatar"
-            title="Account settings"
+            className="rail-button"
+            title="Settings"
+            aria-label="Settings"
             onClick={() => useAuthStore.setState({ settingsOpen: true })}
           >
-            {initials(authUser.fullName)}
+            <Settings size={22} />
           </button>
         </div>
       </nav>
@@ -328,26 +335,14 @@ export default function CommunityWorkspace({
           </button>
           {community ? (
             <>
-              <div className="community-summary">
-                <span className="community-icon large-icon">
-                  {initials(community.name)}
-                </span>
-                <strong>{community.name}</strong>
-                <small>
-                  {community.members.length}{" "}
-                  {community.members.length === 1 ? "member" : "members"} ·
-                  Invite only
-                </small>
-              </div>
+              <small className="community-count">
+                {community.members.length} {community.members.length === 1 ? "member" : "members"}
+              </small>
               {owner && (
                 <button className="community-invite" onClick={generateInvite}>
                   <Users size={15} /> Invite your people <Plus size={14} />
                 </button>
               )}
-              {owner && <button className="nav-row" onClick={() => { open("rename-community"); setValue(community.name); }}>Rename community</button>}
-              {owner && <button className="nav-row" onClick={() => { open("rename-channel"); const first = community.channels[0]; setRenameChannel(first?._id || ""); setValue(first?.name || ""); }}>Rename a channel or room</button>}
-              {owner && <button className="nav-row leave-community" onClick={() => { open("delete-channel"); setRenameChannel(community.channels[0]?._id || ""); }}>Delete a channel or room</button>}
-              {owner && <button className="nav-row leave-community" onClick={() => setConfirmation({ action: "delete-community", communityId: community._id })}>Delete community</button>}
               <div className="sidebar-section">
                 <span>TEXT CHANNELS</span>
                 {owner && (
@@ -386,36 +381,30 @@ export default function CommunityWorkspace({
                   open("channel");
                 }}
               />
-              <div className="community-limits">
-                <ShieldCheck size={14} />
-                <p>
-                  Encrypted for each member.
-                  <br />
-                  Up to 32 people in this early version.
-                </p>
-              </div>
-              <button
-                className="nav-row leave-community"
-                disabled={owner}
-                title={
-                  owner
-                    ? "Transfer ownership to another member before leaving"
-                    : "Leave this community"
-                }
-                onClick={() =>
-                  setConfirmation({
-                    action: "leave",
-                    communityId: community._id,
-                  })
-                }
-              >
-                <LogOut size={16} />
-                Leave community
-              </button>
-              {owner && (
-                <p className="owner-hint">
-                  To leave, transfer ownership from the member list first.
-                </p>
+              {owner ? (
+                <>
+                  <button className="nav-row manage-toggle" aria-expanded={manageOpen} onClick={() => setManageOpen(!manageOpen)}>
+                    <Settings size={16} />
+                    Manage community
+                    <ChevronDown size={15} />
+                  </button>
+                  {manageOpen && (
+                    <>
+                      {owner && <button className="nav-row" onClick={() => { open("rename-community"); setValue(community.name); }}>Rename community</button>}
+                      {owner && <button className="nav-row" onClick={() => { open("rename-channel"); const first = community.channels[0]; setRenameChannel(first?._id || ""); setValue(first?.name || ""); }}>Rename a channel or room</button>}
+                      {owner && <button className="nav-row leave-community" onClick={() => { open("delete-channel"); setRenameChannel(community.channels[0]?._id || ""); }}>Delete a channel or room</button>}
+                      {owner && <button className="nav-row leave-community" onClick={() => setConfirmation({ action: "delete-community", communityId: community._id })}>Delete community</button>}
+                    </>
+                  )}
+                </>
+              ) : (
+                <button
+                  className="nav-row leave-community"
+                  onClick={() => setConfirmation({ action: "leave", communityId: community._id })}
+                >
+                  <LogOut size={16} />
+                  Leave community
+                </button>
               )}
             </>
           ) : (
@@ -453,16 +442,11 @@ export default function CommunityWorkspace({
             <small>7-day history. Pins stay.</small>
           </div>
         </div>
-        <footer className="user-footer">
-          <span className="avatar-tile">{initials(authUser.fullName)}</span>
-          <div>
-            <strong>{authUser.fullName}</strong>
-            <small>Personal space</small>
-          </div>
+        <PresenceControl>
           <button className="icon-button" title="Sign out" onClick={logout}>
             <LogOut size={17} />
           </button>
-        </footer>
+        </PresenceControl>
       </aside>
       <main className="conversation">
         <header className="chat-top">
@@ -519,7 +503,7 @@ export default function CommunityWorkspace({
             Messages disappear after 7 days. Pin the ones worth keeping.
           </span>
         </div>
-        <VoiceCallBanner voice={voice} users={community?.memberDetails || []} />
+        <VoiceCallBanner voice={voice} voiceRoom={voiceRoom} users={community?.memberDetails || []} />
         <VoiceRoomBanner voiceRoom={voiceRoom} />
         <div className="community-content">
           <div className="community-thread">
@@ -653,7 +637,7 @@ export default function CommunityWorkspace({
                             )}
                           </div>
                           {message.replyTo && <div className="reply-reference">Replying to: {visible.find(item => item._id === message.replyTo && !item.unreadable)?.text || "Original message unavailable"}</div>}
-                          <MessageText text={message.text} />
+                          {message.file ? <FileCard file={message.file} /> : <MessageText text={message.text} />}
                           {!pins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => store.send("", null, reaction)} />}
                         </div>
                         <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>
@@ -680,6 +664,7 @@ export default function CommunityWorkspace({
                 <form className="composer" onSubmit={send}>
                   <LockKeyhole size={18} />
                   <textarea
+                    ref={messageBox}
                     aria-label={`Message ${channel.name}`}
                     rows={1}
                     maxLength={4000}
@@ -692,6 +677,15 @@ export default function CommunityWorkspace({
                         send(event);
                       }
                     }}
+                  />
+                  <ComposerTools
+                    textarea={messageBox}
+                    value={text}
+                    setValue={setText}
+                    target={{ community: community._id }}
+                    disabled={loading}
+                    stillHere={() => useCommunityStore.getState().channel?._id === channel._id}
+                    send={(file) => store.send(fileLabel(file), null, null, file)}
                   />
                   <button
                     title="Send encrypted channel message"
@@ -727,8 +721,8 @@ export default function CommunityWorkspace({
               {community.memberDetails.map((member) => (
                 <div className="person" key={member._id}>
                   <span className="avatar-tile">
-                    {initials(member.fullName)}
-                    {onlineUsers.includes(member._id) && <i />}
+                    {initials(member?.fullName)}
+                    {onlineUsers.includes(member._id) && <i className={presence[member._id] ? `status-${presence[member._id]}` : undefined} />}
                   </span>
                   <span>
                     <strong>{member.fullName}</strong>

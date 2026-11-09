@@ -34,27 +34,28 @@ fn body<'a>(value: impl text::IntoFragment<'a>, size: f32, color: Color, line: f
     text(value).size(size).color(color).font(t::REGULAR).line_height(LineHeight::Relative(line))
 }
 
-fn avatar<'a>(name: &str, index: usize, online: Option<Color>, size: f32) -> E<'a> {
+fn avatar<'a>(name: &str, index: usize, online: Option<Color>, size: f32) -> E<'a> { avatar_status(name, index, online, t::presence_color("online"), size) }
+fn avatar_status<'a>(name: &str, index: usize, online: Option<Color>, dot: Color, size: f32) -> E<'a> {
     let (background, color) = t::avatar_colors(index);
-    tile(name, background, color, None, size, if size > 40.0 { 23.0 } else { 12.0 }, if size > 40.0 { 24.0 } else { 14.0 }, online)
+    tile(name, background, color, None, size, if size > 40.0 { 23.0 } else { 12.0 }, if size > 40.0 { 24.0 } else { 14.0 }, online, dot)
 }
 #[allow(clippy::too_many_arguments)]
-fn tile<'a>(name: &str, background: Color, color: Color, line: Option<Color>, size: f32, r: f32, font: f32, online: Option<Color>) -> E<'a> {
-    let face = container(text(t::initials(name)).size(font).color(color).font(t::semibold()))
+fn tile<'a>(name: &str, background: Color, color: Color, line: Option<Color>, size: f32, r: f32, font: f32, online: Option<Color>, dot: Color) -> E<'a> {
+    let face: E<'a> = container(text(t::initials(name)).size(font).color(color).font(t::semibold()))
         .width(size).height(size).center_x(size).center_y(size)
-        .style(move |_| container::Style { background: Some(background.into()), border: t::border(line.unwrap_or(Color::TRANSPARENT), if line.is_some() { 1.0 } else { 0.0 }, r), ..Default::default() });
+        .style(move |_| container::Style { background: Some(background.into()), border: t::border(line.unwrap_or(Color::TRANSPARENT), if line.is_some() { 1.0 } else { 0.0 }, r), ..Default::default() }).into();
     match online {
         Some(ring) => {
-            let badge = container(container(space()).width(9).height(9).style(move |_| container::Style { background: Some(t::rgb(0x88c7a3).into()), border: t::border(ring, 2.0, 6.0), ..Default::default() }))
+            let badge = container(container(space()).width(9).height(9).style(move |_| container::Style { background: Some(dot.into()), border: t::border(ring, 2.0, 6.0), ..Default::default() }))
                 .width(size + 2.0).height(size + 2.0).align_x(Horizontal::Right).align_y(Vertical::Bottom);
             stack![container(face).padding(Padding { right: 1.0, bottom: 1.0, ..Padding::ZERO }), badge].into()
         }
-        None => face.into(),
+        None => face,
     }
 }
 
 fn icon_btn<'a>(icon: Icon, size: f32, on: Option<Msg>, active: bool) -> E<'a> {
-    let color = if active { t::ACCENT } else { rgb(0x8e8e9b) };
+    let color = if active { t::ACCENT } else { rgb(0x8c969d) };
     button(container(t::icon(icon, size, color)).center_x(30).center_y(32)).padding(0).width(30).height(32).style(t::icon_button(active)).on_press_maybe(on).into()
 }
 
@@ -65,17 +66,17 @@ fn action<'a>(label: impl Into<String>, icon: Option<Icon>, style: Box<dyn Fn(&i
     if let Some(icon) = icon { content = content.push(t::icon(icon, size + 5.0, color)); }
     button(content).padding(padding).style(style).on_press_maybe(on).into()
 }
-fn primary<'a>(label: impl Into<String>, icon: Option<Icon>, on: Option<Msg>) -> E<'a> { action(label, icon, t::primary(), rgb(0x251c31), on, [13.0, 18.0], 15.0) }
+fn primary<'a>(label: impl Into<String>, icon: Option<Icon>, on: Option<Msg>) -> E<'a> { action(label, icon, t::primary(), rgb(0x1e2329), on, [13.0, 18.0], 15.0) }
 /// A primary button filling its form, like `.auth-card form .primary`.
 fn primary_wide<'a>(label: impl Into<String>, icon: Icon, on: Option<Msg>) -> E<'a> {
     let label: String = label.into();
-    let color = rgb(0x251c31);
+    let color = rgb(0x1e2329);
     button(row![text(label).size(15).color(color).font(t::semibold()), grow(), t::icon(icon, 18.0, color)].align_y(Vertical::Center)).width(FILL).padding([13, 18]).style(t::primary()).on_press_maybe(on).into()
 }
 fn secondary<'a>(label: impl Into<String>, icon: Option<Icon>, on: Option<Msg>) -> E<'a> {
     let label: String = label.into();
-    let mut content = Row::new().spacing(12).align_y(Vertical::Center).push(text(label).size(15).color(rgb(0xc1b0d0)).font(t::REGULAR));
-    if let Some(icon) = icon { content = content.push(t::icon(icon, 16.0, rgb(0xc1b0d0))); }
+    let mut content = Row::new().spacing(12).align_y(Vertical::Center).push(text(label).size(15).color(rgb(0xd0d7dc)).font(t::REGULAR));
+    if let Some(icon) = icon { content = content.push(t::icon(icon, 16.0, rgb(0xd0d7dc))); }
     button(content).padding([12, 16]).style(t::secondary()).on_press_maybe(on).into()
 }
 fn danger<'a>(label: impl Into<String>, on: Option<Msg>) -> E<'a> {
@@ -102,8 +103,8 @@ fn card_input<'a>(placeholder: &str, value: &'a str, on: impl Fn(String) -> Msg 
 }
 
 fn honest_note<'a>(icon: Icon, note: &'a str) -> E<'a> {
-    container(row![t::icon(icon, 16.0, rgb(0xb59dcf)), body(note, 13.0, rgb(0xa69aaa), 1.8)].spacing(9))
-        .padding(13).width(FILL).style(t::panel(rgb(0x2c2832), rgb(0x3b3345), 7.0)).into()
+    container(row![t::icon(icon, 16.0, rgb(0xd0d7dc)), body(note, 13.0, rgb(0x9ba3a9), 1.8)].spacing(9))
+        .padding(13).width(FILL).style(t::panel(rgb(0x22282f), rgb(0x2d353f), 7.0)).into()
 }
 
 fn scroll_area<'a>(content: impl Into<E<'a>>) -> scrollable::Scrollable<'a, Msg> {
@@ -111,9 +112,15 @@ fn scroll_area<'a>(content: impl Into<E<'a>>) -> scrollable::Scrollable<'a, Msg>
 }
 
 /// A centered dialog over a dimmed backdrop (`.modal-backdrop` + card).
+/// A dialog body that scrolls with its bar beside the text, never over it.
+fn modal_scroll<'a>(content: impl Into<E<'a>>) -> E<'a> {
+    container(scrollable(content).direction(scrollable::Direction::Vertical(scrollable::Scrollbar::new().width(6).scroller_width(6).margin(1).spacing(14))).style(t::scroll()))
+        .padding(Padding { top: 34.0, bottom: 34.0, left: 34.0, right: 12.0 }).into()
+}
+
 fn modal<'a>(content: E<'a>, width: f32, close: Option<Msg>) -> E<'a> {
-    let card = container(content).max_width(width).width(FILL).style(t::modal_card(rgb(0x222127), rgb(0x44404c), 17.0));
-    let backdrop = mouse_area(center(opaque(card)).padding(20).style(t::fill(rgba(0x09090eb8))));
+    let card = container(content).max_width(width).width(FILL).style(t::modal_card(rgb(0x1b2025), rgb(0x353e49), 17.0));
+    let backdrop = mouse_area(center(opaque(card)).padding(20).style(t::fill(rgba(0x090b0db8))));
     opaque(match close { Some(msg) => backdrop.on_press(msg), None => backdrop }).into()
 }
 fn modal_header<'a>(icon: Icon, size: f32, close: Msg) -> E<'a> {
@@ -124,7 +131,7 @@ fn modal_title<'a>(value: impl text::IntoFragment<'a>) -> E<'a> {
 }
 
 fn boot<'a>() -> E<'a> {
-    center(column![t::sonar_mark(1.0), text("Opening your private space...").size(16).color(rgb(0xac9abd))].spacing(25).align_x(Horizontal::Center)).into()
+    center(column![t::sonar_mark(1.0), text("Opening your private space...").size(16).color(rgb(0xd0d7dc))].spacing(25).align_x(Horizontal::Center)).into()
 }
 
 fn screen_button<'a>(app: &'a App) -> E<'a> {
@@ -135,7 +142,7 @@ fn screen_button<'a>(app: &'a App) -> E<'a> {
 fn screen_volume<'a>(app: &'a App, id: &'a str) -> E<'a> {
     let volume = app.screen_volumes.get(id).copied().unwrap_or(1.0);
     let id = id.to_owned();
-    row![t::icon(Icon::Volume, 15.0, rgb(0x9b91a4)), iced::widget::slider(0.0..=1.0, volume, move |value| Msg::ScreenVolume(id.clone(), value)).step(0.01f32).width(110).style(t::volume_slider())].spacing(7).align_y(Vertical::Center).into()
+    row![t::icon(Icon::Volume, 15.0, rgb(0x929ca3)), iced::widget::slider(0.0..=1.0, volume, move |value| Msg::ScreenVolume(id.clone(), value)).step(0.01f32).width(110).style(t::volume_slider())].spacing(7).align_y(Vertical::Center).into()
 }
 
 /// Screens other people are sharing. Mirrors ScreenStage.jsx.
@@ -143,26 +150,26 @@ fn screen_stage(app: &App) -> Option<E<'_>> {
     use iced::widget::image;
     if app.screen_views.is_empty() { return None; }
     if let Some((id, (handle, _, _))) = app.screen_expanded.as_ref().and_then(|id| app.screen_views.get_key_value(id)) {
-        let header = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb9b7c3)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
+        let header = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
         return Some(opaque(container(column![container(header).padding([6, 10]), image(handle.clone()).width(FILL).height(FILL)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000)))));
     }
     let mut tiles = Column::new().spacing(10);
     for (id, (handle, width, height)) in &app.screen_views {
         let aspect = *height as f32 / (*width).max(1) as f32;
-        let caption = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb9b7c3)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
-        tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x15161a), rgb(0x37313e), 8.0)));
+        let caption = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
+        tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
     }
     Some(container(container(opaque(tiles)).width(520)).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom).padding(18).into())
 }
 
 fn screen_picker<'a>(picker: &'a crate::ScreenPicker) -> E<'a> {
     let chosen = picker.sources.get(picker.selected);
-    let section = |label: &'static str| -> E<'a> { container(text(t::tracked(label)).size(11).color(rgb(0x8c8496))).padding(Padding { top: 16.0, bottom: 8.0, ..Padding::ZERO }).into() };
+    let section = |label: &'static str| -> E<'a> { container(text(t::tracked(label)).size(11).color(rgb(0x848f96))).padding(Padding { top: 16.0, bottom: 8.0, ..Padding::ZERO }).into() };
     let mut screens = Column::new().spacing(4);
     let mut apps = Column::new().spacing(4);
     for (index, source) in picker.sources.iter().enumerate() {
         let selected = index == picker.selected;
-        let line = button(row![t::icon(if source.monitor { Icon::ScreenShare } else { Icon::AudioLines }, 15.0, rgb(0xc1b0d0)), text(source.label.clone()).size(14).color(if selected { rgb(0xe6d9f2) } else { rgb(0xb9b7c3) }).wrapping(text::Wrapping::None).width(FILL)].spacing(10).align_y(Vertical::Center)).width(FILL).padding([8, 10]).style(if selected { t::community_invite() } else { t::secondary() }).on_press(Msg::ScreenSelect(index));
+        let line = button(row![t::icon(if source.monitor { Icon::ScreenShare } else { Icon::AudioLines }, 15.0, rgb(0xd0d7dc)), text(source.label.clone()).size(14).color(if selected { rgb(0xd0d7dc) } else { rgb(0xb8bec2) }).wrapping(text::Wrapping::None).width(FILL)].spacing(10).align_y(Vertical::Center)).width(FILL).padding([8, 10]).style(if selected { t::community_invite() } else { t::secondary() }).on_press(Msg::ScreenSelect(index));
         if source.monitor { screens = screens.push(line); } else { apps = apps.push(line); }
     }
     let list = column![section("YOUR SCREENS"), screens, section("APPS"), apps];
@@ -180,7 +187,7 @@ fn screen_picker<'a>(picker: &'a crate::ScreenPicker) -> E<'a> {
         container(scroll_area(list)).max_height(300),
         section("RESOLUTION"),
         sizes,
-        container(text(format!("{sound} {encoder}")).size(13).color(rgb(0x99919f))).padding(Padding { top: 12.0, bottom: 16.0, ..Padding::ZERO }),
+        container(text(format!("{sound} {encoder}")).size(13).color(rgb(0x9099a0))).padding(Padding { top: 12.0, bottom: 16.0, ..Padding::ZERO }),
         primary("Start sharing", Some(Icon::ScreenShare), chosen.map(|_| Msg::ScreenStart)),
     ];
     modal(container(content).padding(34).into(), 520.0, Some(Msg::ScreenClosePicker))
@@ -191,9 +198,9 @@ fn toasts(app: &App) -> E<'_> {
         let (icon, color) = match toast.kind { ToastKind::Success => (Some(Icon::CircleCheck), rgb(0x61d345)), ToastKind::Error => (Some(Icon::CircleX), rgb(0xff4b4b)), ToastKind::Plain => (None, t::TEXT) };
         let mut content = Row::new().spacing(10).align_y(Vertical::Center);
         if let Some(icon) = icon { content = content.push(t::icon(icon, 20.0, color)); }
-        content = content.push(body(toast.text.as_str(), 16.0, rgb(0xeeeeee), 1.3));
+        content = content.push(body(toast.text.as_str(), 16.0, rgb(0xedeeef), 1.3));
         list.push(mouse_area(container(content).padding([10, 14]).max_width(350).style(|_| container::Style {
-            background: Some(rgb(0x24262b).into()), border: t::border(Color::TRANSPARENT, 0.0, 8.0),
+            background: Some(rgb(0x1e2329).into()), border: t::border(Color::TRANSPARENT, 0.0, 8.0),
             ..Default::default()
         })).on_press(Msg::DismissToast(toast.id)))
     });
@@ -204,25 +211,26 @@ fn toasts(app: &App) -> E<'_> {
 
 fn auth(app: &App) -> E<'_> {
     let form = &app.auth;
-    let feature = |icon: Icon, label: &'static str| -> E<'static> { lead_icon(icon, label, rgb(0xb4a2c7), 17.0, 13.0, 7.0).into() };
+    let feature = |icon: Icon, label: &'static str| -> E<'static> { lead_icon(icon, label, rgb(0xd0d7dc), 17.0, 13.0, 7.0).into() };
     let story = container(column![
         row![t::sonar_mark(1.0), text("sonar").size(25).font(t::bold()).color(t::TEXT),
-            container(t::eyebrow("EARLY ACCESS", 10.0, rgb(0xb8a5ce))).padding(5).style(t::panel(Color::TRANSPARENT, rgb(0x52475f), 4.0))].spacing(12).align_y(Vertical::Center),
+            container(t::eyebrow("EARLY ACCESS", 10.0, rgb(0xd0d7dc))).padding(5).style(t::panel(Color::TRANSPARENT, rgb(0x74808b), 4.0))].spacing(12).align_y(Vertical::Center),
         space().height(FILL),
         t::eyebrow("LESS NOISE. MORE CONNECTION.", 13.0, t::EYEBROW),
         column![
             text("Your people.").size(42).font(t::bold()).color(t::TEXT),
             text("Your conversations.").size(42).font(t::bold()).color(t::TEXT),
-            text("Your space.").size(42).font(iced::Font { style: iced::font::Style::Italic, ..t::bold() }).color(rgb(0xc2a7ed)),
+            text("Your space.").size(42).font(t::bold()).color(rgb(0xd0d7dc)),
         ].spacing(2).padding([24, 0]),
-        container(body("A quieter corner of the internet. Built for the conversations that matter, with privacy at the core.", 17.0, rgb(0xa39aaa), 1.9)).max_width(365),
+        container(body("A quieter corner of the internet. Built for the conversations that matter, with privacy at the core.", 17.0, rgb(0x9ba3a9), 1.9)).max_width(365),
         row![feature(Icon::LockKeyhole, "Encrypted messages"), feature(Icon::Timer, "Gone in 7 days"), feature(Icon::AudioLines, "No call recordings")].spacing(20).padding(Padding { top: 36.0, ..Padding::ZERO }),
         space().height(FILL),
-        text("Free to use. No subscriptions. No ads.").size(13).color(rgb(0x8b7f98)),
-    ]).padding([45, 65]).width(Length::FillPortion(105)).height(FILL)
-        .style(t::gradient_panel(35.0, rgb(0x32283d), rgb(0x1d1b24), Color::TRANSPARENT, 0.0));
+        text("Free to use. No subscriptions. No ads.").size(13).color(rgb(0x818c96)),
+    ]).padding([45, 65]).width(FILL).height(FILL);
+    let story = container(stack![container(t::waves::<Msg>()).width(FILL).height(FILL).align_y(Vertical::Bottom), story]).width(Length::FillPortion(105)).height(FILL)
+        .style(t::gradient_panel(35.0, rgb(0x2b333c), rgb(0x121519), Color::TRANSPARENT, 0.0));
 
-    let label = |value: &'static str| text(value).size(14).color(rgb(0xbcb3c6));
+    let label = |value: &'static str| text(value).size(14).color(rgb(0xb7bdc2));
     let entry = |value: &str, field: u8, secure: bool| -> E<'_> {
         let input = text_input("", value).on_input(move |v| Msg::AuthField(field, v)).secure(secure).padding(12).size(16).style(t::auth_input());
         if field == 2 { input.on_submit(Msg::Submit).into() } else { input.into() }
@@ -241,7 +249,7 @@ fn auth(app: &App) -> E<'_> {
         fields = fields.push(column![label("Password"), entry(&form.password, 2, true)].spacing(9));
     }
     if !form.signup && !form.recover {
-        fields = fields.push(container(button(text("Forgot your password?").size(14).color(rgb(0xc3a5ec))).padding(0).style(t::plain(rgb(0xc3a5ec), rgb(0xdcc8f6))).on_press(Msg::ToggleRecover)).width(FILL).align_x(Horizontal::Right).padding(Padding { top: -10.0, ..Padding::ZERO }));
+        fields = fields.push(container(button(text("Forgot your password?").size(14).color(rgb(0xd0d7dc))).padding(0).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::ToggleRecover)).width(FILL).align_x(Horizontal::Right).padding(Padding { top: -10.0, ..Padding::ZERO }));
     }
     let submit_label = if form.busy && form.recover { "Resetting your password..." } else if form.busy { "Setting up your space..." } else if form.recover { "Reset password" } else if form.signup { "Create your account" } else { "Enter your space" };
     fields = fields.push(container(primary_wide(submit_label, Icon::ArrowUpRight, (!form.busy).then_some(if form.recover { Msg::Recover } else { Msg::Submit }))).padding(Padding { top: 5.0, ..Padding::ZERO }));
@@ -249,40 +257,40 @@ fn auth(app: &App) -> E<'_> {
     let mut card = Column::new().width(FILL)
         .push(t::icon(Icon::ShieldCheck, 30.0, t::ACCENT))
         .push(container(text(if form.recover { "Reset your password." } else if form.signup { "Find your frequency." } else { "Welcome back." }).size(28).font(t::bold()).color(t::TEXT)).padding(Padding { top: 22.0, bottom: 10.0, ..Padding::ZERO }))
-        .push(body(if form.recover { "Use the recovery key you saved when you created your account. Your messages stay encrypted and readable." } else if form.signup { "Create your own little corner of Sonar." } else { "Good conversations are waiting for you." }, 15.0, rgb(0x99919f), 1.8))
+        .push(body(if form.recover { "Use the recovery key you saved when you created your account. Your messages stay encrypted and readable." } else if form.signup { "Create your own little corner of Sonar." } else { "Good conversations are waiting for you." }, 15.0, rgb(0x9099a0), 1.8))
         .push(container(fields).padding(Padding { top: 30.0, bottom: 22.0, ..Padding::ZERO }));
     if !form.signup && !form.recover {
-        let divider = row![t::rule(rgb(0x3d3348), true), text("or").size(13).color(rgb(0x7e6e8c)), t::rule(rgb(0x3d3348), true)].spacing(12).align_y(Vertical::Center);
+        let divider = row![t::rule(rgb(0x2f3842), true), text("or").size(13).color(rgb(0x74808b)), t::rule(rgb(0x2f3842), true)].spacing(12).align_y(Vertical::Center);
         #[cfg(windows)]
         let passkey_press = (!form.busy).then_some(Msg::PasskeySignIn);
         #[cfg(not(windows))]
         let passkey_press: Option<Msg> = None;
-        let passkey = button(container(lead_icon(Icon::KeyRound, "Sign in with a passkey", rgb(0xcdb3e1), 17.0, 15.0, 12.0)).center_x(FILL))
+        let passkey = button(container(lead_icon(Icon::KeyRound, "Sign in with a passkey", rgb(0xd0d7dc), 17.0, 15.0, 12.0)).center_x(FILL))
             .width(FILL).padding([12, 16]).style(t::secondary()).on_press_maybe(passkey_press);
         card = card.push(container(divider).padding(Padding { top: 24.0, bottom: 15.0, ..Padding::ZERO }))
             .push(passkey)
-            .push(container(body("Use a passkey you previously added in account settings.", 12.0, rgb(0x8f7e9d), 1.8)).padding(Padding { top: 10.0, bottom: 24.0, ..Padding::ZERO }));
+            .push(container(body("Use a passkey you previously added in account settings.", 12.0, rgb(0x848f97), 1.8)).padding(Padding { top: 10.0, bottom: 24.0, ..Padding::ZERO }));
     }
     card = card.push(row![
-        text(if form.signup || form.recover { "Remembered it?" } else { "New around here?" }).size(15).color(rgb(0x99919f)),
-        button(text(if form.signup || form.recover { "Sign in" } else { "Join Sonar" }).size(15).color(rgb(0xc3a5ec))).padding(0).style(t::plain(rgb(0xc3a5ec), rgb(0xdcc8f6))).on_press(Msg::ToggleSignup),
+        text(if form.signup || form.recover { "Remembered it?" } else { "New around here?" }).size(15).color(rgb(0x9099a0)),
+        button(text(if form.signup || form.recover { "Sign in" } else { "Join Sonar" }).size(15).color(rgb(0xd0d7dc))).padding(0).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::ToggleSignup),
     ].spacing(6));
     // Desktop only: which Sonar server to use (the browser uses its own address).
     let server: E = if form.server_open {
         column![
-            text("Sonar server").size(14).color(rgb(0xbcb3c6)),
+            text("Sonar server").size(14).color(rgb(0xb7bdc2)),
             text_input("https://your-sonar.example", &form.server).on_input(|v| Msg::AuthField(3, v)).padding(10).size(15).style(t::auth_input()),
         ].spacing(8).into()
     } else {
-        button(lead_icon(Icon::Server, format!("Server: {}", form.server.trim_start_matches("https://").trim_start_matches("http://")), rgb(0x82758e), 13.0, 13.0, 7.0)).padding(0).style(t::plain(rgb(0x82758e), rgb(0xb49cc4))).on_press(Msg::ToggleServer).into()
+        button(lead_icon(Icon::Server, format!("Server: {}", form.server.trim_start_matches("https://").trim_start_matches("http://")), rgb(0x76828d), 13.0, 13.0, 7.0)).padding(0).style(t::plain(rgb(0x76828d), rgb(0xd0d7dc))).on_press(Msg::ToggleServer).into()
     };
     card = card.push(container(column![
-        t::rule(rgb(0x35313c), true),
-        row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x82758e)), body("Your messages are locked with a recovery key that only you keep. Sonar never has it, so it can never read your conversations, on the web or the desktop app.", 13.0, rgb(0x82758e), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
+        t::rule(rgb(0x293039), true),
+        row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x76828d)), body("Your messages are locked with a recovery key that only you keep. Sonar never has it, so it can never read your conversations, on the web or the desktop app.", 13.0, rgb(0x76828d), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
         container(server).padding(Padding { top: 14.0, ..Padding::ZERO }),
     ]).padding(Padding { top: 34.0, ..Padding::ZERO }));
     let side = container(scroll_area(container(card.max_width(345)).center_x(FILL).padding([45, 0]))).width(Length::FillPortion(100)).height(FILL).center_y(FILL).padding([0, 45]).style(t::fill(t::SIDEBAR));
-    row![story, t::rule(rgb(0x36313e), false), side].into()
+    row![story, t::rule(rgb(0x2a313a), false), side].into()
 }
 
 // ----- Unlock / reset key (UnpairedDevicePage) --------------------------------
@@ -301,18 +309,18 @@ fn unlock(app: &App) -> E<'_> {
     let mut card = Column::new().width(FILL)
         .push(t::icon(Icon::LockKeyhole, 30.0, t::ACCENT))
         .push(container(text(title).size(28).font(t::bold()).color(t::TEXT)).padding(Padding { top: 22.0, bottom: 10.0, ..Padding::ZERO }))
-        .push(body(note, 15.0, rgb(0x99919f), 1.8));
+        .push(body(note, 15.0, rgb(0x9099a0), 1.8));
     if reason == UnlockReason::Missing {
         card = card.push(container(container(column![
-            text("To keep your history").size(15).font(t::semibold()).color(rgb(0xd3c4ea)),
-            body("Open Sonar on that browser, then go to Account settings → Privacy & device → Turn on multi-device access. Then sign in here again.", 15.0, rgb(0x9d98a8), 1.6),
-        ].spacing(6)).padding([13, 14]).width(FILL).style(t::gradient_panel(120.0, rgb(0x25232b), rgb(0x202126), rgb(0x34303d), 8.0))).padding(Padding { top: 22.0, ..Padding::ZERO }));
+            text("To keep your history").size(15).font(t::semibold()).color(rgb(0xd0d7dc)),
+            body("Open Sonar on that browser, then go to Account settings → Privacy & device → Turn on multi-device access. Then sign in here again.", 15.0, rgb(0x98a1a8), 1.6),
+        ].spacing(6)).padding([13, 14]).width(FILL).style(t::gradient_panel(120.0, rgb(0x1d2329), rgb(0x1a1f25), rgb(0x293039), 8.0))).padding(Padding { top: 22.0, ..Padding::ZERO }));
     }
     let input = text_input(if recovery { "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" } else { "" }, &app.unlock_password).on_input(Msg::UnlockPassword).on_submit(Msg::Unlock).secure(!recovery).padding(12).size(16).style(t::auth_input());
-    let mut form = Column::new().spacing(20).push(column![text(if recovery { "Recovery key" } else { "Password" }).size(14).color(rgb(0xbcb3c6)), input].spacing(9));
+    let mut form = Column::new().spacing(20).push(column![text(if recovery { "Recovery key" } else { "Password" }).size(14).color(rgb(0xb7bdc2)), input].spacing(9));
     if resetting && app.unlock_confirm {
         form = form.push(container(body("A new key replaces the old one. Messages encrypted for the old key stay unreadable here, and your contacts will be asked to confirm your new safety code.", 15.0, rgb(0xe3b8a8), 1.6))
-            .padding([10, 12]).width(FILL).style(t::panel(rgb(0x35242a), rgb(0x4a2f37), 8.0)));
+            .padding([10, 12]).width(FILL).style(t::panel(rgb(0x222930), rgb(0x4a2f37), 8.0)));
     }
     let label = if app.busy { "Working on it..." } else if !resetting { "Unlock messages" } else if app.unlock_confirm { "Yes, create a new key" } else { "Reset my encryption key" };
     let icon = if !resetting { Icon::KeyRound } else if app.unlock_confirm { Icon::RotateCcw } else { Icon::ArrowUpRight };
@@ -322,10 +330,10 @@ fn unlock(app: &App) -> E<'_> {
         let toggle = if resetting { "Back to unlocking" } else if recovery { "Lost your recovery key?" } else { "Forgot your password?" };
         card = card.push(container(button(text(toggle).size(14)).padding([6, 0]).style(t::text_button()).on_press_maybe((!app.busy).then_some(Msg::ToggleUnlockReset))).padding(Padding { bottom: 12.0, ..Padding::ZERO }));
     }
-    card = card.push(button(container(lead_icon(Icon::LogOut, "Sign out", rgb(0xcdb3e1), 17.0, 15.0, 12.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then_some(Msg::SignOut)))
+    card = card.push(button(container(lead_icon(Icon::LogOut, "Sign out", rgb(0xd0d7dc), 17.0, 15.0, 12.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then_some(Msg::SignOut)))
         .push(container(column![
-            t::rule(rgb(0x35313c), true),
-            row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x82758e)), body("Your message key is locked with your recovery key before it is stored. If you lose the recovery key and every signed-in device, encrypted history cannot be recovered.", 13.0, rgb(0x82758e), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
+            t::rule(rgb(0x293039), true),
+            row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x76828d)), body("Your message key is locked with your recovery key before it is stored. If you lose the recovery key and every signed-in device, encrypted history cannot be recovered.", 13.0, rgb(0x76828d), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
         ]).padding(Padding { top: 34.0, ..Padding::ZERO }));
     container(scroll_area(container(card.max_width(345)).center_x(FILL).padding([45, 0]))).width(FILL).height(FILL).center_y(FILL).style(t::fill(t::SIDEBAR)).into()
 }
@@ -334,26 +342,26 @@ fn unlock(app: &App) -> E<'_> {
 fn recovery_view<'a>(app: &'a App, key: &'a str) -> E<'a> {
     let saved = app.recovery_saved;
     let check = iced::widget::checkbox(saved).label("I saved my recovery key somewhere safe").on_toggle(Msg::RecoverySaved).size(14).text_size(14).spacing(9)
-        .style(move |_, _| iced::widget::checkbox::Style { background: (if saved { rgb(0xb69bdc) } else { rgb(0x1d1b22) }).into(), icon_color: rgb(0x21182e), border: t::border(if saved { rgb(0xb69bdc) } else { rgb(0x4b3d55) }, 1.0, 3.0), text_color: Some(rgb(0xb8a4c7)) });
+        .style(move |_, _| iced::widget::checkbox::Style { background: (if saved { rgb(0xd0d7dc) } else { rgb(0x171b20) }).into(), icon_color: rgb(0x1b2025), border: t::border(if saved { rgb(0xd0d7dc) } else { rgb(0x37414c) }, 1.0, 3.0), text_color: Some(rgb(0xd0d7dc)) });
     #[cfg(windows)]
-    let save_file: E = button(container(lead_icon(Icon::Download, "Save as file", rgb(0xc1b0d0), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::SaveRecoveryFile).into();
+    let save_file: E = button(container(lead_icon(Icon::Download, "Save as file", rgb(0xd0d7dc), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::SaveRecoveryFile).into();
     #[cfg(not(windows))]
     let save_file: E = space().into();
     let card = column![
         t::icon(Icon::KeyRound, 30.0, t::ACCENT),
         container(text("Save your recovery key.").size(28).font(t::bold()).color(t::TEXT)).padding(Padding { top: 22.0, bottom: 10.0, ..Padding::ZERO }),
-        body("It unlocks your messages on a new device and resets your password if you forget it. Only you have it: Sonar cannot show it again or recover it for you.", 15.0, rgb(0x99919f), 1.8),
-        container(container(text(key).size(15).font(t::REGULAR).color(rgb(0xefe4fb))).padding([18, 14]).width(FILL).center_x(FILL)
-            .style(t::panel(rgb(0x1b191f), rgb(0x4d3e58), 10.0))).padding(Padding { top: 26.0, bottom: 14.0, ..Padding::ZERO }),
+        body("It unlocks your messages on a new device and resets your password if you forget it. Only you have it: Sonar cannot show it again or recover it for you.", 15.0, rgb(0x9099a0), 1.8),
+        container(container(text(key).size(15).font(t::REGULAR).color(rgb(0xd0d7dc))).padding([18, 14]).width(FILL).center_x(FILL)
+            .style(t::panel(rgb(0x15191e), rgb(0x3a4450), 10.0))).padding(Padding { top: 26.0, bottom: 14.0, ..Padding::ZERO }),
         row![
-            button(container(lead_icon(Icon::Copy, "Copy", rgb(0xc1b0d0), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::CopyRecovery),
+            button(container(lead_icon(Icon::Copy, "Copy", rgb(0xd0d7dc), 15.0, 15.0, 10.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::CopyRecovery),
             save_file,
         ].spacing(10),
         container(check).padding([18, 0]),
         primary("Continue to Sonar", Some(Icon::ArrowUpRight), saved.then_some(Msg::DismissRecovery)),
         container(column![
-            t::rule(rgb(0x35313c), true),
-            row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x82758e)), body("Store it in a password manager or on paper. Anyone with this key and your email address can reset your password.", 13.0, rgb(0x82758e), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
+            t::rule(rgb(0x293039), true),
+            row![t::icon(Icon::LockKeyhole, 15.0, rgb(0x76828d)), body("Store it in a password manager or on paper. Anyone with this key and your email address can reset your password.", 13.0, rgb(0x76828d), 1.8)].spacing(9).padding(Padding { top: 22.0, ..Padding::ZERO }),
         ]).padding(Padding { top: 34.0, ..Padding::ZERO }),
     ].width(FILL);
     container(scroll_area(container(card.max_width(345)).center_x(FILL).padding([45, 0]))).width(FILL).height(FILL).center_y(FILL).style(t::fill(t::SIDEBAR)).into()
@@ -374,12 +382,12 @@ fn workspace(app: &App) -> E<'_> {
 
 fn rail_item<'a>(content: E<'a>, active: bool) -> E<'a> {
     let marker: E = if active {
-        container(space()).width(3).height(23).style(|_| container::Style { background: Some(rgb(0xc6a8ff).into()), border: iced::Border { radius: iced::border::Radius { top_left: 0.0, bottom_left: 0.0, top_right: 3.0, bottom_right: 3.0 }, ..Default::default() }, ..Default::default() }).into()
+        container(space()).width(3).height(23).style(|_| container::Style { background: Some(rgb(0x70eeff).into()), border: iced::Border { radius: iced::border::Radius { top_left: 0.0, bottom_left: 0.0, top_right: 3.0, bottom_right: 3.0 }, ..Default::default() }, ..Default::default() }).into()
     } else { space().width(3).into() };
     row![marker, grow(), content, grow(), h_space(3.0)].width(76).align_y(Vertical::Center).into()
 }
 fn rail_button<'a>(icon: Icon, active: bool, unread: bool, on: Msg) -> E<'a> {
-    let color = if active { rgb(0xc9b0ff) } else { rgb(0x7b7c88) };
+    let color = if active { rgb(0x70eeff) } else { rgb(0x76828d) };
     // The web places the unread dot under the icon (grid button).
     let mut inner = Column::new().align_x(Horizontal::Center).spacing(3).push(t::icon(icon, 22.0, color));
     if unread { inner = inner.push(t::dot(t::UNREAD, 8.0)); }
@@ -390,7 +398,7 @@ fn rail(app: &App) -> E<'_> {
     let name = app.session.as_ref().map(|s| s.account.full_name.as_str()).unwrap_or_default();
     let mut top = Column::new().spacing(14).align_x(Horizontal::Center).width(76)
         .push(rail_item(button(container(t::sonar_mark(0.82)).center_x(44).center_y(42)).padding(0).width(44).height(42).style(t::brand()).on_press(if app.mode == Mode::Direct { Msg::OpenPeer(None) } else { Msg::SetMode(Mode::Direct) }).into(), false))
-        .push(container(t::rule(rgb(0x2d2c33), true)).width(27).padding([6, 0]));
+        .push(container(t::rule(rgb(0x242a31), true)).width(27).padding([6, 0]));
     match app.mode {
         Mode::Direct => {
             top = top.push(rail_button(Icon::MessageCircle, true, false, Msg::OpenPeer(None)))
@@ -407,26 +415,25 @@ fn rail(app: &App) -> E<'_> {
                 list.push(rail_item(button(container(face).center_x(43).center_y(43)).padding(0).width(43).height(43).style(t::community_icon(active)).on_press(Msg::OpenCommunity(Some(item.id.clone()))).into(), false))
             });
             top = top.push(scrollable(list).height(Length::Shrink).direction(scrollable::Direction::Vertical(scrollable::Scrollbar::new().width(0).scroller_width(0))))
-                .push(rail_item(button(container(t::icon(Icon::Plus, 22.0, rgb(0xb4c9b7))).center_x(46).center_y(44)).padding(0).width(46).height(44).style(t::add_community()).on_press(Msg::OpenDialog(Some(Dialog::Start))).into(), false));
+                .push(rail_item(button(container(t::icon(Icon::Plus, 22.0, rgb(0xb9bfc4))).center_x(46).center_y(44)).padding(0).width(46).height(44).style(t::add_community()).on_press(Msg::OpenDialog(Some(Dialog::Start))).into(), false));
         }
     }
     let bottom = column![
-        container(text(t::tracked("FREE")).size(11).font(t::bold()).color(rgb(0xb3a4ca))).padding([3, 6]).style(t::panel(Color::TRANSPARENT, rgb(0x3d384b), 4.0)),
-        button(container(text(t::initials(name)).size(15).font(t::bold()).color(rgb(0xf8e2c9))).center_x(35).center_y(35)).padding(0).width(35).height(35).style(t::self_avatar()).on_press(Msg::OpenSettings(true)),
+        button(container(t::icon(Icon::Settings, 22.0, rgb(0x97a0a6))).center_x(46).center_y(44)).padding(0).width(46).height(44).style(t::rail_button(false)).on_press(Msg::OpenSettings(true)),
     ].spacing(21).align_x(Horizontal::Center);
     container(column![top, space().height(FILL), bottom].align_x(Horizontal::Center))
         .width(76).height(FILL).padding(Padding { top: 25.0, bottom: 15.0, left: 0.0, right: 0.0 })
-        .style(|_| container::Style { background: Some(t::RAIL.into()), ..Default::default() })
+        .style(t::gradient_panel(180.0, rgb(0x15181c), rgb(0x0b0c0e), Color::TRANSPARENT, 0.0))
         .into()
 }
 
 fn section<'a>(label: &str, extra: Option<E<'a>>) -> E<'a> {
-    let mut line = Row::new().align_y(Vertical::Center).height(20).push(text(t::tracked(label)).size(12).font(t::bold()).color(rgb(0x797987))).push(grow());
+    let mut line = Row::new().align_y(Vertical::Center).height(20).push(text(t::tracked(label)).size(12).font(t::bold()).color(rgb(0x75818b))).push(grow());
     if let Some(extra) = extra { line = line.push(extra); }
     container(line).padding(Padding { top: 34.0, bottom: 9.0, left: 10.0, right: 10.0 }).into()
 }
 fn nav_row<'a>(icon: Option<Icon>, label: impl text::IntoFragment<'a>, trailing: Option<E<'a>>, selected: bool, on: Option<Msg>) -> E<'a> {
-    let color = if selected { rgb(0xd3bdf6) } else { rgb(0x9999a6) };
+    let color = if selected { rgb(0xd0d7dc) } else { rgb(0x98a1a7) };
     let mut content = Row::new().spacing(11).align_y(Vertical::Center);
     if let Some(icon) = icon { content = content.push(t::icon(icon, 18.0, color)); }
     content = content.push(text(label).size(15).color(color).font(t::REGULAR)).push(grow());
@@ -440,10 +447,10 @@ fn danger_row<'a>(icon: Option<Icon>, label: &'a str, on: Option<Msg>) -> E<'a> 
     content = content.push(text(label).size(15).color(color));
     container(button(content).width(FILL).padding(12).style(t::danger_row()).on_press_maybe(on)).padding(Padding { top: 11.0, bottom: 3.0, ..Padding::ZERO }).into()
 }
-fn person_row<'a>(name: &str, sub: &str, index: usize, online: bool, chosen: bool, trailing: Vec<E<'a>>, on: Option<Msg>) -> E<'a> {
+fn person_row<'a>(name: &str, sub: &str, index: usize, dot: Option<Color>, chosen: bool, trailing: Vec<E<'a>>, on: Option<Msg>) -> E<'a> {
     let mut content = Row::new().spacing(11).align_y(Vertical::Center)
-        .push(avatar(name, index, online.then_some(t::SIDEBAR), 35.0))
-        .push(column![text(name.to_owned()).size(15).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(sub.to_owned()).size(13).color(rgb(0x7d7c8a))].spacing(4));
+        .push(avatar_status(name, index, dot.map(|_| t::SIDEBAR), dot.unwrap_or(t::OFFLINE), 35.0))
+        .push(column![text(name.to_owned()).size(15).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(sub.to_owned()).size(13).color(rgb(0x78848e))].spacing(4));
     // Like the web row: an unread dot follows the name; the lock sits at the end.
     let mut trailing = trailing;
     let last = trailing.pop();
@@ -452,21 +459,33 @@ fn person_row<'a>(name: &str, sub: &str, index: usize, online: bool, chosen: boo
     if let Some(item) = last { content = content.push(item); }
     let inner = button(content).width(FILL).padding([11, 10]).style(t::person_row(chosen)).on_press_maybe(on);
     if chosen {
-        stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0xb39ae4).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
+        stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0xd0d7dc).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
     } else { inner.into() }
 }
-fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: (Icon, &'a str, &'a str), app: &'a App) -> E<'a> {
+fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: Option<(Icon, &'a str, &'a str)>, app: &'a App) -> E<'a> {
     let name = app.session.as_ref().map(|s| s.account.full_name.as_str()).unwrap_or_default();
     let mut header = Row::new().align_y(Vertical::Center).push(title).push(grow());
     if let Some(action) = header_action { header = header.push(action); }
     let header = column![container(header).height(82).padding([0, 25]).center_y(82), t::rule(t::LINE, true)];
-    let mini = container(container(row![t::icon(mini.0, 19.0, rgb(0xb7a2d0)), column![text(mini.1).size(14).color(rgb(0xb7aec5)), text(mini.2).size(12).color(rgb(0x84808f))].spacing(5)].spacing(10).align_y(Vertical::Center))
-        .padding([13, 12]).width(FILL).style(t::gradient_panel(120.0, rgb(0x25232b), rgb(0x202126), rgb(0x34303d), 8.0))).padding(Padding { top: 10.0, bottom: 21.0, left: 18.0, right: 18.0 });
-    let footer = column![t::rule(t::LINE, true), container(row![
-        avatar(name, 0, Some(t::FOOTER_BG), 35.0),
-        column![text(name.to_owned()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text("Personal space").size(12).color(rgb(0x81818e))].spacing(4).width(FILL),
+    let mini: E<'a> = match mini { Some(mini) => container(container(row![t::icon(mini.0, 19.0, rgb(0xd0d7dc)), column![text(mini.1).size(14).color(rgb(0xb4babf)), text(mini.2).size(12).color(rgb(0x7d8892))].spacing(5)].spacing(10).align_y(Vertical::Center))
+        .padding([13, 12]).width(FILL).style(t::gradient_panel(120.0, rgb(0x1d2329), rgb(0x1a1f25), rgb(0x293039), 8.0))).padding(Padding { top: 10.0, bottom: 21.0, left: 18.0, right: 18.0 }).into(), None => space().height(0).into() };
+    let status = app.session.as_ref().map_or("online", |s| if s.account.presence.is_empty() { "online" } else { s.account.presence.as_str() });
+    let status_label = match status { "away" => "Away", "busy" => "Busy", "offline" => "Appear offline", _ => "Online" };
+    let mut footer = column![t::rule(t::LINE, true)];
+    if app.status_open {
+        let mut menu = Column::new().spacing(2).padding(8);
+        for (value, label) in [("online", "Online"), ("away", "Away"), ("busy", "Busy"), ("offline", "Appear offline")] {
+            menu = menu.push(button(row![t::dot(t::presence_color(value), 9.0), text(label).size(14).color(rgb(0xc8cdd1))].spacing(10).align_y(Vertical::Center)).width(FILL).padding([8, 10]).style(t::person_row(value == status)).on_press(Msg::SetStatus(value)));
+        }
+        footer = footer.push(container(menu).style(t::fill(t::FOOTER_BG))).push(t::rule(t::LINE, true));
+    }
+    let footer = footer.push(container(row![
+        button(row![
+            avatar_status(name, 0, Some(t::FOOTER_BG), t::presence_color(status), 35.0),
+            column![text(name.to_owned()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(status_label).size(12).color(rgb(0x7d8892))].spacing(4).width(FILL),
+        ].spacing(10).align_y(Vertical::Center)).width(FILL).padding(0).style(t::plain(t::TEXT, t::TEXT)).on_press(Msg::ToggleStatusMenu),
         icon_btn(Icon::LogOut, 17.0, Some(Msg::SignOut), false),
-    ].spacing(10).align_y(Vertical::Center)).padding([15, 18]).style(t::fill(t::FOOTER_BG))];
+    ].spacing(10).align_y(Vertical::Center)).padding([15, 18]).style(t::fill(t::FOOTER_BG)));
     row![
         container(column![header, scroll_area(container(content).padding([27, 15])).height(FILL), mini, footer]).width(299).height(FILL).style(t::fill(t::SIDEBAR)),
         t::rule(t::LINE_SIDEBAR, false),
@@ -476,8 +495,8 @@ fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>,
 fn sidebar(app: &App) -> E<'_> {
     match app.mode {
         Mode::Direct => {
-            let title = row![text("sonar").size(28).font(t::heavy()).color(t::TEXT), container(t::dot(rgb(0xb598eb), 5.0)).padding(Padding { top: 16.0, ..Padding::ZERO })].spacing(4).align_y(Vertical::Center);
-            let badge = container(text(app.people.len().to_string()).size(13).color(rgb(0xdfc9ff))).padding([1, 6]).style(t::panel(rgb(0x514164), rgb(0x514164), 4.0));
+            let title = row![text("sonar").size(28).font(t::heavy()).color(t::TEXT), container(t::dot(rgb(0xd0d7dc), 5.0)).padding(Padding { top: 16.0, ..Padding::ZERO })].spacing(4).align_y(Vertical::Center);
+            let badge = container(text(app.people.len().to_string()).size(13).color(rgb(0x70eeff))).padding([1, 6]).style(t::panel(rgb(0x74808b), rgb(0x74808b), 4.0));
             let query = app.query.to_lowercase();
             let mut list = Column::new().spacing(5);
             if !app.people_loaded { list = list.push(text("Loading people...").size(15).color(t::MUTED)); }
@@ -485,26 +504,26 @@ fn sidebar(app: &App) -> E<'_> {
                 let online = app.online.contains(&person.id);
                 let mut trailing: Vec<E> = Vec::new();
                 if app.unread_direct.contains(&person.id) { trailing.push(t::dot(t::UNREAD, 8.0)); }
-                if person.encryption_key.is_some() { trailing.push(t::icon(Icon::LockKeyhole, 12.0, rgb(0xa395b5))); }
-                list = list.push(person_row(&person.name, if online { "Around now" } else { "Offline" }, index, online, app.peer.as_deref() == Some(&person.id), trailing, Some(Msg::OpenPeer(Some(person.id.clone())))));
+                if person.encryption_key.is_some() { trailing.push(t::icon(Icon::LockKeyhole, 12.0, rgb(0xd0d7dc))); }
+                list = list.push(person_row(&person.name, app.status_text(&person.id, "Around now"), index, app.avatar_dot(&person.id), app.peer.as_deref() == Some(&person.id), trailing, Some(Msg::OpenPeer(Some(person.id.clone())))));
             }
             if app.people_loaded && app.people.is_empty() {
-                list = list.push(container(body("Your space starts with a hello. Invite someone to create a Sonar account, then find them here.", 15.0, rgb(0x858390), 1.8)).padding(12));
+                list = list.push(container(body("Your space starts with a hello. Invite someone to create a Sonar account, then find them here.", 15.0, rgb(0x7f8a94), 1.8)).padding(12));
             }
             let search = container(row![
-                t::icon(Icon::Search, 15.0, rgb(0x676977)),
+                t::icon(Icon::Search, 15.0, rgb(0x74808b)),
                 text_input("Find a conversation", &app.query).on_input(Msg::Query).size(14).padding(0).style(t::bare_input()),
-                text("/").size(16).color(rgb(0x72727d)),
-            ].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x15161a), rgb(0x2a2b32), 6.0));
+                text("/").size(16).color(rgb(0x74808b)),
+            ].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0));
             let content = column![
-                container(text(t::tracked("YOUR SPACE")).size(12).font(t::bold()).color(rgb(0x70717f))).padding(Padding { left: 11.0, bottom: 13.0, ..Padding::ZERO }),
+                container(text(t::tracked("YOUR SPACE")).size(12).font(t::bold()).color(rgb(0x74808b))).padding(Padding { left: 11.0, bottom: 13.0, ..Padding::ZERO }),
                 nav_row(Some(Icon::MessageCircle), "Direct messages", Some(badge.into()), true, Some(Msg::OpenPanel(None))),
-                nav_row(Some(Icon::Users), "People", Some(t::icon(Icon::ArrowUpRight, 15.0, rgb(0x9999a6))), false, Some(Msg::OpenPanel(Some(Panel::People)))),
+                nav_row(Some(Icon::Users), "People", Some(t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))), false, Some(Msg::OpenPanel(Some(Panel::People)))),
                 section("CONVERSATIONS", Some(icon_btn(Icon::Search, 15.0, Some(Msg::OpenPanel(Some(Panel::People))), false))),
                 container(search).padding(Padding { left: 5.0, right: 5.0, bottom: 13.0, ..Padding::ZERO }),
                 list,
             ];
-            sidebar_frame(title.into(), Some(icon_btn(Icon::ChevronDown, 18.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)), content.into(), (Icon::ShieldCheck, "A little more private.", "Messages disappear after 7 days."), app)
+            sidebar_frame(title.into(), Some(icon_btn(Icon::ChevronDown, 18.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)), content.into(), Some((Icon::ShieldCheck, "A little more private.", "Messages disappear after 7 days.")), app)
         }
         Mode::Community => {
             let title_text = app.community.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| "Communities".into());
@@ -515,42 +534,43 @@ fn sidebar(app: &App) -> E<'_> {
                 Some(community) => {
                     let owner = app.owner();
                     let count = community.members.len();
-                    content = content.push(container(column![
-                        tile(&community.name, rgb(0x34303f), rgb(0xc6b5de), Some(rgb(0x494050)), 58.0, 19.0, 22.0, None),
-                        text(community.name.clone()).size(17).font(t::semibold()).color(t::TEXT),
-                        text(format!("{count} {} · Invite only", if count == 1 { "member" } else { "members" })).size(13).color(rgb(0x928599)),
-                    ].spacing(10).align_x(Horizontal::Center)).width(FILL).center_x(FILL).padding(Padding { top: 25.0, bottom: 22.0, ..Padding::ZERO }));
+                    content = content.push(container(text(format!("{count} {}", if count == 1 { "member" } else { "members" })).size(13).color(rgb(0x89939a))).padding(Padding { top: 2.0, bottom: 14.0, left: 12.0, right: 12.0 }));
                     if owner {
-                        content = content.push(button(row![t::icon(Icon::Users, 15.0, rgb(0xcbb2ea)), text("Invite your people").size(14).color(rgb(0xcbb2ea)), grow(), t::icon(Icon::Plus, 14.0, rgb(0xcbb2ea))].spacing(8).align_y(Vertical::Center))
-                            .width(FILL).padding(11).style(t::community_invite()).on_press(Msg::OpenDialog(Some(Dialog::Invite))))
-                            .push(nav_row(None, "Rename community", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameCommunity)))))
-                            .push(nav_row(None, "Rename a channel or room", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameChannel)))))
-                            .push(danger_row(None, "Delete a channel or room", Some(Msg::OpenDialog(Some(Dialog::DeleteChannel)))))
-                            .push(danger_row(None, "Delete community", Some(Msg::AskConfirm(Some(Confirm { action: "delete-community".into(), member: None, channel: None })))));
+                        content = content.push(button(row![t::icon(Icon::Users, 15.0, rgb(0xd0d7dc)), text("Invite your people").size(14).color(rgb(0xd0d7dc)), grow(), t::icon(Icon::Plus, 14.0, rgb(0xd0d7dc))].spacing(8).align_y(Vertical::Center))
+                            .width(FILL).padding(11).style(t::community_invite()).on_press(Msg::OpenDialog(Some(Dialog::Invite))));
                     }
                     content = content.push(section("TEXT CHANNELS", owner.then(|| icon_btn(Icon::Plus, 16.0, Some(Msg::NewChannel(false)), false))));
                     for channel in community.channels.iter().filter(|c| c.kind != "voice") {
                         let selected = app.channel.as_deref() == Some(&channel.id);
                         let mut trailing = Row::new().spacing(8).align_y(Vertical::Center);
                         if app.unread_channels.contains(&format!("{}:{}", community.id, channel.id)) { trailing = trailing.push(t::dot(t::UNREAD, 8.0)); }
-                        if selected { trailing = trailing.push(t::icon(Icon::LockKeyhole, 11.0, rgb(0xd3bdf6))); }
+                        if selected { trailing = trailing.push(t::icon(Icon::LockKeyhole, 11.0, rgb(0xd0d7dc))); }
                         content = content.push(nav_row(Some(Icon::Hash), channel.name.clone(), Some(trailing.into()), selected, Some(Msg::OpenChannel(channel.id.clone()))));
                     }
                     content = content.push(voice_rooms(app, community));
-                    content = content.push(container(row![t::icon(Icon::ShieldCheck, 14.0, rgb(0x86758f)), body("Encrypted for each member.\nUp to 32 people in this early version.", 12.0, rgb(0x86758f), 1.8)].spacing(8)).padding([24, 10]))
-                        .push(danger_row(Some(Icon::LogOut), "Leave community", (!owner).then(|| Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
-                    if owner { content = content.push(container(body("To leave, transfer ownership from the member list first.", 12.0, rgb(0x8f7b99), 1.7)).padding([0, 12])); }
+                    if owner {
+                        content = content.push(nav_row(Some(Icon::Settings), "Manage community", Some(t::icon(Icon::ChevronDown, 15.0, rgb(0x89939a))), false, Some(Msg::ToggleManage)));
+                        if app.manage_open {
+                            content = content
+                            .push(nav_row(None, "Rename community", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameCommunity)))))
+                            .push(nav_row(None, "Rename a channel or room", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameChannel)))))
+                            .push(danger_row(None, "Delete a channel or room", Some(Msg::OpenDialog(Some(Dialog::DeleteChannel)))))
+                            .push(danger_row(None, "Delete community", Some(Msg::AskConfirm(Some(Confirm { action: "delete-community".into(), member: None, channel: None })))));
+                        }
+                    } else {
+                        content = content.push(danger_row(Some(Icon::LogOut), "Leave community", Some(Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
+                    }
                 }
                 None => {
                     content = content.push(section("YOUR COMMUNITIES", None));
                     for (index, item) in app.communities.iter().enumerate() {
-                        content = content.push(person_row(&item.name, &format!("{} members", item.members.len()), index, false, false, vec![t::icon(Icon::ArrowUpRight, 15.0, rgb(0x9999a6))], Some(Msg::OpenCommunity(Some(item.id.clone())))));
+                        content = content.push(person_row(&item.name, &format!("{} members", item.members.len()), index, None, false, vec![t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))], Some(Msg::OpenCommunity(Some(item.id.clone())))));
                     }
                     content = content.push(nav_row(Some(Icon::Plus), "Create a community", None, false, Some(Msg::OpenDialog(Some(Dialog::Create)))))
                         .push(nav_row(Some(Icon::Users), "Join with an invite", None, false, Some(Msg::OpenDialog(Some(Dialog::Join)))));
                 }
             }
-            sidebar_frame(title.into(), header_action, content.into(), (Icon::Timer, "Keep what matters.", "7-day history. Pins stay."), app)
+            sidebar_frame(title.into(), header_action, content.into(), None, app)
         }
     }
 }
@@ -558,7 +578,7 @@ fn sidebar(app: &App) -> E<'_> {
 // ----- Conversation ------------------------------------------------------------
 
 fn encrypted_badge<'a>() -> E<'a> {
-    container(lead_icon(Icon::LockKeyhole, "Encrypted", rgb(0xa1b9a9), 12.0, 12.0, 6.0)).padding([5, 8]).style(t::panel(rgb(0x25312c), rgb(0x344139), 5.0)).into()
+    container(lead_icon(Icon::LockKeyhole, "Encrypted", rgb(0xa6aeb4), 12.0, 12.0, 6.0)).padding([5, 8]).style(t::panel(rgb(0x21272d), rgb(0x2d343d), 5.0)).into()
 }
 
 fn conversation(app: &App) -> E<'_> {
@@ -568,10 +588,10 @@ fn conversation(app: &App) -> E<'_> {
             Some(peer) => {
                 let online = app.online.contains(&peer.id);
                 (row![
-                    avatar(&peer.name, 0, online.then_some(t::CONVERSATION), 35.0),
+                    avatar_status(&peer.name, 0, online.then_some(t::CONVERSATION), app.status_color(&peer.id), 35.0),
                     column![
                         text(peer.name.clone()).size(16).font(t::semibold()).color(t::TEXT),
-                        row![t::dot(if online { t::GREEN } else { t::OFFLINE }, 5.0), text(if online { "Online" } else { "Offline" }).size(13).color(rgb(0x82828f)), text("/").size(13).color(rgb(0x484850)), text("Direct message").size(13).color(rgb(0x82828f))].spacing(5).align_y(Vertical::Center),
+                        row![t::dot(if !online { t::OFFLINE } else if app.presence.contains_key(&peer.id) { app.status_color(&peer.id) } else { t::GREEN }, 5.0), text(app.status_text(&peer.id, "Online").to_owned()).size(13).color(rgb(0x7e8993)), text("/").size(13).color(rgb(0x3a444f)), text("Direct message").size(13).color(rgb(0x7e8993))].spacing(5).align_y(Vertical::Center),
                     ].spacing(7),
                 ].spacing(12).align_y(Vertical::Center).into(),
                 vec![
@@ -580,14 +600,14 @@ fn conversation(app: &App) -> E<'_> {
                         let phone = icon_btn(Icon::Phone, 19.0, (online && app.call.is_none() && app.incoming.is_none() && app.live_connected).then_some(Msg::StartCall), false);
                         if online { phone } else {
                             let first = peer.name.split_whitespace().next().unwrap_or_default();
-                            tooltip(phone, container(text(format!("{first} is offline. Calls need both people online.")).size(13).color(rgb(0xddd4ee))).padding([6, 10]).style(t::panel(rgb(0x24262b), rgb(0x44404c), 6.0)), tooltip::Position::Bottom).into()
+                            tooltip(phone, container(text(format!("{first} is offline. Calls need both people online.")).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0)), tooltip::Position::Bottom).into()
                         }
                     },
                     icon_btn(Icon::Pin, 19.0, Some(Msg::TogglePins), app.thread.pins),
                     icon_btn(Icon::Ellipsis, 21.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false),
                 ])
             }
-            None => (row![t::icon(Icon::MessageCircle, 22.0, rgb(0xb5a5cd)), text("Direct messages").size(16).font(t::semibold()).color(t::TEXT)].spacing(12).align_y(Vertical::Center).into(),
+            None => (row![t::icon(Icon::MessageCircle, 22.0, rgb(0xd0d7dc)), text("Direct messages").size(16).font(t::semibold()).color(t::TEXT)].spacing(12).align_y(Vertical::Center).into(),
                 vec![container(encrypted_badge()).padding(Padding { right: 8.0, ..Padding::ZERO }).into(), icon_btn(Icon::Ellipsis, 21.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)]),
         },
         Mode::Community => {
@@ -595,9 +615,9 @@ fn conversation(app: &App) -> E<'_> {
             let mut actions: Vec<E> = vec![container(encrypted_badge()).padding(Padding { right: 8.0, ..Padding::ZERO }).into()];
             if channel.is_some() { actions.push(icon_btn(Icon::Pin, 18.0, Some(Msg::TogglePins), app.thread.pins)); }
             if app.community.is_some() { actions.push(icon_btn(Icon::Users, 19.0, Some(Msg::ToggleMembers), app.members_open)); }
-            (row![t::icon(Icon::Hash, 22.0, rgb(0xb5a5cd)), column![
+            (row![t::icon(Icon::Hash, 22.0, rgb(0xd0d7dc)), column![
                 text(channel.map(|c| c.name.clone()).unwrap_or_else(|| "Your communities".into())).size(16).font(t::semibold()).color(t::TEXT),
-                text(app.community.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| "A place for your people".into())).size(13).color(rgb(0x82828f)),
+                text(app.community.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| "A place for your people".into())).size(13).color(rgb(0x7e8993)),
             ].spacing(7)].spacing(12).align_y(Vertical::Center).into(), actions)
         }
     };
@@ -606,28 +626,29 @@ fn conversation(app: &App) -> E<'_> {
         t::rule(t::LINE_CHAT, true),
     ];
     let retention_text = if app.mode == Mode::Direct { "A conversation, not a permanent record. Messages disappear after 7 days." } else { "Messages disappear after 7 days. Pin the ones worth keeping." };
-    let mut banner = Row::new().spacing(8).align_y(Vertical::Center).push(t::icon(Icon::Timer, 14.0, rgb(0xb59bdc))).push(text(retention_text).size(13).color(rgb(0x8f8a9b)));
+    let mut banner = Row::new().spacing(8).align_y(Vertical::Center).push(t::icon(Icon::Timer, 14.0, rgb(0xd0d7dc))).push(text(retention_text).size(13).color(rgb(0x8a949b)));
     if app.mode == Mode::Direct {
-        banner = banner.push(h_space(6.0)).push(button(row![text("How it works").size(13).color(rgb(0xb7a3d2)), t::icon(Icon::ArrowUpRight, 12.0, rgb(0xb7a3d2))].spacing(5).align_y(Vertical::Center)).padding(0).style(t::plain(rgb(0xb7a3d2), rgb(0xd3c0ec))).on_press(Msg::OpenPanel(Some(Panel::Privacy))));
+        banner = banner.push(h_space(6.0)).push(button(row![text("How it works").size(13).color(rgb(0xd0d7dc)), t::icon(Icon::ArrowUpRight, 12.0, rgb(0xd0d7dc))].spacing(5).align_y(Vertical::Center)).padding(0).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::OpenPanel(Some(Panel::Privacy))));
     }
-    let retention = column![container(banner).width(FILL).center_x(FILL).padding([12, 20]).style(t::fill(rgb(0x211f29))), t::rule(rgb(0x2c2934), true)];
+    let retention = column![container(banner).width(FILL).center_x(FILL).padding([12, 20]).style(t::fill(rgb(0x1b2025))), t::rule(rgb(0x232a31), true)];
 
     let mut main = Column::new().push(top).push(retention);
+    if let Some(banner) = waiting_banner(app) { main = main.push(banner); }
     if let Some(banner) = call_banner(app) { main = main.push(banner); }
     let thread: E = match app.mode {
         Mode::Direct => direct_thread(app, me),
         Mode::Community => community_thread(app, me),
     };
-    let footer = column![t::rule(rgb(0x2b2a31), true), container(row![
-        row![t::dot(t::GREEN, 5.0), text(if app.mode == Mode::Direct { "Your space. Your pace." } else { "Your space. Your people." }).size(12).color(rgb(0x76717f))].spacing(7).align_y(Vertical::Center),
+    let footer = column![t::rule(rgb(0x222930), true), container(row![
+        row![t::dot(t::GREEN, 5.0), text(if app.mode == Mode::Direct { "Your space. Your pace." } else { "Your space. Your people." }).size(12).color(rgb(0x74808b))].spacing(7).align_y(Vertical::Center),
         grow(),
-        text(if app.live_connected { "Always free. Always ad-free." } else { "Reconnecting..." }).size(12).color(rgb(0x76717f)),
+        text(if app.live_connected { "Always free. Always ad-free." } else { "Reconnecting..." }).size(12).color(rgb(0x74808b)),
     ].align_y(Vertical::Center)).padding(Padding { top: 12.0, bottom: 15.0, left: 33.0, right: 33.0 })];
     let body_row: E = if app.mode == Mode::Community && app.members_open && app.community.is_some() {
         row![container(thread).width(FILL).height(FILL), t::rule(t::LINE_CHAT, false), members_panel(app)].height(FILL).into()
     } else { container(thread).width(FILL).height(FILL).into() };
     main = main.push(body_row).push(footer);
-    container(main).width(FILL).height(FILL).style(t::fill(t::CONVERSATION)).into()
+    container(main).width(FILL).height(FILL).style(t::gradient_panel(180.0, rgb(0x21272e), rgb(0x15191d), Color::TRANSPARENT, 0.0)).into()
 }
 
 // VoiceRoomList: rooms, occupancy, lock controls and participants.
@@ -637,75 +658,88 @@ fn voice_rooms<'a>(app: &'a App, community: &'a crate::api::Community) -> E<'a> 
     let mut list = Column::new().push(container(section("VOICE ROOMS", add)).padding(Padding { top: 0.0, ..Padding::ZERO }));
     let rooms: Vec<_> = community.channels.iter().filter(|c| c.kind == "voice").collect();
     if rooms.is_empty() {
-        list = list.push(container(body(if owner { "Make room for a real conversation. Create your first voice room." } else { "No voice rooms yet. The owner can create one." }, 13.0, rgb(0x887694), 1.8)).padding(Padding { left: 10.0, right: 10.0, bottom: 9.0, ..Padding::ZERO }));
+        list = list.push(container(body(if owner { "Make room for a real conversation. Create your first voice room." } else { "No voice rooms yet. The owner can create one." }, 13.0, rgb(0x7a8690), 1.8)).padding(Padding { left: 10.0, right: 10.0, bottom: 9.0, ..Padding::ZERO }));
     }
     for channel in rooms {
         let active = app.room.as_ref().is_some_and(|r| r.community == community.id && r.channel == channel.id);
         let participants = app.rooms.get(&format!("{}:{}", community.id, channel.id)).cloned().unwrap_or_default();
-        let color = if active { rgb(0xbed3bd) } else { rgb(0x9999a6) };
+        let color = if active { rgb(0xd0d7dc) } else { rgb(0x98a1a7) };
         let mut row_content = Row::new().spacing(11).align_y(Vertical::Center).push(t::icon(Icon::Volume, 17.0, color)).push(text(channel.name.clone()).size(15).color(color));
         if channel.voice_locked { row_content = row_content.push(t::icon(Icon::Lock, 13.0, color)); }
-        row_content = row_content.push(grow()).push(text(format!("{}/6", participants.len())).size(12).color(rgb(0x8e7d9e)));
+        row_content = row_content.push(grow()).push(text(format!("{}/6", participants.len())).size(12).color(rgb(0x848f97)));
         let style: Box<dyn Fn(&iced::Theme, button::Status) -> button::Style> = if active {
-            Box::new(|_, _| button::Style { background: Some(rgb(0x28332c).into()), text_color: rgb(0xbed3bd), border: t::border(Color::TRANSPARENT, 0.0, 7.0), ..Default::default() })
+            Box::new(|_, _| button::Style { background: Some(rgb(0x222930).into()), text_color: rgb(0xd0d7dc), border: t::border(Color::TRANSPARENT, 0.0, 7.0), ..Default::default() })
         } else { t::nav_row(false) };
         list = list.push(container(button(row_content).width(FILL).padding(12).style(style).on_press_maybe((!active && !channel.voice_locked).then(|| Msg::JoinRoom(channel.id.clone())))).padding(Padding { bottom: 1.0, top: 3.0, ..Padding::ZERO }));
         if owner || moderator {
             let (icon, label) = if channel.voice_locked { (Icon::LockOpen, "Unlock room") } else { (Icon::Lock, "Lock room") };
-            list = list.push(button(lead_icon(icon, label, rgb(0xb7a3c9), 13.0, 13.0, 5.0)).padding([4, 10]).style(t::plain(rgb(0xb7a3c9), rgb(0xdcc8ec))).on_press(Msg::RoomLock(channel.id.clone(), !channel.voice_locked)));
+            list = list.push(button(lead_icon(icon, label, rgb(0xd0d7dc), 13.0, 13.0, 5.0)).padding([4, 10]).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::RoomLock(channel.id.clone(), !channel.voice_locked)));
         }
         let mut people = Column::new().padding(Padding { top: 3.0, bottom: 8.0, left: 29.0, right: 8.0 });
         for person in &participants {
             let mut line = Row::new().spacing(7).align_y(Vertical::Center).push(t::dot(t::GREEN, 5.0))
-                .push(text(format!("{}{}", person.name, if person.user_id == me { " (you)" } else { "" })).size(13).color(rgb(0xa995b9)).width(FILL));
+                .push(text(format!("{}{}", person.name, if person.user_id == me { " (you)" } else { "" })).size(13).color(rgb(0xd0d7dc)).width(FILL));
             let can_kick = (owner || moderator) && person.user_id != me && Some(&person.user_id) != community.owner_id.as_ref() && (owner || !community.moderators.contains(&person.user_id));
             if can_kick {
-                line = line.push(button(t::icon(Icon::LogOut, 12.0, rgb(0xbc9ead))).padding(3).style(t::plain(rgb(0xbc9ead), rgb(0xe0c0cc))).on_press(Msg::RoomKick(channel.id.clone(), person.clone())));
+                line = line.push(button(t::icon(Icon::LogOut, 12.0, rgb(0xd0d7dc))).padding(3).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press(Msg::RoomKick(channel.id.clone(), person.clone())));
             }
-            if person.muted || person.deafened { line = line.push(t::icon(Icon::MicOff, 11.0, rgb(0xb390c6))); }
+            if person.muted || person.deafened { line = line.push(t::icon(Icon::MicOff, 11.0, rgb(0xd0d7dc))); }
             people = people.push(container(line).padding([7, 2]));
         }
         if !participants.is_empty() { list = list.push(people); }
     }
-    list = list.push(container(body("Joining shares your audio with everyone in the room. Up to 6 people. No recordings. Locking stops new joins; it does not disconnect people already in the room.", 11.0, rgb(0x796a84), 1.8)).padding([15, 10]));
     list.into()
+}
+
+/// A second call arriving during a connected call. Mirrors VoiceCallBanner.jsx.
+fn waiting_banner(app: &App) -> Option<E<'_>> {
+    let in_room = app.waiting.is_none();
+    let waiting = app.waiting.as_ref().or(app.incoming.as_ref().filter(|_| app.room.is_some()))?;
+    let name = app.person(&waiting.from).map(|p| p.name.clone()).unwrap_or_else(|| "someone".into());
+    Some(container(container(row![
+        t::icon(Icon::PhoneIncoming, 23.0, rgb(0xd0d7dc)),
+        column![text(format!("Incoming call from {name}")).size(15).font(t::semibold()).color(rgb(0xd0d7dc)), text(if in_room { "Swapping leaves the voice room" } else { "Swapping ends your current call" }).size(13).color(rgb(0x98a1a8))].spacing(4).width(FILL),
+        button(text("Swap").size(15).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 14]).style(t::primary()).on_press(Msg::SwapCall),
+        button(t::icon(Icon::PhoneOff, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::DeclineWaiting),
+    ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x74808b), 9.0)))
+        .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into())
 }
 
 fn call_banner(app: &App) -> Option<E<'_>> {
     let name = |id: &str| app.person(id).map(|p| p.name.clone()).or_else(|| app.member(id).map(|p| p.name.clone())).unwrap_or_else(|| "Someone".into());
-    let style = t::panel(rgb(0x2a332b), rgb(0x495747), 9.0);
+    let style = t::panel(rgb(0x232a31), rgb(0x74808b), 9.0);
     // Mirrors VoiceCallBanner.jsx: same titles, subtitle and controls.
-    let pill = |relay: bool| -> E { container(lead_icon(Icon::LockKeyhole, if relay { "Relay only" } else { "Encrypted audio" }, rgb(0xa2baa0), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x303e30), rgb(0x485946), 5.0)).into() };
+    let pill = |relay: bool| -> E { container(lead_icon(Icon::LockKeyhole, if relay { "Relay only" } else { "Encrypted audio" }, rgb(0xa6aeb4), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x2a3139), rgb(0x74808b), 5.0)).into() };
     let end_call = |on: Msg| -> E { button(t::icon(Icon::PhoneOff, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(on).into() };
-    let content: E = if let Some(incoming) = &app.incoming {
+    let content: E = if let Some(incoming) = app.incoming.as_ref().filter(|_| app.room.is_none()) {
         row![
-            t::icon(Icon::AudioLines, 23.0, rgb(0xbfd1bb)),
-            column![text("Incoming voice call").size(15).font(t::semibold()).color(rgb(0xbfd1bb)), text(format!("{} · No recordings", name(&incoming.from))).size(13).color(rgb(0x9aaa96))].spacing(4).width(FILL),
+            t::icon(Icon::AudioLines, 23.0, rgb(0xd0d7dc)),
+            column![text("Incoming voice call").size(15).font(t::semibold()).color(rgb(0xd0d7dc)), text(format!("{} · No recordings", name(&incoming.from))).size(13).color(rgb(0x98a1a8))].spacing(4).width(FILL),
             pill(app.settings.relay_only),
-            button(text("Accept").size(15).font(t::semibold()).color(rgb(0x251c31))).padding([8, 14]).style(t::primary()).on_press_maybe((app.call.is_none() && app.room.is_none()).then_some(Msg::AcceptCall)),
+            button(text("Accept").size(15).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 14]).style(t::primary()).on_press_maybe((app.call.is_none() && app.room.is_none()).then_some(Msg::AcceptCall)),
             end_call(Msg::DeclineCall),
         ].spacing(14).align_y(Vertical::Center).into()
     } else if let Some(room) = &app.room {
         let joining = room.spec.is_none() || room.controls.is_none();
         return Some(container(container(row![
-            t::icon(Icon::Volume, 23.0, rgb(0xbfd1bb)),
+            t::icon(Icon::Volume, 23.0, rgb(0xd0d7dc)),
             column![
-                text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xbfd1bb)),
-                text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0x9aaa96)),
+                text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xd0d7dc)),
+                text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0x98a1a8)),
             ].spacing(4).width(FILL),
-            container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xa2baa0), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x303e30), rgb(0x485946), 5.0)),
+            container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xa6aeb4), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x2a3139), rgb(0x74808b), 5.0)),
             mic_btn(room.muted, app.mic_active && !room.deafened, Msg::RoomMute),
             icon_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
             screen_button(app),
             button(t::icon(Icon::LogOut, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::LeaveRoom),
-        ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x26322d), rgb(0x405a4b), 9.0)))
+        ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x74808b), 9.0)))
             .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into());
     } else if let Some(call) = &app.call {
         let title = match call.status { CallStatus::Calling => "Calling...", CallStatus::Connecting => "Connecting voice...", CallStatus::Connected => "Voice connected" };
         let duration = call.started.map(|s| { let secs = s.elapsed().as_secs(); format!(" · {}:{:02}", secs / 60, secs % 60) }).unwrap_or_default();
         row![
-            t::icon(Icon::AudioLines, 23.0, rgb(0xbfd1bb)),
-            column![text(title).size(15).font(t::semibold()).color(rgb(0xbfd1bb)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0x9aaa96))].spacing(4).width(FILL),
+            t::icon(Icon::AudioLines, 23.0, rgb(0xd0d7dc)),
+            column![text(title).size(15).font(t::semibold()).color(rgb(0xd0d7dc)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0x98a1a8))].spacing(4).width(FILL),
             pill(call.spec.relay_only),
             mic_btn(call.muted, app.mic_active && !call.deafened, Msg::Mute),
             icon_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
@@ -717,23 +751,31 @@ fn call_banner(app: &App) -> Option<E<'_>> {
 }
 
 fn welcome<'a>(symbol: E<'a>, eyebrow: &'a str, title: &'a str, lines: [&'a str; 2], buttons: Vec<E<'a>>, values: [(Icon, &'a str); 3]) -> E<'a> {
-    let orbit = stack![t::orbit::<Msg>(), container(symbol).width(186).height(186).center_x(186).center_y(186)];
-    let values = values.into_iter().fold(Row::new().spacing(28), |row, (icon, label)| row.push(lead_icon(icon, label, rgb(0x777080), 16.0, 12.0, 7.0)));
+    // Two sonar rings leaving the emblem, half a cycle apart. Mirrors .orbit in index.css.
+    let ms = t::PULSE.load(std::sync::atomic::Ordering::Relaxed);
+    let ring = |offset: u32| -> E<'a> {
+        let t_cycle = ((ms + offset) % 3000) as f32 / 3000.0;
+        let eased = 1.0 - (1.0 - t_cycle) * (1.0 - t_cycle);
+        let size = 114.0 + 72.0 * eased;
+        container(container(space()).width(size).height(size).style(t::panel(Color::TRANSPARENT, Color { a: 0.55 * (1.0 - eased), ..rgb(0x70eeff) }, size / 2.0))).width(186).height(186).center_x(186).center_y(186).into()
+    };
+    let orbit = stack![t::orbit::<Msg>(), ring(0), ring(1500), container(symbol).width(186).height(186).center_x(186).center_y(186)];
+    let values = values.into_iter().fold(Row::new().spacing(28), |row, (icon, label)| row.push(lead_icon(icon, label, rgb(0x74808b), 16.0, 12.0, 7.0)));
     center(column![
         container(orbit).padding(Padding { bottom: 0.0, ..Padding::ZERO }),
         container(t::eyebrow(eyebrow, 12.0, t::EYEBROW)).padding(Padding { top: 16.0, ..Padding::ZERO }),
-        container(text(title).size(36).font(t::bold()).color(rgb(0xeee9f5))).padding([15, 0]),
-        body(lines[0], 16.0, rgb(0x93909e), 1.9).align_x(Horizontal::Center),
-        body(lines[1], 16.0, rgb(0x93909e), 1.9).align_x(Horizontal::Center),
+        container(text(title).size(36).font(t::bold()).color(rgb(0xd0d7dc))).padding([15, 0]),
+        body(lines[0], 16.0, rgb(0x8f989f), 1.9).align_x(Horizontal::Center),
+        body(lines[1], 16.0, rgb(0x8f989f), 1.9).align_x(Horizontal::Center),
         container(Row::from_vec(buttons).spacing(12)).padding(Padding { top: 27.0, ..Padding::ZERO }),
         container(values).padding(Padding { top: 65.0, ..Padding::ZERO }),
     ].align_x(Horizontal::Center)).padding([55, 10]).into()
 }
 
 fn date_divider<'a>(label: &str) -> E<'a> {
-    container(row![t::rule(t::LINE_CHAT, true), text(t::tracked(label)).size(11).color(rgb(0x787482)), t::rule(t::LINE_CHAT, true)].spacing(15).align_y(Vertical::Center)).padding(Padding { top: 8.0, bottom: 24.0, ..Padding::ZERO }).into()
+    container(row![t::rule(t::LINE_CHAT, true), text(t::tracked(label)).size(11).color(rgb(0x74808b)), t::rule(t::LINE_CHAT, true)].spacing(15).align_y(Vertical::Center)).padding(Padding { top: 8.0, bottom: 24.0, ..Padding::ZERO }).into()
 }
-fn notice<'a>(value: &'a str) -> E<'a> { container(text(value).size(15).color(rgb(0x817887))).padding(24).into() }
+fn notice<'a>(value: &'a str) -> E<'a> { container(text(value).size(15).color(rgb(0x74808b))).padding(24).into() }
 
 fn invite_card<'a>(app: &'a App, token: String) -> E<'a> {
     let (mut title, mut detail) = ("Checking invite...".to_string(), "Community invite".to_string());
@@ -747,17 +789,17 @@ fn invite_card<'a>(app: &'a App, token: String) -> E<'a> {
             title = preview.name.clone();
             detail = if preview.member { format!("{members} · You're a member") } else if preview.full { format!("{members} · Community full") } else { format!("{members} · Invite only") };
             if preview.member {
-                join = Some(action("Open", None, t::secondary(), rgb(0xc1b0d0), (!app.busy).then(|| Msg::DialogDone(Ok(preview.id.clone()))), [8.0, 14.0], 14.0));
+                join = Some(action("Open", None, t::secondary(), rgb(0xd0d7dc), (!app.busy).then(|| Msg::DialogDone(Ok(preview.id.clone()))), [8.0, 14.0], 14.0));
             } else if !preview.full {
-                join = Some(action(if app.busy { "Joining..." } else { "Join" }, Some(Icon::ArrowUpRight), t::primary(), rgb(0x251c31), (!app.busy).then(|| Msg::JoinInvite(token.clone())), [8.0, 14.0], 14.0));
+                join = Some(action(if app.busy { "Joining..." } else { "Join" }, Some(Icon::ArrowUpRight), t::primary(), rgb(0x1e2329), (!app.busy).then(|| Msg::JoinInvite(token.clone())), [8.0, 14.0], 14.0));
             }
         }
     }
     let mut card = Row::new().spacing(13).align_y(Vertical::Center)
-        .push(container(t::icon(Icon::Users, 19.0, rgb(0xcbb2ea))).center_x(40).center_y(40).style(t::panel(rgb(0x30283e), rgb(0x30283e), 8.0)))
-        .push(column![text(title).size(16).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::WordOrGlyph), text(detail).size(13).color(rgb(0x928599))].spacing(2).width(FILL));
+        .push(container(t::icon(Icon::Users, 19.0, rgb(0xd0d7dc))).center_x(40).center_y(40).style(t::panel(rgb(0x272e37), rgb(0x272e37), 8.0)))
+        .push(column![text(title).size(16).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::WordOrGlyph), text(detail).size(13).color(rgb(0x869098))].spacing(2).width(FILL));
     if let Some(join) = join { card = card.push(join); }
-    container(container(card).padding(14).max_width(440).style(t::panel(rgb(0x24242b), rgb(0x37313e), 8.0))).padding(Padding { top: 4.0, ..Padding::ZERO }).into()
+    container(container(card).padding(14).max_width(440).style(t::panel(rgb(0x1e2329), rgb(0x2a313a), 8.0))).padding(Padding { top: 4.0, ..Padding::ZERO }).into()
 }
 
 fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
@@ -766,7 +808,7 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
     let mut out = Vec::new();
     if app.thread.has_more {
         let label = if app.thread.loading_older { "Decrypting older messages..." } else if app.thread.pins { "Load older pinned messages" } else { "Load older messages" };
-        out.push(container(button(text(label).size(13).color(rgb(0xbca0d3))).padding([10, 16]).style(t::load_older()).on_press_maybe((!app.thread.loading_older && !app.thread.loading).then_some(Msg::LoadOlder))).center_x(FILL).padding(Padding { bottom: 22.0, ..Padding::ZERO }).into());
+        out.push(container(button(text(label).size(13).color(rgb(0xd0d7dc))).padding([10, 16]).style(t::load_older()).on_press_maybe((!app.thread.loading_older && !app.thread.loading).then_some(Msg::LoadOlder))).center_x(FILL).padding(Padding { bottom: 22.0, ..Padding::ZERO }).into());
     }
     if app.thread.loading {
         out.push(notice(if community { "Opening your encrypted channel..." } else { "Decrypting your conversation..." }));
@@ -780,22 +822,31 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
             else if community { app.member(&message.sender).map(|p| p.name.clone()).unwrap_or_else(|| "Member".into()) }
             else { app.selected_peer().map(|p| p.name.clone()).unwrap_or_default() };
         let mut meta = Row::new().spacing(10).align_y(Vertical::Center).push(text(sender_name.clone()).size(15).font(t::semibold()).color(t::TEXT));
-        if message.sender == me { meta = meta.push(container(text(t::tracked("YOU")).size(10).color(rgb(0xb59ecb))).padding([1, 4]).style(t::panel(rgb(0x36303f), rgb(0x36303f), 3.0))); }
-        meta = meta.push(text(if community { message.date_time() } else { message.time() }).size(12).color(rgb(0x777582)));
-        if message.pinned { meta = meta.push(lead_icon(Icon::Pin, "Pinned", rgb(0xb9a0d8), 11.0, 12.0, 4.0)); }
+        if message.sender == me { meta = meta.push(container(text(t::tracked("YOU")).size(10).color(rgb(0xd0d7dc))).padding([1, 4]).style(t::panel(rgb(0x2a313a), rgb(0x2a313a), 3.0))); }
+        meta = meta.push(text(if community { message.date_time() } else { message.time() }).size(12).color(rgb(0x74808b)));
+        if message.pinned { meta = meta.push(lead_icon(Icon::Pin, "Pinned", rgb(0xd0d7dc), 11.0, 12.0, 4.0)); }
         let mut content = Column::new().width(FILL).push(container(meta).padding(Padding { bottom: 7.0, ..Padding::ZERO }));
         if let Some(target) = &message.reply_to {
             let quoted = visible.iter().find(|m| &m.id == target && !m.unreadable).map(|m| m.text.clone()).unwrap_or_else(|| "Original message unavailable".into());
-            content = content.push(container(row![container(space()).width(2).height(18).style(t::fill(rgb(0x9675bb))), text(format!("Replying to: {quoted}")).size(14).color(rgb(0xb8a7cb)).wrapping(text::Wrapping::None)].spacing(8).align_y(Vertical::Center)).padding(Padding { top: 3.0, bottom: 5.0, ..Padding::ZERO }));
+            content = content.push(container(row![container(space()).width(2).height(18).style(t::fill(rgb(0xd0d7dc))), text(format!("Replying to: {quoted}")).size(14).color(rgb(0xd0d7dc)).wrapping(text::Wrapping::None)].spacing(8).align_y(Vertical::Center)).padding(Padding { top: 3.0, bottom: 5.0, ..Padding::ZERO }));
+        }
+        if let Some(file) = &message.file {
+            let size = if file.size < 1024 * 1024 { format!("{} KB", (file.size / 1024).max(1)) } else { format!("{:.1} MB", file.size as f64 / 1_048_576.0) };
+            let card = row![
+                container(t::icon(Icon::File, 19.0, rgb(0xd0d7dc))).center_x(40).center_y(40).style(t::panel(rgb(0x272e37), rgb(0x272e37), 8.0)),
+                column![text(file.name.clone()).size(16).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::WordOrGlyph), text(format!("{size} · Encrypted")).size(13).color(rgb(0x869098))].spacing(2).width(FILL),
+                button(container(t::icon(Icon::Download, 16.0, rgb(0xd0d7dc))).center_x(36).center_y(36)).padding(0).width(36).height(36).style(t::secondary()).on_press(Msg::DownloadFile(file.clone())),
+            ].spacing(13).align_y(Vertical::Center);
+            content = content.push(container(container(card).padding([12, 14]).max_width(440).style(t::panel(rgb(0x1e2329), rgb(0x2a313a), 8.0))).padding(Padding { top: 4.0, ..Padding::ZERO }));
         }
         if message.missed_call {
             let mine = message.sender == me;
             let label = if mine { "You called. No answer.".to_string() } else { format!("Missed call from {}", sender_name.split_whitespace().next().unwrap_or_default()) };
-            content = content.push(container(row![t::icon(Icon::PhoneMissed, 16.0, if mine { rgb(0x9b91a4) } else { rgb(0xe8909f) }), text(label).size(16).color(rgb(0xb9b7c3))].spacing(9).align_y(Vertical::Center)).padding(Padding { top: 2.0, ..Padding::ZERO }));
+            content = content.push(container(row![t::icon(Icon::PhoneMissed, 16.0, if mine { rgb(0x929ca3) } else { rgb(0xe8909f) }), text(label).size(16).color(rgb(0xb8bec2))].spacing(9).align_y(Vertical::Center)).padding(Padding { top: 2.0, ..Padding::ZERO }));
         }
-        let invite = if message.unreadable || message.missed_call { None } else { crate::api::find_invite(&message.text) };
-        if !message.missed_call && !invite.as_ref().is_some_and(|(_, only)| *only) {
-            content = content.push(body(message.text.as_str(), 16.0, if message.unreadable { rgb(0x8d8098) } else { rgb(0xb9b7c3) }, 1.8).wrapping(text::Wrapping::WordOrGlyph));
+        let invite = if message.unreadable || message.missed_call || message.file.is_some() { None } else { crate::api::find_invite(&message.text) };
+        if !message.missed_call && message.file.is_none() && !invite.as_ref().is_some_and(|(_, only)| *only) {
+            content = content.push(body(message.text.as_str(), 16.0, if message.unreadable { rgb(0x828d96) } else { rgb(0xb8bec2) }, 1.8).wrapping(text::Wrapping::WordOrGlyph));
         }
         if let Some((token, _)) = invite { content = content.push(invite_card(app, token)); }
         if !app.thread.pins {
@@ -807,16 +858,16 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
                 if !open && senders.is_empty() { continue; }
                 let selected = senders.iter().any(|s| s == me);
                 let mut label = Row::new().spacing(4).align_y(Vertical::Center).push(text(emoji).size(15));
-                if !senders.is_empty() { label = label.push(text(senders.len().to_string()).size(13).color(rgb(0xe6d9f2))); }
+                if !senders.is_empty() { label = label.push(text(senders.len().to_string()).size(13).color(rgb(0xd0d7dc))); }
                 bar = bar.push(button(label).padding([3, 7]).style(t::reaction(selected)).on_press_maybe((!message.unreadable && !app.sending).then(|| Msg::React(message.id.clone(), emoji.to_string(), selected))));
             }
-            bar = bar.push(button(t::icon(Icon::SmilePlus, 14.0, rgb(0xaaa0b4))).padding([3, 7]).style(t::reaction(false)).on_press_maybe((!message.unreadable).then(|| Msg::Picker(Some(message.id.clone())))));
+            bar = bar.push(button(t::icon(Icon::SmilePlus, 14.0, rgb(0xa3abb1))).padding([3, 7]).style(t::reaction(false)).on_press_maybe((!message.unreadable).then(|| Msg::Picker(Some(message.id.clone())))));
             content = content.push(container(bar).padding(Padding { top: 5.0, ..Padding::ZERO }));
         }
         let row_view = container(row![avatar(&sender_name, 0, None, 35.0), content, h_space(if message.sender == me { 92.0 } else { 57.0 })].spacing(13)).padding([14, 11]).width(FILL)
-            .style(if message.pinned { t::fill(rgba(0xb28ee805)) } else { t::fill(Color::TRANSPARENT) });
+            .style(if message.pinned { t::fill(rgba(0xd0d7dc05)) } else { t::fill(Color::TRANSPARENT) });
         let mut tools = Row::new().spacing(2);
-        let tool = |icon: Icon, on: Option<Msg>| -> E { button(t::icon(icon, 14.0, rgb(0x9c8db0))).padding(4).style(t::plain(rgb(0x9c8db0), rgb(0xd9c4ee))).on_press_maybe(on).into() };
+        let tool = |icon: Icon, on: Option<Msg>| -> E { button(t::icon(icon, 14.0, rgb(0xd0d7dc))).padding(4).style(t::plain(rgb(0xd0d7dc), rgb(0xd0d7dc))).on_press_maybe(on).into() };
         tools = tools.push(tool(Icon::Reply, (!message.unreadable).then(|| Msg::Reply(Some(message.id.clone())))));
         if message.sender == me { tools = tools.push(tool(Icon::Trash, Some(Msg::AskDelete(Some(message.id.clone()))))); }
         tools = tools.push(tool(Icon::Pin, Some(Msg::Pin(message.id.clone()))));
@@ -826,12 +877,17 @@ fn message_list<'a>(app: &'a App, me: &'a str, community: bool) -> Vec<E<'a>> {
     out
 }
 
+const EMOJI: [&str; 92] = ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","🙂","😉","😍","🥰","😘","😋","😜","🤪","😎","🤩","🥳","😏","😒","😔","😢","😭","😤","😡","🤯","😳","🥺","😱","🤔","🤗","🤫","🙄","😴","🤒","🤮","🤠","👻","💀","👽","🤖","💩","👍","👎","👏","🙌","🙏","💪","🤝","👋","🤞","🤘","👌","👀","🧠","❤","🧡","💛","💚","💙","💜","🖤","💔","💯","🔥","✨","⭐","🎉","🎊","🎁","🎂","🍕","🍔","🍟","🍺","☕","🎮","🎧","🎵","⚽","🏆","🚀","💡","💻","📱","💰","⏰","✅","❌","❓"];
+
+trait IntoGrid<'a> { fn into_grid(self, grid: Column<'a, Msg>) -> Column<'a, Msg>; }
+impl<'a> IntoGrid<'a> for Row<'a, Msg> { fn into_grid(self, grid: Column<'a, Msg>) -> Column<'a, Msg> { grid.push(self) } }
+
 fn composer<'a>(app: &'a App, placeholder: String, enabled: bool, hint_left: String) -> E<'a> {
     let mut area = Column::new();
     if let Some(reply) = &app.reply_to {
         let quoted = app.thread.messages.iter().find(|m| &m.id == reply).map(|m| m.text.clone()).unwrap_or_default();
-        area = area.push(container(row![text(format!("Replying to: {quoted}")).size(14).color(rgb(0xb8a7cb)).wrapping(text::Wrapping::None).width(FILL), icon_btn(Icon::X, 16.0, Some(Msg::Reply(None)), false)].spacing(8).align_y(Vertical::Center))
-            .padding([6, 10]).style(|_| container::Style { background: Some(rgb(0x30283e).into()), border: iced::Border { radius: iced::border::Radius { top_left: 8.0, top_right: 8.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() }));
+        area = area.push(container(row![text(format!("Replying to: {quoted}")).size(14).color(rgb(0xd0d7dc)).wrapping(text::Wrapping::None).width(FILL), icon_btn(Icon::X, 16.0, Some(Msg::Reply(None)), false)].spacing(8).align_y(Vertical::Center))
+            .padding([6, 10]).style(|_| container::Style { background: Some(rgb(0x272e37).into()), border: iced::Border { radius: iced::border::Radius { top_left: 8.0, top_right: 8.0, bottom_left: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() }));
     }
     let mut editor = text_editor(&app.composer).placeholder(placeholder).size(15).padding(0).height(Length::Shrink).max_height(120.0)
         .line_height(LineHeight::Relative(1.6)).style(t::composer_editor())
@@ -844,15 +900,24 @@ fn composer<'a>(app: &'a App, placeholder: String, enabled: bool, hint_left: Str
         });
     if enabled { editor = editor.on_action(Msg::Edit); }
     let can_send = enabled && !app.sending && !app.composer.text().trim().is_empty();
-    let send = button(container(t::icon(Icon::Send, 18.0, rgb(0x21182e))).center_x(32).center_y(32)).padding(0).width(32).height(32).style(t::send_button()).on_press_maybe(can_send.then_some(Msg::Send));
+    let send = button(container(t::icon(Icon::Send, 18.0, rgb(0x1b2025))).center_x(32).center_y(32)).padding(0).width(32).height(32).style(t::send_button()).on_press_maybe(can_send.then_some(Msg::Send));
     let focused = false;
-    area = area.push(container(row![t::icon(Icon::LockKeyhole, 18.0, rgb(0x82768f)), editor, send].spacing(12).align_y(Vertical::Center))
+    if app.emoji_open {
+        let mut grid = Column::new().spacing(2);
+        for line in EMOJI.chunks(14) {
+            grid = line.iter().fold(Row::new().spacing(2), |row, emoji| row.push(button(container(text(*emoji).size(20)).center_x(34).center_y(34)).padding(0).width(34).height(34).style(t::plain(Color::WHITE, Color::WHITE)).on_press(Msg::PickEmoji(emoji)))).into_grid(grid);
+        }
+        area = area.push(container(container(scroll_area(grid).height(Length::Fixed(170.0))).padding(8).style(t::panel(rgb(0x1b2025), rgb(0x353e49), 8.0))).padding(Padding { bottom: 8.0, ..Padding::ZERO }));
+    }
+    let tool = |icon: Icon, on: Option<Msg>| -> E<'a> { button(container(t::icon(icon, 18.0, rgb(0x929ca3))).center_x(32).center_y(32)).padding(0).width(32).height(32).style(t::plain(rgb(0x929ca3), rgb(0xd0d7dc))).on_press_maybe(on).into() };
+    let tools = row![tool(Icon::Smile, enabled.then_some(Msg::ToggleEmoji)), tool(Icon::Paperclip, (enabled && !app.uploading).then_some(Msg::AttachFile))].spacing(2);
+    area = area.push(container(row![t::icon(Icon::LockKeyhole, 18.0, rgb(0x77838e)), editor, tools, send].spacing(12).align_y(Vertical::Center))
         .padding([13, 15]).style(move |_| container::Style {
-            background: Some(rgb(0x28292f).into()), border: t::border(if focused { rgb(0x89739f) } else { rgb(0x414048) }, 1.0, 10.0), ..Default::default()
+            background: Some(rgb(0x21272d).into()), border: t::border(if focused { rgb(0x7e8a94) } else { rgb(0x333c47) }, 1.0, 10.0), ..Default::default()
         }));
     area = area.push(container(row![
-        lead_icon(Icon::LockKeyhole, hint_left, rgb(0x706b7b), 11.0, 11.0, 5.0), grow(),
-        text("Enter to send · Shift + Enter for a new line").size(11).color(rgb(0x706b7b)),
+        lead_icon(Icon::LockKeyhole, hint_left, rgb(0x74808b), 11.0, 11.0, 5.0), grow(),
+        text("Enter to send · Shift + Enter for a new line").size(11).color(rgb(0x74808b)),
     ]).padding([10, 1]));
     container(area).padding(Padding { top: 18.0, bottom: 12.0, left: 33.0, right: 33.0 }).into()
 }
@@ -866,10 +931,10 @@ fn direct_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
     let first = peer.name.split_whitespace().next().unwrap_or_default().to_owned();
     let changed = app.trust_changed(peer);
     let start = column![
-        container(tile(&peer.name, rgb(0x40354e), rgb(0xdbc5f4), Some(rgb(0x594566)), 69.0, 23.0, 24.0, None)).padding(Padding { bottom: 18.0, ..Padding::ZERO }),
-        container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("This is your space with {first}.") }).size(24).font(t::bold()).color(rgb(0xededf2))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
-        body(if app.thread.pins { "Pinned messages stay until you unpin them." } else { "Say something. Make a plan. Stay a while." }, 15.0, rgb(0x878693), 1.7),
-        container(lead_icon(Icon::LockKeyhole, if changed { "Contact key changed. Verify it in conversation details before sending.".to_string() } else if peer.encryption_key.is_some() { "Encrypted on your device before sending".to_string() } else { format!("{first} hasn't set up encryption yet. They need to sign in to Sonar once before you can message them.") }, if changed { rgb(0xe3b8a8) } else { rgb(0xac9bbd) }, 12.0, 12.0, 6.0)).padding(Padding { top: 17.0, ..Padding::ZERO }),
+        container(tile(&peer.name, rgb(0x333c46), rgb(0xd0d7dc), Some(rgb(0x74808b)), 69.0, 23.0, 24.0, None, t::presence_color("online"))).padding(Padding { bottom: 18.0, ..Padding::ZERO }),
+        container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("This is your space with {first}.") }).size(24).font(t::bold()).color(rgb(0xeef0f1))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
+        body(if app.thread.pins { "Pinned messages stay until you unpin them." } else { "Say something. Make a plan. Stay a while." }, 15.0, rgb(0x838e96), 1.7),
+        container(lead_icon(Icon::LockKeyhole, if changed { "Contact key changed. Verify it in conversation details before sending.".to_string() } else if peer.encryption_key.is_some() { "Encrypted on your device before sending".to_string() } else { format!("{first} hasn't set up encryption yet. They need to sign in to Sonar once before you can message them.") }, if changed { rgb(0xe3b8a8) } else { rgb(0xd0d7dc) }, 12.0, 12.0, 6.0)).padding(Padding { top: 17.0, ..Padding::ZERO }),
     ];
     let mut list = Column::new().push(container(start).padding(Padding { top: 45.0, bottom: 27.0, ..Padding::ZERO })).push(date_divider(if app.thread.pins { "PINNED MESSAGES" } else { "YOUR CONVERSATION" }));
     for item in message_list(app, me, false) { list = list.push(item); }
@@ -883,7 +948,7 @@ fn community_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
         if app.thread.loading { return center(notice("Opening your community...")).into(); }
         return scroll_area(welcome(t::icon(Icon::Users, 37.0, t::ACCENT), "GOOD COMPANY. YOUR OWN CORNER.", "Make room for your people.", ["A weekend crew. A study group. Your next big idea.", "Bring everyone together in a private community."],
             vec![
-                button(row![t::icon(Icon::Plus, 17.0, rgb(0x251c31)), text("Create a community").size(15).font(t::semibold()).color(rgb(0x251c31))].spacing(22).align_y(Vertical::Center)).padding([13, 18]).style(t::primary()).on_press(Msg::OpenDialog(Some(Dialog::Create))).into(),
+                button(row![t::icon(Icon::Plus, 17.0, rgb(0x1e2329)), text("Create a community").size(15).font(t::semibold()).color(rgb(0x1e2329))].spacing(22).align_y(Vertical::Center)).padding([13, 18]).style(t::primary()).on_press(Msg::OpenDialog(Some(Dialog::Create))).into(),
                 secondary("Join with an invite", Some(Icon::ArrowUpRight), Some(Msg::OpenDialog(Some(Dialog::Join)))),
             ],
             [(Icon::LockKeyhole, "Encrypted channel messages"), (Icon::Timer, "7-day history"), (Icon::Users, "Invite-only spaces")])).height(FILL).into();
@@ -891,10 +956,10 @@ fn community_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
     let channel = app.channel_info();
     let name = channel.map(|c| c.name.clone()).unwrap_or_else(|| "general".into());
     let start = column![
-        container(container(t::icon(Icon::Hash, 35.0, rgb(0xbba2d4))).width(65).height(65).center_x(65).center_y(65).style(t::panel(rgb(0x352d41), rgb(0x4a3c5a), 22.0))).padding(Padding { bottom: 20.0, ..Padding::ZERO }),
-        container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("Welcome to #{name}") }).size(24).font(t::bold()).color(rgb(0xededf2))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
-        body(if app.thread.pins { "Pinned messages stay until someone unpins them." } else { "Your own corner of the conversation. Make yourself at home." }, 15.0, rgb(0x878693), 1.7),
-        container(row![t::icon(Icon::LockKeyhole, 12.0, rgb(0xac9bbd)), body("Encrypted separately for each member. New members start with a clean history.", 12.0, rgb(0xac9bbd), 1.8)].spacing(6)).padding(Padding { top: 17.0, ..Padding::ZERO }),
+        container(container(t::icon(Icon::Hash, 35.0, rgb(0xd0d7dc))).width(65).height(65).center_x(65).center_y(65).style(t::panel(rgb(0x2a323b), rgb(0x3a4450), 22.0))).padding(Padding { bottom: 20.0, ..Padding::ZERO }),
+        container(text(if app.thread.pins { "The things worth keeping.".to_string() } else { format!("Welcome to #{name}") }).size(24).font(t::bold()).color(rgb(0xeef0f1))).padding(Padding { bottom: 10.0, ..Padding::ZERO }),
+        body(if app.thread.pins { "Pinned messages stay until someone unpins them." } else { "Your own corner of the conversation. Make yourself at home." }, 15.0, rgb(0x838e96), 1.7),
+        container(row![t::icon(Icon::LockKeyhole, 12.0, rgb(0xd0d7dc)), body("Encrypted separately for each member. New members start with a clean history.", 12.0, rgb(0xd0d7dc), 1.8)].spacing(6)).padding(Padding { top: 17.0, ..Padding::ZERO }),
     ];
     let mut list = Column::new().push(container(start).padding(Padding { top: 45.0, bottom: 27.0, ..Padding::ZERO })).push(date_divider(if app.thread.pins { "PINNED MESSAGES" } else { "CHANNEL CONVERSATION" }));
     for item in message_list(app, me, true) { list = list.push(item); }
@@ -911,7 +976,7 @@ impl std::fmt::Display for Choice { fn fmt(&self, f: &mut std::fmt::Formatter<'_
 fn members_panel(app: &App) -> E<'_> {
     let Some(community) = &app.community else { return space().into() };
     let (owner, moderator, me) = (app.owner(), app.moderator(), app.me());
-    let mut list = Column::new().push(container(row![text(t::tracked(&format!("MEMBERS — {}", community.members.len()))).size(11).font(t::bold()).color(rgb(0x797987)), grow(), icon_btn(Icon::X, 15.0, Some(Msg::ToggleMembers), false)].align_y(Vertical::Center)).padding(Padding { top: 10.0, bottom: 18.0, left: 4.0, right: 4.0 }));
+    let mut list = Column::new().push(container(row![text(t::tracked(&format!("MEMBERS — {}", community.members.len()))).size(11).font(t::bold()).color(rgb(0x75818b)), grow(), icon_btn(Icon::X, 15.0, Some(Msg::ToggleMembers), false)].align_y(Vertical::Center)).padding(Padding { top: 10.0, bottom: 18.0, left: 4.0, right: 4.0 }));
     if owner { list = list.push(nav_row(None, "Manage bans", None, false, Some(Msg::OpenDialog(Some(Dialog::Bans))))); }
     for (index, member) in community.member_details.iter().enumerate() {
         let is_mod = community.moderators.contains(&member.id);
@@ -926,14 +991,14 @@ fn members_panel(app: &App) -> E<'_> {
             let member = member.clone();
             pick_list(choices, None::<Choice>, move |choice| Msg::AskConfirm(Some(Confirm { action: choice.action.into(), member: Some(member.clone()), channel: None })))
                 .placeholder("Manage").text_size(11).padding([5, 4]).width(84).style(t::select()).menu_style(t::menu()).into()
-        } else { t::icon(Icon::LockKeyhole, 11.0, rgb(0xa395b5)) };
+        } else { t::icon(Icon::LockKeyhole, 11.0, rgb(0xd0d7dc)) };
         list = list.push(container(row![
-            avatar(&member.name, index, app.online.contains(&member.id).then_some(rgb(0x1b1c21)), 30.0),
-            column![text(member.name.clone()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).color(rgb(0x7d7c8a))].spacing(4).width(FILL),
+            avatar_status(&member.name, index, app.online.contains(&member.id).then_some(rgb(0x171b1f)), app.status_color(&member.id), 30.0),
+            column![text(member.name.clone()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).color(rgb(0x78848e))].spacing(4).width(FILL),
             trailing,
         ].spacing(8).align_y(Vertical::Center)).padding([10, 4]));
     }
-    container(scroll_area(list)).width(250).height(FILL).padding([12, 10]).style(t::fill(rgb(0x1b1c21))).into()
+    container(scroll_area(list)).width(250).height(FILL).padding([12, 10]).style(t::fill(rgb(0x171b1f))).into()
 }
 
 fn matches_person(person: &crate::api::Person, query: &str) -> bool {
@@ -944,7 +1009,7 @@ fn matches_person(person: &crate::api::Person, query: &str) -> bool {
 // ----- Overlays ---------------------------------------------------------------
 
 fn privacy_item<'a>(icon: Icon, title: &'a str, note: &'a str) -> E<'a> {
-    container(row![t::icon(icon, 19.0, rgb(0xb29cc9)), column![text(title).size(15).font(t::semibold()).color(rgb(0xddd3e7)), body(note, 14.0, rgb(0x9a909f), 1.8)].spacing(7)].spacing(14)).padding([12, 0]).into()
+    container(row![t::icon(icon, 19.0, rgb(0xd0d7dc)), column![text(title).size(15).font(t::semibold()).color(rgb(0xd0d7dc)), body(note, 14.0, rgb(0x8f99a0), 1.8)].spacing(7)].spacing(14)).padding([12, 0]).into()
 }
 
 fn panel_view(app: &App, panel: Panel) -> E<'_> {
@@ -953,14 +1018,14 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
         Panel::People => {
             let mut people = Column::new().spacing(6).padding(Padding { top: 20.0, ..Padding::ZERO });
             let found: Vec<_> = app.people.iter().filter(|p| matches_person(p, &app.people_query)).collect();
-            if !app.people.is_empty() && found.is_empty() { people = people.push(body("No one matches that username.", 15.0, rgb(0x9b91a4), 1.8)); }
+            if !app.people.is_empty() && found.is_empty() { people = people.push(body("No one matches that username.", 15.0, rgb(0x929ca3), 1.8)); }
             for (index, person) in found.into_iter().enumerate() {
-                people = people.push(person_row(&person.name, &format!("@{}", person.username), index, app.online.contains(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x9999a6))], Some(Msg::OpenPeer(Some(person.id.clone())))));
+                people = people.push(person_row(&person.name, &format!("@{}", person.username), index, app.avatar_dot(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x98a1a7))], Some(Msg::OpenPeer(Some(person.id.clone())))));
             }
-            if app.people.is_empty() { people = people.push(body("No other members yet. Share this app's address with a friend.", 15.0, rgb(0x9b91a4), 1.8)); }
+            if app.people.is_empty() { people = people.push(body("No other members yet. Share this app's address with a friend.", 15.0, rgb(0x929ca3), 1.8)); }
             column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Your people, a little closer."),
-                body("Choose someone to start an encrypted conversation. New members appear here after signing up.", 15.0, rgb(0x99919f), 1.8),
-                container(container(row![t::icon(Icon::Search, 15.0, rgb(0x676977)), text_input("Find by username or name", &app.people_query).on_input(Msg::PeopleQuery).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x15161a), rgb(0x2a2b32), 6.0))).padding(Padding { top: 20.0, ..Padding::ZERO }),
+                body("Choose someone to start an encrypted conversation. New members appear here after signing up.", 15.0, rgb(0x9099a0), 1.8),
+                container(container(row![t::icon(Icon::Search, 15.0, rgb(0x74808b)), text_input("Find by username or name", &app.people_query).on_input(Msg::PeopleQuery).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0))).padding(Padding { top: 20.0, ..Padding::ZERO }),
                 scroll_area(people).height(Length::Shrink)].into()
         }
         Panel::Privacy => {
@@ -973,14 +1038,14 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
                 .push(privacy_item(Icon::Headphones, "Voice is for the moment.", "Direct WebRTC audio is encrypted in transit. Sonar has no recording or media storage. Calls need a compatible network or a configured STUN/TURN service."));
             if let (Mode::Direct, Some(peer)) = (app.mode, app.selected_peer()) {
                 if let Some(print) = peer.encryption_key.as_deref().and_then(|k| crate::crypto::fingerprint(k).ok()) {
-                    let mut card = Column::new().push(text(format!("{}’s safety code", peer.name)).size(13).font(t::semibold()).color(rgb(0xb7a5ca)))
-                        .push(container(body(print, 14.0, rgb(0xb8b1c3), 1.8)).padding(Padding { top: 8.0, ..Padding::ZERO }));
+                    let mut card = Column::new().push(text(format!("{}’s safety code", peer.name)).size(13).font(t::semibold()).color(rgb(0xd0d7dc)))
+                        .push(container(body(print, 14.0, rgb(0xb4bbc0), 1.8)).padding(Padding { top: 8.0, ..Padding::ZERO }));
                     if app.trust_changed(peer) {
                         let first = peer.name.split_whitespace().next().unwrap_or_default().to_owned();
-                        card = card.push(container(body(format!("{first}’s key changed, for example because they reset it or set up a new device. Ask them to open Account settings → Privacy & device and read you their safety code in person or on a call. If it matches the code above, trust the new key. Older messages may become unreadable."), 14.0, rgb(0xb9aabc), 1.6)).padding(Padding { top: 10.0, ..Padding::ZERO }))
-                            .push(container(button(text("The codes match, trust the new key").size(15).color(rgb(0xe9dcf5))).padding([8, 12]).style(t::fingerprint_button()).on_press(Msg::AcceptKey)).padding(Padding { top: 10.0, ..Padding::ZERO }));
+                        card = card.push(container(body(format!("{first}’s key changed, for example because they reset it or set up a new device. Ask them to open Account settings → Privacy & device and read you their safety code in person or on a call. If it matches the code above, trust the new key. Older messages may become unreadable."), 14.0, rgb(0xadb4b9), 1.6)).padding(Padding { top: 10.0, ..Padding::ZERO }))
+                            .push(container(button(text("The codes match, trust the new key").size(15).color(rgb(0xd0d7dc))).padding([8, 12]).style(t::fingerprint_button()).on_press(Msg::AcceptKey)).padding(Padding { top: 10.0, ..Padding::ZERO }));
                     }
-                    content = content.push(container(card).padding(12).width(FILL).style(t::panel(rgb(0x19181d), rgb(0x39313f), 7.0))).push(v_space(20.0));
+                    content = content.push(container(card).padding(12).width(FILL).style(t::panel(rgb(0x14181c), rgb(0x2a323b), 7.0))).push(v_space(20.0));
                 }
             }
             content.push(honest_note(Icon::Check, "This is an early implementation, not an audited messenger. Account and connection metadata remain visible to the service. Forward secrecy is not implemented. Recipients can copy or record content."))
@@ -989,7 +1054,7 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
                 .into()
         }
     };
-    modal(container(scroll_area(content)).padding(34).into(), 520.0, Some(close))
+    modal(modal_scroll(content), 520.0, Some(close))
 }
 
 fn dialog_view(app: &App) -> E<'_> {
@@ -1003,24 +1068,24 @@ fn dialog_view(app: &App) -> E<'_> {
     let channel_picker = move || -> E {
         let (ids, names2) = (ids.clone(), names.clone());
         field("Channel or room", pick_list(names.clone(), selected_name.clone(), move |name: String| Msg::DialogChannel(ids[names2.iter().position(|n| n == &name).unwrap_or(0)].clone()))
-            .padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 10.0, 14.0, rgb(0xb7a5c5))
+            .padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 10.0, 14.0, rgb(0xd0d7dc))
     };
     let mut content = Column::new().push(modal_header(Icon::Users, 29.0, close.clone()));
     match dialog {
         Dialog::Start => {
             content = content.push(modal_title("Your people belong here."))
-                .push(body("Start a private community, or join a space with an invite from its owner.", 15.0, rgb(0x99919f), 1.8))
+                .push(body("Start a private community, or join a space with an invite from its owner.", 15.0, rgb(0x9099a0), 1.8))
                 .push(container(column![
-                    button(container(row![t::icon(Icon::Plus, 17.0, rgb(0x251c31)), text("Create a community").size(15).font(t::semibold()).color(rgb(0x251c31))].spacing(12).align_y(Vertical::Center)).center_x(FILL)).width(FILL).padding([13, 18]).style(t::primary()).on_press(Msg::OpenDialog(Some(Dialog::Create))),
-                    button(container(lead_icon(Icon::ArrowUpRight, "Join with an invite", rgb(0xc1b0d0), 17.0, 15.0, 12.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::OpenDialog(Some(Dialog::Join))),
+                    button(container(row![t::icon(Icon::Plus, 17.0, rgb(0x1e2329)), text("Create a community").size(15).font(t::semibold()).color(rgb(0x1e2329))].spacing(12).align_y(Vertical::Center)).center_x(FILL)).width(FILL).padding([13, 18]).style(t::primary()).on_press(Msg::OpenDialog(Some(Dialog::Create))),
+                    button(container(lead_icon(Icon::ArrowUpRight, "Join with an invite", rgb(0xd0d7dc), 17.0, 15.0, 12.0)).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::OpenDialog(Some(Dialog::Join))),
                 ].spacing(12)).padding(Padding { top: 27.0, ..Padding::ZERO }));
         }
         Dialog::Invite => {
             content = content.push(modal_title("Good company starts here."))
-                .push(body("This invite expires in 24 hours. Generating a new invite revokes the previous link. Anyone with it can join, up to 32 members.", 15.0, rgb(0x99919f), 1.8));
+                .push(body("This invite expires in 24 hours. Generating a new invite revokes the previous link. Anyone with it can join, up to 32 members.", 15.0, rgb(0x9099a0), 1.8));
             match &app.invite {
                 Some(invite) => {
-                    content = content.push(container(field("Invite code", text_input("", &invite.token).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xb7a5c5))).padding([24, 0]))
+                    content = content.push(container(field("Invite code", text_input("", &invite.token).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xd0d7dc))).padding([24, 0]))
                         .push(primary("Copy invite link", Some(Icon::Copy), Some(Msg::CopyInvite)))
                         .push(v_space(24.0))
                         .push(honest_note(Icon::Timer, "New members receive future messages only. Their devices cannot decrypt older history."));
@@ -1029,7 +1094,7 @@ fn dialog_view(app: &App) -> E<'_> {
             }
         }
         Dialog::Bans => {
-            content = content.push(modal_title("Community bans")).push(body("Banned accounts cannot use an invite to rejoin. Removing a ban revokes the current invite.", 15.0, rgb(0x99919f), 1.8));
+            content = content.push(modal_title("Community bans")).push(body("Banned accounts cannot use an invite to rejoin. Removing a ban revokes the current invite.", 15.0, rgb(0x9099a0), 1.8));
             content = match &app.bans {
                 None if app.busy => content.push(notice("Loading bans...")),
                 None => content.push(notice("Could not load bans. Close and try again.")),
@@ -1043,16 +1108,16 @@ fn dialog_view(app: &App) -> E<'_> {
         Dialog::DeleteChannel => {
             let target = app.dialog_channel.as_ref().and_then(|id| channels.iter().find(|c| &c.id == id)).cloned();
             content = content.push(modal_title("Delete a channel or room"))
-                .push(body("Select a channel. Its stored messages, including pins, will be deleted. Every community must keep at least one text channel.", 15.0, rgb(0x99919f), 1.8))
+                .push(body("Select a channel. Its stored messages, including pins, will be deleted. Every community must keep at least one text channel.", 15.0, rgb(0x9099a0), 1.8))
                 .push(container(channel_picker()).padding([24, 0]))
                 .push(danger("Continue", target.map(|channel| Msg::AskConfirm(Some(Confirm { action: "delete-channel".into(), member: None, channel: Some(channel) })))));
         }
         Dialog::RenameCommunity | Dialog::RenameChannel => {
             let channel = *dialog == Dialog::RenameChannel;
             content = content.push(modal_title(if channel { "Rename channel or room" } else { "Rename community" }))
-                .push(body("Everyone in the community will see the updated name.", 15.0, rgb(0x99919f), 1.8));
+                .push(body("Everyone in the community will see the updated name.", 15.0, rgb(0x9099a0), 1.8));
             if channel { content = content.push(container(channel_picker()).padding(Padding { top: 24.0, ..Padding::ZERO })); }
-            content = content.push(container(field("New name", text_input("", &app.dialog_value).on_input(Msg::DialogValue).on_submit(Msg::SubmitDialog).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xb7a5c5))).padding([24, 0]))
+            content = content.push(container(field("New name", text_input("", &app.dialog_value).on_input(Msg::DialogValue).on_submit(Msg::SubmitDialog).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xd0d7dc))).padding([24, 0]))
                 .push(primary(if app.busy { "Saving..." } else { "Save name" }, None, (!app.busy && !app.dialog_value.trim().is_empty()).then_some(Msg::SubmitDialog)));
         }
         Dialog::Create | Dialog::Join | Dialog::Channel => {
@@ -1062,19 +1127,19 @@ fn dialog_view(app: &App) -> E<'_> {
                 _ if app.dialog_voice => ("Give the conversation a home.", "All community members can join. Up to six people can share encrypted audio at a time.", "Room name", "lounge", "Create voice room"),
                 _ => ("Give the conversation a home.", "Only the owner can create channels. All community members can read future messages.", "Channel name", "ideas-and-plans", "Create channel"),
             };
-            content = content.push(modal_title(title)).push(body(note, 15.0, rgb(0x99919f), 1.8));
+            content = content.push(modal_title(title)).push(body(note, 15.0, rgb(0x9099a0), 1.8));
             if *dialog == Dialog::Channel {
                 let options = vec!["Text channel".to_string(), "Voice room · up to 6 people".to_string()];
                 let selected = Some(options[usize::from(app.dialog_voice)].clone());
-                content = content.push(container(field("Channel type", pick_list(options, selected, |value: String| Msg::DialogVoice(value.starts_with("Voice"))).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 10.0, 14.0, rgb(0xb7a5c5))).padding(Padding { top: 24.0, ..Padding::ZERO }));
+                content = content.push(container(field("Channel type", pick_list(options, selected, |value: String| Msg::DialogVoice(value.starts_with("Voice"))).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 10.0, 14.0, rgb(0xd0d7dc))).padding(Padding { top: 24.0, ..Padding::ZERO }));
             }
-            content = content.push(container(field(label, text_input(placeholder, &app.dialog_value).on_input(Msg::DialogValue).on_submit(Msg::SubmitDialog).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xb7a5c5))).padding(Padding { top: 24.0, bottom: 20.0, ..Padding::ZERO }))
+            content = content.push(container(field(label, text_input(placeholder, &app.dialog_value).on_input(Msg::DialogValue).on_submit(Msg::SubmitDialog).padding(13).size(15).style(t::dialog_input()).into(), 10.0, 14.0, rgb(0xd0d7dc))).padding(Padding { top: 24.0, bottom: 20.0, ..Padding::ZERO }))
                 .push(primary(if app.busy { "One moment..." } else { submit }, Some(Icon::Check), (!app.busy && !app.dialog_value.trim().is_empty()).then_some(Msg::SubmitDialog)))
                 .push(v_space(24.0))
                 .push(honest_note(Icon::ShieldCheck, "Messages are encrypted on your device. Community names, channel names, and membership are visible to the service. This early encryption protocol has not been independently audited."));
         }
     }
-    modal(container(scroll_area(content)).padding(34).into(), 520.0, (!app.busy).then_some(close))
+    modal(modal_scroll(content), 520.0, (!app.busy).then_some(close))
 }
 
 fn confirm_view<'a>(app: &'a App, confirm: &'a Confirm) -> E<'a> {
@@ -1095,15 +1160,15 @@ fn confirm_view<'a>(app: &'a App, confirm: &'a Confirm) -> E<'a> {
     let label = if app.busy { "Updating membership..." } else { label };
     let go = (!app.busy).then_some(Msg::ApplyConfirm);
     let confirm_button = if matches!(confirm.action.as_str(), "transfer" | "promote") {
-        button(container(text(label).size(15).font(t::semibold()).color(rgb(0x251c31))).center_x(FILL)).width(FILL).padding([13, 18]).style(t::primary()).on_press_maybe(go)
+        button(container(text(label).size(15).font(t::semibold()).color(rgb(0x1e2329))).center_x(FILL)).width(FILL).padding([13, 18]).style(t::primary()).on_press_maybe(go)
     } else {
         button(container(text(label).size(15).font(t::semibold()).color(Color::WHITE)).center_x(FILL)).width(FILL).padding([13, 18]).style(t::danger()).on_press_maybe(go)
     };
     let content = column![
         modal_header(Icon::ShieldCheck, 29.0, Msg::AskConfirm(None)),
         modal_title(title),
-        body(note, 15.0, rgb(0x99919f), 1.8),
-        container(column![confirm_button, button(container(text("Cancel").size(15).color(rgb(0xc1b0d0))).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then_some(Msg::AskConfirm(None)))].spacing(12)).padding(Padding { top: 27.0, ..Padding::ZERO }),
+        body(note, 15.0, rgb(0x9099a0), 1.8),
+        container(column![confirm_button, button(container(text("Cancel").size(15).color(rgb(0xd0d7dc))).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then_some(Msg::AskConfirm(None)))].spacing(12)).padding(Padding { top: 27.0, ..Padding::ZERO }),
     ];
     modal(container(content).padding(34).into(), 520.0, (!app.busy).then_some(Msg::AskConfirm(None)))
 }
@@ -1113,10 +1178,10 @@ fn delete_view<'a>(app: &'a App, id: &'a str) -> E<'a> {
     let content = column![
         modal_header(Icon::Trash, 26.0, Msg::AskDelete(None)),
         modal_title("Delete message?"),
-        body(note, 15.0, rgb(0x99919f), 1.8),
+        body(note, 15.0, rgb(0x9099a0), 1.8),
         container(column![
             button(container(text("Delete message").size(15).font(t::semibold()).color(Color::WHITE)).center_x(FILL)).width(FILL).padding([13, 18]).style(t::danger()).on_press(Msg::Delete(id.to_owned())),
-            button(container(text("Cancel").size(15).color(rgb(0xc1b0d0))).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::AskDelete(None)),
+            button(container(text("Cancel").size(15).color(rgb(0xd0d7dc))).center_x(FILL)).width(FILL).padding([12, 16]).style(t::secondary()).on_press(Msg::AskDelete(None)),
         ].spacing(12)).padding(Padding { top: 27.0, ..Padding::ZERO }),
     ];
     modal(container(content).padding(34).into(), 420.0, Some(Msg::AskDelete(None)))
@@ -1126,14 +1191,14 @@ fn delete_view<'a>(app: &'a App, id: &'a str) -> E<'a> {
 
 fn security_card<'a>(icon: Icon, title: E<'a>, note: &'a str, content: E<'a>) -> E<'a> {
     container(column![
-        row![container(t::icon(icon, 20.0, rgb(0xc9ade6))).width(39).height(39).center_x(39).center_y(39).style(t::panel(rgb(0x352b41), rgb(0x493958), 12.0)),
-            column![title, body(note, 14.0, rgb(0x9d8eaa), 1.7)].spacing(5)].spacing(12),
+        row![container(t::icon(icon, 20.0, rgb(0xd0d7dc))).width(39).height(39).center_x(39).center_y(39).style(t::panel(rgb(0x2a3139), rgb(0x38424e), 12.0)),
+            column![title, body(note, 14.0, rgb(0x949da4), 1.7)].spacing(5)].spacing(12),
         container(content).padding(Padding { top: 20.0, ..Padding::ZERO }),
-    ]).padding(22).width(FILL).style(t::panel(rgb(0x25222b), rgb(0x3d3446), 12.0)).into()
+    ]).padding(22).width(FILL).style(t::panel(rgb(0x1d2329), rgb(0x2e3640), 12.0)).into()
 }
-fn card_title<'a>(value: &'a str) -> E<'a> { text(value).size(17).font(t::semibold()).color(rgb(0xe0d7e8)).into() }
+fn card_title<'a>(value: &'a str) -> E<'a> { text(value).size(17).font(t::semibold()).color(rgb(0xd0d7dc)).into() }
 fn small_note<'a>(value: impl text::IntoFragment<'a>) -> E<'a> {
-    column![t::rule(rgb(0x39313f), true), container(body(value, 12.0, rgb(0x8e7d99), 1.8)).padding(Padding { top: 14.0, ..Padding::ZERO })].padding(Padding { top: 18.0, ..Padding::ZERO }).into()
+    column![t::rule(rgb(0x2a323b), true), container(body(value, 12.0, rgb(0x818c95), 1.8)).padding(Padding { top: 14.0, ..Padding::ZERO })].padding(Padding { top: 18.0, ..Padding::ZERO }).into()
 }
 fn date(value: &str) -> String {
     crate::chat::timestamp(value).and_then(chrono::DateTime::from_timestamp_millis).map(|d| d.with_timezone(&chrono::Local).format("%d/%m/%Y, %H:%M:%S").to_string()).unwrap_or_default()
@@ -1146,10 +1211,10 @@ fn checkbox_row<'a>(label: &'a str, checked: bool, on: impl Fn(bool) -> Msg + 'a
         .style(move |_, status| {
             let hovered = matches!(status, iced::widget::checkbox::Status::Hovered { .. });
             iced::widget::checkbox::Style {
-                background: (if checked { rgb(0xb69bdc) } else { rgb(0x1d1b22) }).into(),
-                icon_color: rgb(0x21182e),
-                border: t::border(if checked || hovered { rgb(0xb69bdc) } else { rgb(0x4b3d55) }, 1.0, 3.0),
-                text_color: Some(rgb(0xb8a4c7)),
+                background: (if checked { rgb(0xd0d7dc) } else { rgb(0x171b20) }).into(),
+                icon_color: rgb(0x1b2025),
+                border: t::border(if checked || hovered { rgb(0xd0d7dc) } else { rgb(0x37414c) }, 1.0, 3.0),
+                text_color: Some(rgb(0xd0d7dc)),
             }
         }).into()
 }
@@ -1160,32 +1225,32 @@ fn settings_view(app: &App) -> E<'_> {
     let tabs = [(Tab::Profile, Icon::UserRound, "Your profile"), (Tab::Security, Icon::KeyRound, "Password & passkeys"), (Tab::Privacy, Icon::ShieldCheck, "Privacy & device"), (Tab::Voice, Icon::Headphones, "Voice & audio")];
     let nav = tabs.iter().fold(Column::new(), |nav, (tab, icon, label)| {
         let selected = app.tab == *tab;
-        let color = if selected { rgb(0xd3bdf6) } else { rgb(0x9999a6) };
+        let color = if selected { rgb(0xd0d7dc) } else { rgb(0x98a1a7) };
         nav.push(container(button(row![t::icon(*icon, 17.0, color), text(*label).size(13).color(color)].spacing(11).align_y(Vertical::Center)).width(FILL).padding([12, 10]).style(t::nav_row(selected)).on_press_maybe((!app.busy).then_some(Msg::SetTab(*tab)))).padding([3, 0]))
     });
     let navigation = container(column![
         t::eyebrow("YOUR SONAR", 11.0, t::EYEBROW),
         container(text("Make it yours.").size(23).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 9.0, bottom: 24.0, ..Padding::ZERO }),
-        tile(&session.account.full_name, rgb(0x4a3959), rgb(0xd9b9ee), Some(rgb(0x6a4b7d)), 65.0, 22.0, 24.0, None),
+        tile(&session.account.full_name, rgb(0x39434e), rgb(0xd0d7dc), Some(rgb(0x74808b)), 65.0, 22.0, 24.0, None, t::presence_color("online")),
         container(text(session.account.full_name.clone()).size(16).font(t::semibold()).color(t::TEXT)).padding(Padding { top: 12.0, ..Padding::ZERO }),
-        container(text(format!("@{}", session.account.username)).size(13).color(rgb(0xc3a5ec))).padding(Padding { top: 5.0, ..Padding::ZERO }),
-        container(text(session.account.email.clone()).size(13).color(rgb(0x8c7c97))).padding(Padding { top: 7.0, bottom: 24.0, ..Padding::ZERO }),
+        container(text(format!("@{}", session.account.username)).size(13).color(rgb(0xd0d7dc))).padding(Padding { top: 5.0, ..Padding::ZERO }),
+        container(text(session.account.email.clone()).size(13).color(rgb(0x7f8a94))).padding(Padding { top: 7.0, bottom: 24.0, ..Padding::ZERO }),
         nav,
-        container(button(row![t::icon(Icon::LogOut, 16.0, rgb(0xbb91a2)), text("Sign out everywhere").size(13).color(rgb(0xbb91a2))].spacing(11).align_y(Vertical::Center)).width(FILL).padding([12, 10]).style(t::nav_row(false)).on_press_maybe((!app.busy).then_some(Msg::SignOut))).padding(Padding { top: 30.0, ..Padding::ZERO }),
+        container(button(row![t::icon(Icon::LogOut, 16.0, rgb(0xd0d7dc)), text("Sign out everywhere").size(13).color(rgb(0xd0d7dc))].spacing(11).align_y(Vertical::Center)).width(FILL).padding([12, 10]).style(t::nav_row(false)).on_press_maybe((!app.busy).then_some(Msg::SignOut))).padding(Padding { top: 30.0, ..Padding::ZERO }),
         space().height(FILL),
-        text("Free to use. Your space to keep.").size(11).color(rgb(0x74667d)),
-    ].align_x(Horizontal::Center)).width(270).height(FILL).padding(Padding { top: 34.0, bottom: 24.0, left: 20.0, right: 20.0 }).style(|_| container::Style { background: Some(rgb(0x1b1a20).into()), border: iced::Border { radius: iced::border::Radius { top_left: 17.0, bottom_left: 17.0, top_right: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() });
+        text("Free to use. Your space to keep.").size(11).color(rgb(0x74808b)),
+    ].align_x(Horizontal::Center)).width(270).height(FILL).padding(Padding { top: 34.0, bottom: 24.0, left: 20.0, right: 20.0 }).style(|_| container::Style { background: Some(rgb(0x161a1e).into()), border: iced::Border { radius: iced::border::Radius { top_left: 17.0, bottom_left: 17.0, top_right: 0.0, bottom_right: 0.0 }, ..Default::default() }, ..Default::default() });
 
     let heading = |eyebrow: &'static str, title: &'static str, note: &'static str| -> Column<'_, Msg> {
-        column![t::eyebrow(eyebrow, 11.0, t::EYEBROW), container(text(title).size(24).font(t::semibold()).color(t::TEXT)).padding([10, 0]), body(note, 15.0, rgb(0xa497ae), 1.8)]
+        column![t::eyebrow(eyebrow, 11.0, t::EYEBROW), container(text(title).size(24).font(t::semibold()).color(t::TEXT)).padding([10, 0]), body(note, 15.0, rgb(0x9ba4aa), 1.8)]
     };
     let content: Column<Msg> = match app.tab {
         Tab::Profile => heading("A FAMILIAR FACE", "Your profile", "The name your people see in conversations and communities.")
-            .push(container(field("Display name", dialog_input("", &app.profile_name, Msg::ProfileName, false), 10.0, 13.0, rgb(0xb7a5c5))).padding([22, 0]))
-            .push(field("Username", dialog_input("", &app.profile_username, Msg::ProfileUsername, false), 10.0, 13.0, rgb(0xb7a5c5)))
-            .push(container(text("People can find you with this. Letters, numbers, dots and underscores.").size(12).color(rgb(0x887691))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
-            .push(field("Email address", text_input("", &session.account.email).padding(13).size(15).style(t::input(rgb(0x211d26), rgb(0x4d3e58), rgb(0x4d3e58), 7.0)).into(), 10.0, 13.0, rgb(0xb7a5c5)))
-            .push(container(text("Email changes are not available yet.").size(12).color(rgb(0x887691))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
+            .push(container(field("Display name", dialog_input("", &app.profile_name, Msg::ProfileName, false), 10.0, 13.0, rgb(0xd0d7dc))).padding([22, 0]))
+            .push(field("Username", dialog_input("", &app.profile_username, Msg::ProfileUsername, false), 10.0, 13.0, rgb(0xd0d7dc)))
+            .push(container(text("People can find you with this. Letters, numbers, dots and underscores.").size(12).color(rgb(0x78848f))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
+            .push(field("Email address", text_input("", &session.account.email).padding(13).size(15).style(t::input(rgb(0x191e23), rgb(0x3a4450), rgb(0x3a4450), 7.0)).into(), 10.0, 13.0, rgb(0xd0d7dc)))
+            .push(container(text("Email changes are not available yet.").size(12).color(rgb(0x78848f))).padding(Padding { top: 8.0, bottom: 22.0, ..Padding::ZERO }))
             .push(primary(if app.busy { "Saving..." } else { "Save changes" }, Some(Icon::Check), (!app.busy && !app.profile_name.trim().is_empty() && !app.profile_username.is_empty() && (app.profile_name.trim() != session.account.full_name || app.profile_username != session.account.username)).then_some(Msg::SaveProfile)))
             .push(v_space(28.0))
             .push(honest_note(Icon::UserRound, "Your display name and email are account information visible to the service. Message content is encrypted separately on your device.")),
@@ -1194,22 +1259,22 @@ fn settings_view(app: &App) -> E<'_> {
             let mut passkeys = Column::new();
             match &app.passkeys {
                 None => passkeys = passkeys.push(notice("Loading passkeys...")),
-                Some(list) if list.is_empty() => passkeys = passkeys.push(container(row![t::icon(Icon::KeyRound, 18.0, rgb(0x9e83b7)), column![text("No passkeys yet").size(14).font(t::semibold()).color(rgb(0xc0accf)), body("Add one to sign in with your face, fingerprint, or device PIN.", 13.0, rgb(0x87768f), 1.7)].spacing(5)].spacing(13))
-                    .padding(16).width(FILL).style(t::panel(rgb(0x201d25), rgb(0x4b3b57), 8.0))).push(v_space(17.0)),
+                Some(list) if list.is_empty() => passkeys = passkeys.push(container(row![t::icon(Icon::KeyRound, 18.0, rgb(0xd0d7dc)), column![text("No passkeys yet").size(14).font(t::semibold()).color(rgb(0xd0d7dc)), body("Add one to sign in with your face, fingerprint, or device PIN.", 13.0, rgb(0x77838e), 1.7)].spacing(5)].spacing(13))
+                    .padding(16).width(FILL).style(t::panel(rgb(0x191d22), rgb(0x38424e), 8.0))).push(v_space(17.0)),
                 Some(list) => for passkey in list {
                     let removing = app.passkey_removing.as_deref() == Some(&passkey.id);
                     passkeys = passkeys.push(container(container(row![
-                        t::icon(Icon::KeyRound, 16.0, rgb(0xb397ca)),
-                        column![text(passkey.name.clone()).size(14).font(t::semibold()).color(rgb(0xcdb6dd)), text(format!("Added {}", day(&passkey.created_at))).size(12).color(rgb(0x8e7b9c))].spacing(5).width(FILL),
+                        t::icon(Icon::KeyRound, 16.0, rgb(0xd0d7dc)),
+                        column![text(passkey.name.clone()).size(14).font(t::semibold()).color(rgb(0xd0d7dc)), text(format!("Added {}", day(&passkey.created_at))).size(12).color(rgb(0x818c96))].spacing(5).width(FILL),
                         icon_btn(Icon::Trash, 16.0, (!app.busy).then(|| Msg::PasskeyRemove(if removing { None } else { Some(passkey.id.clone()) })), removing),
-                    ].spacing(10).align_y(Vertical::Center)).padding(12).width(FILL).style(t::panel(rgb(0x211c28), rgb(0x3e3349), 7.0))).padding(Padding { top: 8.0, ..Padding::ZERO }));
+                    ].spacing(10).align_y(Vertical::Center)).padding(12).width(FILL).style(t::panel(rgb(0x1a1f25), rgb(0x303842), 7.0))).padding(Padding { top: 8.0, ..Padding::ZERO }));
                 },
             }
             if app.passkey_removing.is_some() {
                 passkeys = passkeys.push(container(column![
-                    text("Remove this passkey?").size(15).font(t::semibold()).color(rgb(0xcebadc)),
-                    body("Confirm with your current password. Removing it signs out all sessions.", 14.0, rgb(0xac90a8), 1.8),
-                    container(field("Current password", card_input("", &app.passkey_password, Msg::PasskeyPassword, true), 9.0, 13.0, rgb(0xb7a5c5))).padding([17, 0]),
+                    text("Remove this passkey?").size(15).font(t::semibold()).color(rgb(0xd0d7dc)),
+                    body("Confirm with your current password. Removing it signs out all sessions.", 14.0, rgb(0x969fa6), 1.8),
+                    container(field("Current password", card_input("", &app.passkey_password, Msg::PasskeyPassword, true), 9.0, 13.0, rgb(0xd0d7dc))).padding([17, 0]),
                     row![
                         action(if app.busy { "Removing..." } else { "Remove passkey" }, None, t::danger(), Color::WHITE, (!app.busy && !app.passkey_password.is_empty()).then_some(Msg::RemovePasskey), [11.0, 14.0], 14.0),
                         button(text("Cancel").size(14)).padding([10, 5]).style(t::text_button()).on_press(Msg::PasskeyRemove(None)),
@@ -1224,20 +1289,20 @@ fn settings_view(app: &App) -> E<'_> {
                 #[cfg(not(windows))]
                 let create: Option<Msg> = None;
                 passkeys = passkeys.push(container(column![
-                    text("Add a passkey").size(15).font(t::semibold()).color(rgb(0xcebadc)),
-                    container(field("Passkey name", card_input("My laptop", &app.passkey_name, Msg::PasskeyName, false), 9.0, 13.0, rgb(0xb7a5c5))).padding(Padding { top: 17.0, ..Padding::ZERO }),
-                    container(field("Current password", card_input("", &app.passkey_password, Msg::PasskeyPassword, true), 9.0, 13.0, rgb(0xb7a5c5))).padding([17, 0]),
+                    text("Add a passkey").size(15).font(t::semibold()).color(rgb(0xd0d7dc)),
+                    container(field("Passkey name", card_input("My laptop", &app.passkey_name, Msg::PasskeyName, false), 9.0, 13.0, rgb(0xd0d7dc))).padding(Padding { top: 17.0, ..Padding::ZERO }),
+                    container(field("Current password", card_input("", &app.passkey_password, Msg::PasskeyPassword, true), 9.0, 13.0, rgb(0xd0d7dc))).padding([17, 0]),
                     row![
-                        action(if app.busy { "Waiting for Windows..." } else { "Create passkey" }, None, t::primary(), rgb(0x251c31), create, [11.0, 14.0], 14.0),
+                        action(if app.busy { "Waiting for Windows..." } else { "Create passkey" }, None, t::primary(), rgb(0x1e2329), create, [11.0, 14.0], 14.0),
                         button(text("Cancel").size(14)).padding([10, 5]).style(t::text_button()).on_press(Msg::PasskeyAdding(false)),
                     ].spacing(14),
                 ]).padding(Padding { top: 16.0, ..Padding::ZERO }));
             } else if app.passkey_removing.is_none() {
                 #[cfg(windows)]
-                { passkeys = passkeys.push(container(button(row![t::icon(Icon::Plus, 16.0, rgb(0xc1b0d0)), text("Add a passkey").size(14).color(rgb(0xc1b0d0))].spacing(12).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.busy).then_some(add_passkey))).padding(Padding { top: 18.0, ..Padding::ZERO })); }
+                { passkeys = passkeys.push(container(button(row![t::icon(Icon::Plus, 16.0, rgb(0xd0d7dc)), text("Add a passkey").size(14).color(rgb(0xd0d7dc))].spacing(12).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.busy).then_some(add_passkey))).padding(Padding { top: 18.0, ..Padding::ZERO })); }
             }
             passkeys = passkeys.push(small_note("Your passkey signs you in. Your messages unlock with your recovery key the first time you use a new device."));
-            let passkey_title = row![card_title("Passkeys"), container(text(t::tracked("RECOMMENDED")).size(10).font(t::bold()).color(rgb(0xa7c1a7))).padding([3, 5]).style(t::panel(rgb(0x2b352d), rgb(0x4d5c4d), 4.0))].spacing(9).align_y(Vertical::Center);
+            let passkey_title = row![card_title("Passkeys"), container(text(t::tracked("RECOMMENDED")).size(10).font(t::bold()).color(rgb(0xd0d7dc))).padding([3, 5]).style(t::panel(rgb(0x242b32), rgb(0x74808b), 4.0))].spacing(9).align_y(Vertical::Center);
 
             // Sessions.
             let mut sessions = Column::new();
@@ -1246,23 +1311,23 @@ fn settings_view(app: &App) -> E<'_> {
                 Some(list) => for entry in &list.sessions {
                     let method = if entry.method == "passkey" { "Passkey sign-in" } else { "Password sign-in" };
                     sessions = sessions.push(column![row![
-                        column![text(format!("{method}{}", if entry.current { " · This session" } else { "" })).size(15).font(t::semibold()).color(t::TEXT), text(format!("Signed in {} · Expires {}", date(&entry.created_at), day(&entry.expires_at))).size(13).color(rgb(0xae9fbc))].spacing(4).width(FILL),
-                        button(row![t::icon(Icon::LogOut, 14.0, rgb(0xc1b0d0)), text("Sign out").size(15).color(rgb(0xc1b0d0))].spacing(10).align_y(Vertical::Center)).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then(|| Msg::EndSession(entry.id.clone()))),
-                    ].align_y(Vertical::Center).padding([10, 0]), t::rule(rgb(0x39313f), true)]);
+                        column![text(format!("{method}{}", if entry.current { " · This session" } else { "" })).size(15).font(t::semibold()).color(t::TEXT), text(format!("Signed in {} · Expires {}", date(&entry.created_at), day(&entry.expires_at))).size(13).color(rgb(0xd0d7dc))].spacing(4).width(FILL),
+                        button(row![t::icon(Icon::LogOut, 14.0, rgb(0xd0d7dc)), text("Sign out").size(15).color(rgb(0xd0d7dc))].spacing(10).align_y(Vertical::Center)).padding([12, 16]).style(t::secondary()).on_press_maybe((!app.busy).then(|| Msg::EndSession(entry.id.clone()))),
+                    ].align_y(Vertical::Center).padding([10, 0]), t::rule(rgb(0x2a323b), true)]);
                 },
             }
             sessions = sessions.push(small_note("Session entries don't include device names or IP addresses. Signing out does not erase encryption keys from a device."));
 
             // Password.
             let show = app.show_passwords;
-            let pw = |index: usize, label: &'static str| -> E { field(label, card_input("", &app.passwords[index], move |v| Msg::PasswordField(index, v), !show), 9.0, 13.0, rgb(0xb7a5c5)) };
+            let pw = |index: usize, label: &'static str| -> E { field(label, card_input("", &app.passwords[index], move |v| Msg::PasswordField(index, v), !show), 9.0, 13.0, rgb(0xd0d7dc)) };
             let password = column![
                 pw(0, "Current password"),
                 row![container(pw(1, "New password")).width(FILL), container(pw(2, "Confirm new password")).width(FILL)].spacing(14),
                 checkbox_row("Show passwords", show, Msg::ShowPasswords),
-                text("Use at least 10 characters.").size(12).color(rgb(0x9c8ba8)),
-                action(if app.busy { "Updating password..." } else { "Update password & sign out" }, Some(Icon::KeyRound), t::primary(), rgb(0x251c31), (!app.busy).then_some(Msg::ChangePassword), [12.0, 14.0], 14.0),
-                column![t::rule(rgb(0x39313f), true), row![t::icon(Icon::LockKeyhole, 13.0, rgb(0x9680a4)), body("Your message key is re-protected with the new password on this device. Your encrypted history is kept.", 12.0, rgb(0x9680a4), 1.8)].spacing(8).padding(Padding { top: 15.0, ..Padding::ZERO })].padding(Padding { top: 2.0, ..Padding::ZERO }),
+                text("Use at least 10 characters.").size(12).color(rgb(0x919ba2)),
+                action(if app.busy { "Updating password..." } else { "Update password & sign out" }, Some(Icon::KeyRound), t::primary(), rgb(0x1e2329), (!app.busy).then_some(Msg::ChangePassword), [12.0, 14.0], 14.0),
+                column![t::rule(rgb(0x2a323b), true), row![t::icon(Icon::LockKeyhole, 13.0, rgb(0x89939b)), body("Your message key is re-protected with the new password on this device. Your encrypted history is kept.", 12.0, rgb(0x89939b), 1.8)].spacing(8).padding(Padding { top: 15.0, ..Padding::ZERO })].padding(Padding { top: 2.0, ..Padding::ZERO }),
             ].spacing(17);
             heading("KEEP YOUR SPACE YOURS", "Password & passkeys", "Choose how you sign in and keep your account secure.")
                 .push(v_space(24.0))
@@ -1281,8 +1346,8 @@ fn settings_view(app: &App) -> E<'_> {
                 None => ("Checking your key...", " ", t::OFFLINE),
             };
             let mut col = heading("PRIVACY IN PLAIN SIGHT", "Your message key", "Messages are encrypted with a key that only your devices hold. It is locked with your recovery key before it is stored, so the web app and the desktop app can both open your conversations and Sonar never can.")
-                .push(container(container(row![t::icon(Icon::ShieldCheck, 21.0, rgb(0xc5add8)), column![text(status).size(14).font(t::semibold()).color(rgb(0xc5add8)), text(detail).size(12).color(rgb(0x9985a6))].spacing(6).width(FILL), t::dot(dot, 5.0)].spacing(12).align_y(Vertical::Center))
-                    .padding(16).width(FILL).style(t::panel(rgb(0x2b2533), rgb(0x484051), 8.0))).padding([24, 0]));
+                .push(container(container(row![t::icon(Icon::ShieldCheck, 21.0, rgb(0xd0d7dc)), column![text(status).size(14).font(t::semibold()).color(rgb(0xd0d7dc)), text(detail).size(12).color(rgb(0x8d979e))].spacing(6).width(FILL), t::dot(dot, 5.0)].spacing(12).align_y(Vertical::Center))
+                    .padding(16).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x37404b), 8.0))).padding([24, 0]));
             if let Some(kind) = app.backup_kind {
                 let (title, note, action) = match kind {
                     "none" => ("Turn on multi-device access", "Creates a new key protected by a recovery key. Your contacts will be asked to confirm your new key. Messages encrypted for the old key cannot be opened by the new one.", "Turn on multi-device access"),
@@ -1290,19 +1355,19 @@ fn settings_view(app: &App) -> E<'_> {
                     _ => ("Create a new recovery key", "Your recovery key unlocks your messages on a new device and resets a forgotten password. A new one replaces the old one.", "Create recovery key"),
                 };
                 col = col.push(container(column![
-                    text(title).size(16).font(t::semibold()).color(rgb(0xe2d4f6)),
-                    body(note, 15.0, rgb(0x8f8a9b), 1.6),
-                    field("Current password", dialog_input("", &app.sync_password, Msg::SyncPassword, true), 10.0, 13.0, rgb(0xb7a5c5)),
+                    text(title).size(16).font(t::semibold()).color(rgb(0xd0d7dc)),
+                    body(note, 15.0, rgb(0x8a949b), 1.6),
+                    field("Current password", dialog_input("", &app.sync_password, Msg::SyncPassword, true), 10.0, 13.0, rgb(0xd0d7dc)),
                     primary(if app.busy { "Securing your key..." } else { action }, Some(Icon::KeyRound), (!app.busy && !app.sync_password.is_empty()).then_some(Msg::EnableSync)),
-                ].spacing(12)).padding(16).width(FILL).style(t::panel(rgb(0x221f29), rgb(0x3d324c), 10.0))).push(v_space(22.0));
+                ].spacing(12)).padding(16).width(FILL).style(t::panel(rgb(0x1b2025), rgb(0x313943), 10.0))).push(v_space(22.0));
             }
             col.push(container(column![
-                    text("Your safety code").size(13).font(t::semibold()).color(rgb(0xb7a5ca)),
-                    container(body(print, 14.0, rgb(0xb8b1c3), 1.8)).padding(Padding { top: 8.0, ..Padding::ZERO }),
-                    container(button(row![t::icon(Icon::Copy, 14.0, rgb(0xc1b0d0)), text("Copy safety code").size(12).color(rgb(0xc1b0d0))].spacing(12).align_y(Vertical::Center)).padding([8, 10]).style(t::secondary()).on_press(Msg::CopyFingerprint)).padding(Padding { top: 14.0, ..Padding::ZERO }),
-                ]).padding(12).width(FILL).style(t::panel(rgb(0x19181d), rgb(0x39313f), 7.0)))
-                .push(container(body("Read this code to a contact in person or on a call so they can confirm it is really you. It is a code, not a fingerprint scan.", 13.0, rgb(0x9c8ba8), 1.8)).padding([12, 0]))
-                .push(column![t::rule(rgb(0x39303f), true), container(column![text("A short memory, by design.").size(16).font(t::semibold()).color(t::TEXT), body("Messages expire after seven days unless pinned. Calls have no recording or storage in Sonar.", 14.0, rgb(0x9c8ba8), 1.8)].spacing(9)).padding(Padding { top: 20.0, ..Padding::ZERO })])
+                    text("Your safety code").size(13).font(t::semibold()).color(rgb(0xd0d7dc)),
+                    container(body(print, 14.0, rgb(0xb4bbc0), 1.8)).padding(Padding { top: 8.0, ..Padding::ZERO }),
+                    container(button(row![t::icon(Icon::Copy, 14.0, rgb(0xd0d7dc)), text("Copy safety code").size(12).color(rgb(0xd0d7dc))].spacing(12).align_y(Vertical::Center)).padding([8, 10]).style(t::secondary()).on_press(Msg::CopyFingerprint)).padding(Padding { top: 14.0, ..Padding::ZERO }),
+                ]).padding(12).width(FILL).style(t::panel(rgb(0x14181c), rgb(0x2a323b), 7.0)))
+                .push(container(body("Read this code to a contact in person or on a call so they can confirm it is really you. It is a code, not a fingerprint scan.", 13.0, rgb(0x919ba2), 1.8)).padding([12, 0]))
+                .push(column![t::rule(rgb(0x2a313a), true), container(column![text("A short memory, by design.").size(16).font(t::semibold()).color(t::TEXT), body("Messages expire after seven days unless pinned. Calls have no recording or storage in Sonar.", 14.0, rgb(0x919ba2), 1.8)].spacing(9)).padding(Padding { top: 20.0, ..Padding::ZERO })])
                 .push(v_space(28.0))
                 .push(honest_note(Icon::LockKeyhole, "If you lose your recovery key and every signed-in device, your encrypted history cannot be recovered. Forward secrecy is not implemented. Metadata remains visible to the service."))
         }
@@ -1314,22 +1379,22 @@ fn settings_view(app: &App) -> E<'_> {
             let input = Some(app.settings.input.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
             let output = Some(app.settings.output.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
             let level = app.mic_level.unwrap_or(0).min(100) as f32 / 100.0;
-            let meter = container(container(space()).width(Length::FillPortion((level * 100.0) as u16 + 1)).height(FILL).style(t::gradient_panel(90.0, rgb(0x8baa96), rgb(0xbaa3e1), Color::TRANSPARENT, 8.0)))
-                .width(FILL).height(10).style(t::panel(rgb(0x19191e), rgb(0x423a4b), 8.0));
+            let meter = container(container(space()).width(Length::FillPortion((level * 100.0) as u16 + 1)).height(FILL).style(t::gradient_panel(90.0, rgb(0x929ca3), rgb(0xd0d7dc), Color::TRANSPARENT, 8.0)))
+                .width(FILL).height(10).style(t::panel(rgb(0x15181c), rgb(0x323b46), 8.0));
             let meter = row![meter, space().width(Length::FillPortion(((1.0 - level) * 100.0) as u16 + 1))];
             heading("SOUND LIKE YOURSELF", "Voice & audio", "Choose your microphone and speakers. Settings stay on this computer.")
                 .push(v_space(24.0))
                 .push(security_card(Icon::Mic, card_title("Your microphone"), "Test your input before your next call.", column![
-                    field("Microphone", pick_list(inputs, input, Msg::SelectInput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xb7a5c5)),
+                    field("Microphone", pick_list(inputs, input, Msg::SelectInput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
                     container(meter).padding(Padding { top: 20.0, bottom: 14.0, ..Padding::ZERO }),
-                    row![button(text(if app.testing { "Listening..." } else { "Test microphone" }).size(13).color(rgb(0xc1b0d0))).padding([9, 12]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestMic)),
-                        body(app.mic_level.map(|l| format!("Peak level {l}%. Nothing is recorded.")).unwrap_or_else(|| "A three-second local test. Nothing is recorded or sent.".into()), 12.0, rgb(0x9e8aac), 1.7)].spacing(10).align_y(Vertical::Center),
+                    row![button(text(if app.testing { "Listening..." } else { "Test microphone" }).size(13).color(rgb(0xd0d7dc))).padding([9, 12]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestMic)),
+                        body(app.mic_level.map(|l| format!("Peak level {l}%. Nothing is recorded.")).unwrap_or_else(|| "A three-second local test. Nothing is recorded or sent.".into()), 12.0, rgb(0xd0d7dc), 1.7)].spacing(10).align_y(Vertical::Center),
                 ].into()))
                 .push(v_space(24.0))
                 .push(security_card(Icon::Speaker, card_title("Your speakers"), "Choose where calls play.", column![
                     checkbox_row("Noise suppression", !app.settings.noise_suppression_off, Msg::NoiseSuppression),
-                    field("Speakers", pick_list(outputs, output, Msg::SelectOutput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xb7a5c5)),
-                    container(button(row![t::icon(Icon::Play, 14.0, rgb(0xc1b0d0)), text(if app.testing { "Playing..." } else { "Play test sound" }).size(13).color(rgb(0xc1b0d0))].spacing(10).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestSpeakers))).padding(Padding { top: 18.0, ..Padding::ZERO }),
+                    field("Speakers", pick_list(outputs, output, Msg::SelectOutput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
+                    container(button(row![t::icon(Icon::Play, 14.0, rgb(0xd0d7dc)), text(if app.testing { "Playing..." } else { "Play test sound" }).size(13).color(rgb(0xd0d7dc))].spacing(10).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestSpeakers))).padding(Padding { top: 18.0, ..Padding::ZERO }),
                 ].into()))
                 .push(v_space(24.0))
                 .push(security_card(Icon::Shield, card_title("Call connectivity"), "Relay-only hides your network address from the other person, but needs a TURN server.", checkbox_row("Use relay-only connections", app.settings.relay_only, Msg::RelayOnly)))
@@ -1337,7 +1402,7 @@ fn settings_view(app: &App) -> E<'_> {
     };
     let content = container(scroll_area(container(content).padding(Padding { top: 44.0, bottom: 32.0, left: 36.0, right: 36.0 })).height(FILL)).width(FILL).height(FILL);
     let close_button = container(icon_btn(Icon::X, 20.0, (!app.busy).then_some(close.clone()), false)).width(FILL).align_x(Horizontal::Right).padding(18);
-    let card = container(row![navigation, t::rule(rgb(0x37313e), false), stack![content, close_button]]).width(940).max_height(720).height(FILL)
-        .style(t::modal_card(rgb(0x222127), rgb(0x44394d), 17.0));
-    opaque(mouse_area(center(opaque(card)).padding(20).style(t::fill(rgba(0x09090eb8)))).on_press(if app.busy { Msg::Noop } else { close })).into()
+    let card = container(row![navigation, t::rule(rgb(0x2a313a), false), stack![content, close_button]]).width(940).max_height(720).height(FILL)
+        .style(t::modal_card(rgb(0x1b2025), rgb(0x333c46), 17.0));
+    opaque(mouse_area(center(opaque(card)).padding(20).style(t::fill(rgba(0x090b0db8)))).on_press(if app.busy { Msg::Noop } else { close })).into()
 }

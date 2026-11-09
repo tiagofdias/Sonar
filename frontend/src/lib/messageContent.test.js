@@ -20,3 +20,14 @@ test("missed calls round-trip and cannot be typed as plain text", () => {
   const typed = missedCall();
   assert.deepEqual(decodeForCall(encodeForCall(typed)), { text: typed });
 });
+
+test("file messages validate their details and cannot be typed", async () => {
+  const { encodeFile, decodeMessage: decode, encodeMessage: encode } = await import("./messageContent.js");
+  const file = { id: "a".repeat(24), key: "A".repeat(43) + "=", iv: "B".repeat(16), name: "notes.txt", type: "text/plain", size: 12 };
+  const made = encodeFile(file);
+  assert.deepEqual(decode(made).file, file);
+  assert.equal(decode(made).text.endsWith("notes.txt"), true);
+  assert.throws(() => encodeFile({ ...file, size: 8388609 }));
+  assert.equal(decode(made.replace(file.id, "nope")).file, undefined);
+  assert.equal(decode(encode(made)).file, undefined);
+});

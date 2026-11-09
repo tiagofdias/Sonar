@@ -25,6 +25,7 @@ pub struct Message {
     pub reply_to: Option<String>,
     pub reaction: Option<Reaction>,
     pub missed_call: bool,
+    pub file: Option<message_content::FileMeta>,
     pub unreadable: bool,
 }
 
@@ -60,7 +61,7 @@ pub fn open(key: &SecretKey, peer_key: Option<&str>, envelope: &MessageEnvelope,
         text: String::new(),
         reply_to: None,
         reaction: None,
-        missed_call: false,
+        missed_call: false, file: None,
         unreadable: false,
     };
     let plain = (|| {
@@ -71,6 +72,7 @@ pub fn open(key: &SecretKey, peer_key: Option<&str>, envelope: &MessageEnvelope,
     match plain.map(|plain| message_content::decode(&plain)) {
         Some(Content::Text { text, reply_to }) => { message.text = text; message.reply_to = reply_to; }
         Some(Content::Reaction { target, emoji, action }) => message.reaction = Some(Reaction { target, emoji, action }),
+        Some(Content::File(file)) => { message.text = file.label(); message.file = Some(file); }
         Some(Content::MissedCall) => { message.text = message_content::MISSED_CALL_TEXT.into(); message.missed_call = true; }
         None => { message.text = "Unable to decrypt on this device.".into(); message.unreadable = true; }
     }
@@ -115,7 +117,7 @@ mod tests {
     use super::*;
     fn message(id: &str, sender: &str, created: i64, reaction: Option<(&str, &str, &str)>) -> Message {
         Message { id: id.into(), sender: sender.into(), receiver: "r".into(), channel: None, created_at: String::new(), created, expires: Some(i64::MAX), pinned: false, text: String::new(), reply_to: None,
-            reaction: reaction.map(|(target, emoji, action)| Reaction { target: target.into(), emoji: emoji.into(), action: action.into() }), missed_call: false, unreadable: false }
+            reaction: reaction.map(|(target, emoji, action)| Reaction { target: target.into(), emoji: emoji.into(), action: action.into() }), missed_call: false, file: None, unreadable: false }
     }
     #[test]
     fn merge_orders_and_replaces_like_the_web() {

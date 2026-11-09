@@ -8,6 +8,7 @@ const publicUser = (user) => ({
   _id: user._id,
   fullName: user.fullName,
   username: user.username,
+  presence: user.presence || "online",
   email: user.email,
   profilePic: user.profilePic,
   encryptionKey: user.encryptionKey,

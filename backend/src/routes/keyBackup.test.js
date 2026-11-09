@@ -91,6 +91,15 @@ test("encrypted key backups bind to the account key and follow password changes"
       assert.equal(result.body.encryptionKey, rotated.publicKey);
       assert.deepEqual((await request("/key-backup", "GET", undefined, cookie)).body.backup, rotated.backup);
     });
+    await t.test("status can be chosen, is validated and survives sign-in", async () => {
+      const email = "status@example.invalid";
+      const made = await request("/signup", "POST", { fullName: "Status tester", email, password: "status-password-1" });
+      assert.equal(made.body.presence, "online");
+      assert.equal((await request("/presence", "PUT", { presence: "invisible" }, made.cookie)).status, 400);
+      assert.equal((await request("/presence", "PUT", { presence: "busy" })).status, 401);
+      assert.equal((await request("/presence", "PUT", { presence: "busy" }, made.cookie)).body.presence, "busy");
+      assert.equal((await request("/login", "POST", { email, password: "status-password-1" })).body.presence, "busy");
+    });
     await t.test("usernames are unique, validated and editable", async () => {
       const a = await request("/signup", "POST", { fullName: "Ana Lopes", username: "@Ana.Lopes", email: "ana@example.invalid", password: "ana-password-1" });
       assert.equal(a.status, 201);

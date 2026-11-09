@@ -31,6 +31,7 @@ const userSchema = new mongoose.Schema(
     },
     // Unique public handle; see lib/usernames.js.
     username: { type: String, unique: true, sparse: true },
+    presence: { type: String, enum: ["online", "away", "busy", "offline"], default: "online" },
     fullName: {
       type: String,
       required: true,

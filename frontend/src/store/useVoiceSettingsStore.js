@@ -15,7 +15,7 @@ export function audioConstraints() {
   return {
     ...(inputDeviceId ? { deviceId: { exact: inputDeviceId } } : {}),
     echoCancellation,
-    // RNNoise does this instead (see lib/noiseSuppression.js); running both muffles speech.
+    // DeepFilterNet does this instead (see lib/noiseSuppression.js); running both muffles speech.
     noiseSuppression: false,
     autoGainControl,
   };

@@ -194,19 +194,13 @@ test("voice-room membership, capacity, session routing, and revocation", async (
         joinedB = rejoined;
       },
     );
-    await t.test("rooms and direct calls are mutually exclusive", async () => {
-      assert.ok(
-        (
-          await send(c, "call:signal", {
-            to: String(alice._id),
-            signal: {
-              type: "offer",
-              callId: crypto.randomUUID(),
-              sdp: { type: "offer", sdp: "busy" },
-            },
-          })
-        ).error,
-      );
+    await t.test("someone in a room can be called, but cannot place a call", async () => {
+      const offer = () => ({ type: "offer", callId: crypto.randomUUID(), sdp: { type: "offer", sdp: "x" } });
+      const first = offer();
+      assert.equal((await send(c, "call:signal", { to: String(alice._id), signal: first })).ok, true);
+      assert.ok((await send(c, "call:signal", { to: String(bob._id), signal: offer() })).error, "one call at a time per caller");
+      assert.equal((await send(c, "call:signal", { to: String(alice._id), signal: { type: "hangup", callId: first.callId } })).ok, true);
+      assert.ok((await send(a, "call:signal", { to: String(bob._id), signal: offer() })).error, "people in a room cannot start a call");
     });
     await t.test(
       "ban immediately ejects a room member and blocks rejoin",

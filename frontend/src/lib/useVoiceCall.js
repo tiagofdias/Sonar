@@ -19,11 +19,12 @@ const mediaError = (error) =>
         ? "The selected microphone is unavailable. Choose another in Voice settings."
         : error.message;
 // Loops the ringtone on the chosen speakers until the call is answered or ends.
-function useRingtone(ringing) {
+function useRingtone(level) {
   useEffect(() => {
-    if (!ringing) return undefined;
+    if (!level) return undefined;
     const player = new Audio("/sounds/ringtone.wav");
     player.loop = true;
+    player.volume = level;
     const play = () => player.play().catch(() => {});
     // Browsers block sound on a page nobody has touched yet: retry on first input.
     const retry = () => { play(); stopRetry(); };
@@ -39,12 +40,15 @@ function useRingtone(ringing) {
       player.removeAttribute("src");
       player.load();
     };
-  }, [ringing]);
+  }, [level]);
 }
-export function useVoiceCall(socket) {
+export function useVoiceCall(socket, inRoom = false) {
   // Reached the other person, and whether they picked up: decides "missed call".
   const rang = useRef(false), answered = useRef(false);
   const screenRef = useRef(null);
+  const [waiting, setWaiting] = useState(null);
+  const waitingRef = useRef(null);
+  const setWait = (value) => { waitingRef.current = value; setWaiting(value); };
   const cleaned = useRef(null);
   const [call, setCall] = useState(null),
     [muted, setMuted] = useState(false),
@@ -300,13 +304,21 @@ export function useVoiceCall(socket) {
     const receive = async ({ from, signal: payload }) => {
       try {
         if (payload.type === "offer") {
-          if (state.current) return;
+          if (state.current) {
+            if (["connected", "reconnecting"].includes(state.current.status) && !waitingRef.current)
+              setWait({ id: payload.callId, peer: from, sdp: payload.sdp, pending: [] });
+            return;
+          }
           update({
             id: payload.callId,
             peer: from,
             status: "incoming",
             sdp: payload.sdp,
           });
+          return;
+        }
+        if (waitingRef.current?.id === payload.callId && waitingRef.current.peer === from) {
+          if (payload.type === "ice" && waitingRef.current.pending.length < 128) waitingRef.current.pending.push(payload.candidate);
           return;
         }
         if (!valid(payload.callId) || state.current.peer !== from) return;
@@ -335,6 +347,7 @@ export function useVoiceCall(socket) {
       }
     };
     const ended = ({ callId, reason }) => {
+      if (waitingRef.current?.id === callId) setWait(null);
       if (valid(callId)) {
         cleanup();
         if (reason === "unanswered") toast("No answer. Try again later.");
@@ -399,7 +412,30 @@ export function useVoiceCall(socket) {
         "Check your selected speakers and allow audio playback in your browser.",
       ),
     );
-  useRingtone(call?.status === "incoming");
+  // A second call rings softly so it never drowns out the conversation.
+  useRingtone(call?.status === "incoming" ? (inRoom ? 0.35 : 1) : waiting ? 0.35 : 0);
+  useEffect(() => {
+    if (call || !waiting) return;
+    const next = waiting;
+    setWait(null);
+    pending.current = next.pending;
+    update({ id: next.id, peer: next.peer, status: "incoming", sdp: next.sdp });
+  }, [call, waiting]);
+  const swapCall = async () => {
+    const next = waitingRef.current;
+    if (!next) return;
+    setWait(null);
+    hangup();
+    pending.current = next.pending;
+    update({ id: next.id, peer: next.peer, status: "incoming", sdp: next.sdp });
+    await accept();
+  };
+  const declineWaiting = () => {
+    const next = waitingRef.current;
+    if (!next) return;
+    setWait(null);
+    signal(next.peer, { type: "hangup", callId: next.id });
+  };
   const screen = useScreenShare({
     send: (to, payload) => signal(to, { ...payload, callId: state.current?.id }),
     targets: call?.status === "connected" || call?.status === "reconnecting" ? [call.peer] : [],
@@ -419,5 +455,8 @@ export function useVoiceCall(socket) {
     resumeAudio,
     micStream,
     screen,
+    waiting,
+    swapCall,
+    declineWaiting,
   };
 }

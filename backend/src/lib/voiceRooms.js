@@ -29,6 +29,7 @@ function leave(userId, reason = "left") {
   const room = rooms.get(active.key),
     participant = room?.participants.get(userId);
   voiceRoomUsers.delete(userId);
+  roomsChanged();
   if (!room || !participant) return;
   room.participants.delete(userId);
   transport
@@ -54,7 +55,9 @@ export function reconcileVoiceRooms(community) {
         if (!channelExists || !room.members.includes(userId)) leave(userId, channelExists ? "removed" : "channelDeleted");
     }
 }
-export function installVoiceRooms(io) {
+let roomsChanged = () => {};
+export function installVoiceRooms(io, onChange = () => {}) {
+  roomsChanged = onChange;
   transport = io;
   return (socket) => {
     let count = 0;
@@ -161,6 +164,7 @@ export function installVoiceRooms(io) {
         socketId: socket.id,
         sessionId: participant.sessionId,
       });
+      roomsChanged();
       broadcast(room);
       reply({ ...snapshot(room), sessionId: participant.sessionId });
     });

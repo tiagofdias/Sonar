@@ -236,6 +236,14 @@ pub struct App {
     /// Invite cards by token; None while loading, Err when the lookup failed.
     pub invite_previews: HashMap<String, Option<Result<InvitePreview, String>>>,
     invite_scan: (usize, String),
+    pub waiting: Option<live::IncomingCall>,
+    pub emoji_open: bool,
+    pub manage_open: bool,
+    pub uploading: bool,
+    pending_file: Option<message_content::FileMeta>,
+    ringtone_level: f32,
+    pub presence: HashMap<String, String>,
+    pub status_open: bool,
     pub screen_controls: Option<screen::Controls>,
     pub screen_sharing: Option<String>,
     pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
@@ -358,6 +366,18 @@ pub enum Msg {
     InviteReady(Result<CreatedInvite, String>),
     InvitePreviewReady(String, Result<InvitePreview, String>),
     ScreenUpdate(String, screen::Update),
+    ToggleStatusMenu,
+    SwapCall,
+    ToggleEmoji,
+    Pulse,
+    ToggleManage,
+    PickEmoji(&'static str),
+    AttachFile,
+    FileReady(u64, Result<Option<message_content::FileMeta>, String>),
+    DownloadFile(message_content::FileMeta),
+    DeclineWaiting,
+    SetStatus(&'static str),
+    StatusSaved(String, Result<(), String>),
     ScreenOpenPicker,
     ScreenSources(Vec<screen::Shareable>, bool),
     ScreenClosePicker,
@@ -441,7 +461,7 @@ impl App {
     fn boot() -> (Self, Task<Msg>) {
         let settings = store::load_settings();
         voice_audio::NOISE_SUPPRESSION.store(!settings.noise_suppression_off, std::sync::atomic::Ordering::Relaxed);
-        let server = if settings.server.is_empty() { "http://127.0.0.1:5000".to_string() } else { settings.server.clone() };
+        let server = if settings.server.is_empty() { "https://sonar-73yj.onrender.com".to_string() } else { settings.server.clone() };
         let saved = store::load_session();
         let app = App {
             screen: if saved.is_some() { Screen::Boot } else { Screen::Auth },
@@ -455,7 +475,7 @@ impl App {
             unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -505,6 +525,9 @@ impl App {
         if let Some(call) = &self.call {
             list.push(Subscription::run_with(call.spec.clone(), call::run).with(call.spec.id.clone()).map(|(id, update)| Msg::CallUpdate(id, update)));
         }
+        // The sonar pulse only redraws while a welcome screen is showing.
+        let welcome = matches!(self.screen, Screen::Main) && match self.mode { Mode::Direct => self.peer.is_none(), Mode::Community => self.community.is_none() };
+        if welcome { list.push(iced::time::every(std::time::Duration::from_millis(33)).map(|_| Msg::Pulse)); }
         if let Some(spec) = self.screen_spec() {
             let key = spec.key.clone();
             list.push(Subscription::run_with(spec, screen::run).with(key).map(|(key, update)| Msg::ScreenUpdate(key, update)));
@@ -540,6 +563,14 @@ impl App {
         let deafened = self.call.as_ref().is_some_and(|c| c.deafened) || self.room.as_ref().is_some_and(|r| r.deafened);
         if deafened != self.screen_deafened { self.screen_deafened = deafened; controls.send(screen::Command::Deafen(deafened)); }
     }
+
+    /// The word shown for someone, or `here` when they are simply online.
+    pub fn status_text<'a>(&'a self, id: &str, here: &'a str) -> &'a str {
+        if !self.online.contains(id) { return "Offline"; }
+        match self.presence.get(id).map(String::as_str) { Some("away") => "Away", Some("busy") => "Busy", Some("room") => "In a voice room", _ => here }
+    }
+    pub fn avatar_dot(&self, id: &str) -> Option<iced::Color> { self.online.contains(id).then(|| self.status_color(id)) }
+    pub fn status_color(&self, id: &str) -> iced::Color { theme::presence_color(self.presence.get(id).map_or("online", String::as_str)) }
 
     pub fn screen_name(&self, id: &str) -> String {
         self.room.as_ref().and_then(|r| r.participants.iter().find(|p| p.user_id == id)).map(|p| p.name.clone()).filter(|n| !n.is_empty())
@@ -598,7 +629,7 @@ impl App {
         self.panel = None; self.dialog = None; self.confirm = None; self.invite = None; self.bans = None; self.busy = false;
         self.settings_open = false; self.sessions = None; self.passkeys = None; self.backup_kind = None; self.new_recovery = None; self.recovery_saved = false; self.unlock_reset = false;
         self.passwords.iter_mut().for_each(Zeroize::zeroize); self.sync_password.zeroize(); self.passkey_password.zeroize(); self.unlock_password.zeroize(); self.auth.password.zeroize();
-        self.call = None; self.incoming = None; self.early_candidates.clear(); self.room = None; self.rooms.clear();
+        self.call = None; self.incoming = None; self.waiting = None; self.early_candidates.clear(); self.room = None; self.rooms.clear();
         self.mode = Mode::Direct; self.screen = Screen::Auth; self.auth.busy = false;
     }
 
@@ -793,10 +824,15 @@ impl App {
 
     /// Rings exactly while a call is waiting to be answered, however it ended.
     fn sync_ringtone(&mut self) {
-        if self.incoming.is_some() == self.ringtone.is_some() { return; }
-        self.ringtone = self.incoming.is_some().then(|| {
+        // When the current call ends, a waiting call becomes a normal incoming one.
+        if self.call.is_none() && self.incoming.is_none() { self.incoming = self.waiting.take(); }
+        // A second call rings softly so it never drowns out the conversation.
+        let level = if self.incoming.is_some() && self.room.is_none() { 1.0 } else if self.waiting.is_some() || self.incoming.is_some() { 0.35 } else { 0.0 };
+        if level == self.ringtone_level { return; }
+        self.ringtone_level = level;
+        self.ringtone = (level > 0.0).then(|| {
             if cfg!(debug_assertions) && std::env::var_os("SONAR_DEV_SILENT_AUDIO").is_some() { audio::Ringtone::silent() }
-            else { audio::Ringtone::start(self.settings.output.clone()) }
+            else { audio::Ringtone::start(self.settings.output.clone(), level) }
         });
     }
 
@@ -996,17 +1032,18 @@ impl App {
                     self.live_connected = false; self.socket = None;
                     if self.call.is_some() { self.call = None; self.fail("Connection lost. The call ended.".into()); }
                     if self.room.is_some() { self.room = None; self.fail("Connection lost. You left the voice room.".into()); }
-                    self.incoming = None; self.rooms.clear();
+                    self.incoming = None; self.waiting = None; self.rooms.clear();
                     // Reconnect shortly; the subscription restarts with a new generation.
                     return Task::perform(tokio::time::sleep(std::time::Duration::from_secs(3)), |_| Msg::Reconnect);
                 }
                 live::Event::Revoked => { store::forget_session(); self.clear_session(); self.fail("You were signed out.".into()); }
                 live::Event::Online(ids) => self.online = ids.into_iter().collect(),
                 live::Event::Incoming(call) => {
-                    if self.call.is_some() || self.incoming.is_some() { return Task::none(); }
+                    let can_wait = self.call.as_ref().is_some_and(|c| c.status == CallStatus::Connected) && self.waiting.is_none();
+                    if self.incoming.is_some() || (self.call.is_some() && !can_wait) { return Task::none(); }
                     let mut call = call;
                     call.candidates.extend(self.early_candidates.drain(..).filter(|c| c.id == call.id).map(|c| c.candidate));
-                    self.incoming = Some(call);
+                    if can_wait { self.waiting = Some(call); } else { self.incoming = Some(call); }
                 }
                 live::Event::Answer(answer) => {
                     if let Some(state) = self.call.as_ref().filter(|c| c.spec.id == answer.id && c.spec.peer == answer.from) {
@@ -1018,6 +1055,8 @@ impl App {
                         if let Some(controls) = &state.controls { controls.send(call::Command::Candidate(candidate.candidate)); }
                     } else if let Some(incoming) = self.incoming.as_mut().filter(|c| c.id == candidate.id && c.from == candidate.from) {
                         if incoming.candidates.len() < 128 { incoming.candidates.push(candidate.candidate); }
+                    } else if let Some(waiting) = self.waiting.as_mut().filter(|c| c.id == candidate.id && c.from == candidate.from) {
+                        if waiting.candidates.len() < 128 { waiting.candidates.push(candidate.candidate); }
                     } else if self.early_candidates.len() < 64 { self.early_candidates.push(candidate); }
                 }
                 live::Event::Screen { from, id, signal } => {
@@ -1026,6 +1065,7 @@ impl App {
                     }
                 }
                 live::Event::CallEnded(id) => {
+                    if self.waiting.as_ref().is_some_and(|c| c.id == id) { self.waiting = None; }
                     if self.incoming.as_ref().is_some_and(|c| c.id == id) { self.incoming = None; self.toast(ToastKind::Plain, "Call ended"); }
                     if self.call.as_ref().is_some_and(|c| c.spec.id == id) { self.call = None; self.toast(ToastKind::Plain, "Call ended"); }
                 }
@@ -1038,6 +1078,12 @@ impl App {
                             self.thread.deleted.insert(id.to_owned());
                             self.thread.messages.retain(|m| m.id != id);
                         }
+                    }
+                    "getPresence" => {
+                        self.presence = value.as_object().map(|all| all.iter().filter_map(|(id, status)| Some((id.clone(), status.as_str()?.to_owned()))).collect()).unwrap_or_default();
+                    }
+                    "ownPresence" => {
+                        if let (Some(session), Some(status)) = (self.session.as_mut(), value.get("presence").and_then(|v| v.as_str())) { session.account.presence = status.to_owned(); }
                     }
                     "voice:room-state" => {
                         let (Some(community), Some(channel)) = (value.get("communityId").and_then(|v| v.as_str()), value.get("channelId").and_then(|v| v.as_str())) else { return Task::none() };
@@ -1198,7 +1244,7 @@ impl App {
                 self.sending = false;
                 match result {
                     Ok(message) if generation == self.generation => {
-                        if message.reaction.is_none() {
+                        if message.reaction.is_none() && message.file.is_none() {
                             self.composer = text_editor::Content::new();
                             if let Some(key) = self.draft_key() { self.drafts.remove(&key); }
                             if self.reply_to.as_ref() == message.reply_to.as_ref() { self.reply_to = None; }
@@ -1242,7 +1288,9 @@ impl App {
                 let place = (self.community.as_ref().map(|c| c.id.clone()), self.channel.clone());
                 let mode = self.mode;
                 let target = id.clone();
+                let attachment = self.thread.messages.iter().find(|m| m.id == id).and_then(|m| m.file.as_ref().map(|f| f.id.clone()));
                 return Task::perform(async move {
+                    if let Some(file) = attachment { let _ = session.delete_file(&file).await; }
                     match (mode, place) {
                         (Mode::Community, (Some(community), Some(channel))) => session.delete_channel_message(&community, &channel, &target).await,
                         _ => session.delete_direct(&target).await,
@@ -1363,6 +1411,67 @@ impl App {
                     },
                 }
             }
+            Msg::ToggleStatusMenu => self.status_open = !self.status_open,
+            Msg::ToggleEmoji => self.emoji_open = !self.emoji_open,
+            Msg::ToggleManage => self.manage_open = !self.manage_open,
+            Msg::Pulse => { theme::PULSE.store(STARTED.get_or_init(std::time::Instant::now).elapsed().as_millis() as u32, std::sync::atomic::Ordering::Relaxed); }
+            Msg::PickEmoji(emoji) => self.composer.perform(text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(emoji.to_owned())))),
+            Msg::AttachFile if !self.uploading => {
+                let Some(target) = self.upload_target() else { return Task::none() };
+                let Some(session) = self.session.clone() else { return Task::none() };
+                self.uploading = true;
+                let generation = self.generation;
+                return Task::perform(async move {
+                    let path = tokio::task::spawn_blocking(native_file::open).await.map_err(|_| "Could not open the file picker".to_string())??;
+                    let Some(path) = path else { return Ok(None) };
+                    upload(session, target, path).await.map(Some)
+                }, move |result| Msg::FileReady(generation, result));
+            }
+            Msg::FileReady(generation, result) => {
+                self.uploading = false;
+                match result {
+                    Ok(Some(file)) if generation == self.generation => { self.pending_file = Some(file); return self.send(None); }
+                    Ok(_) => {}
+                    Err(error) => self.fail(error),
+                }
+            }
+            Msg::DownloadFile(file) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                return Task::perform(async move {
+                    let suggested = safe_file_name(&file.name);
+                    let path = tokio::task::spawn_blocking(move || native_file::save(&suggested)).await.map_err(|_| "Could not open the save dialog".to_string())??;
+                    let Some(path) = path else { return Ok(()) };
+                    save_file(session, file, path).await
+                }, |result| Msg::Done(result, "File saved"));
+            }
+            Msg::SwapCall => {
+                // Swapping from a voice room leaves the room; the call is already ringing.
+                if self.room.is_some() && self.incoming.is_some() {
+                    let left = self.update(Msg::LeaveRoom);
+                    return Task::batch([left, self.update(Msg::AcceptCall)]);
+                }
+                let Some(next) = self.waiting.take() else { return Task::none() };
+                if let Some(state) = self.call.take() { if let Some(controls) = &state.controls { controls.send(call::Command::Hangup); } }
+                self.incoming = Some(next);
+                return self.update(Msg::AcceptCall);
+            }
+            Msg::DeclineWaiting if self.waiting.is_none() => return self.update(Msg::DeclineCall),
+            Msg::DeclineWaiting => {
+                if let (Some(next), Some(socket)) = (self.waiting.take(), self.socket.clone()) {
+                    return Task::perform(async move { let _ = socket.decline(next).await; }, |_| Msg::Noop);
+                }
+            }
+            Msg::SetStatus(status) => {
+                self.status_open = false;
+                let Some(session) = self.session.as_mut() else { return Task::none() };
+                let previous = std::mem::replace(&mut session.account.presence, status.to_owned());
+                let session = session.clone();
+                return Task::perform(async move { session.set_presence(status).await }, move |result| Msg::StatusSaved(previous.clone(), result));
+            }
+            Msg::StatusSaved(previous, result) => if let Err(error) = result {
+                if let Some(session) = self.session.as_mut() { session.account.presence = previous; }
+                self.fail(error);
+            },
             Msg::ScreenOpenPicker => return Task::perform(async { tokio::task::spawn_blocking(|| (screen::list_shareable(), screen_media::has_hardware_encoder())).await.unwrap_or_default() }, |(list, hardware)| Msg::ScreenSources(list, hardware)),
             Msg::ScreenSources(sources, hardware) => {
                 if sources.is_empty() { self.toast(ToastKind::Plain, "Nothing to share was found."); return Task::none(); }
@@ -1799,6 +1908,24 @@ impl App {
                 None
             }
             "sharestop" => Some(Msg::ScreenStop),
+            "swap" => Some(Msg::SwapCall),
+            "declinewaiting" => Some(Msg::DeclineWaiting),
+            #[cfg(debug_assertions)]
+            "sendfile" => {
+                let (Some(session), Some(target)) = (self.session.clone(), self.upload_target()) else { return Task::none() };
+                let generation = self.generation;
+                let path = std::path::PathBuf::from(value.clone());
+                return Task::batch([Task::perform(async move { upload(session, target, path).await.map(Some) }, move |result| Msg::FileReady(generation, result)), next()]);
+            }
+            #[cfg(debug_assertions)]
+            "getfile" => {
+                let (Some(session), Some(file)) = (self.session.clone(), self.thread.messages.iter().rev().find_map(|m| m.file.clone())) else { return next() };
+                let path = std::path::PathBuf::from(value.clone());
+                return Task::batch([Task::perform(async move { save_file(session, file, path).await }, |result| Msg::Done(result, "File saved")), next()]);
+            }
+            "emoji" => Some(Msg::ToggleEmoji),
+            "statusmenu" => Some(Msg::ToggleStatusMenu),
+            "status" => Some(Msg::SetStatus(match value.as_str() { "away" => "away", "busy" => "busy", "offline" => "offline", _ => "online" })),
             #[cfg(debug_assertions)]
             "screenvolume" => self.screen_views.keys().next().cloned().map(|id| Msg::ScreenVolume(id, value.parse().unwrap_or(0.4))),
             #[cfg(debug_assertions)]
@@ -1826,18 +1953,28 @@ impl App {
     fn debug_state(&self) -> String {
         let texts: Vec<&str> = self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| m.text.as_str()).collect();
         let reactions = chat::reactions(&self.thread.messages, self.now);
-        format!("{}", serde_json::json!({ "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+        format!("{}", serde_json::json!({ "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+    }
+
+    /// Where an attachment is being sent, as the upload's query string.
+    fn upload_target(&self) -> Option<String> {
+        match self.mode {
+            Mode::Direct => self.selected_peer().filter(|p| p.encryption_key.is_some()).map(|p| format!("to={}", p.id)),
+            Mode::Community => self.community.as_ref().map(|c| format!("community={}", c.id)),
+        }
     }
 
     fn send(&mut self, reaction: Option<chat::Reaction>) -> Task<Msg> {
         if self.sending { return Task::none(); }
         let (Some(session), Some(key)) = (self.session.clone(), self.key.clone()) else { return Task::none() };
-        let text = self.composer.text().trim().to_owned();
+        let file = self.pending_file.take();
+        let text = file.as_ref().map_or_else(|| self.composer.text().trim().to_owned(), |f| f.label());
         if reaction.is_none() && text.is_empty() { return Task::none(); }
-        let reply = if reaction.is_none() { self.reply_to.clone() } else { None };
-        let plain = match &reaction {
-            Some(r) => message_content::encode_reaction(&r.target, &r.emoji, &r.action),
-            None => message_content::encode_text(&text, reply.as_deref()),
+        let reply = if reaction.is_none() && file.is_none() { self.reply_to.clone() } else { None };
+        let plain = match (&file, &reaction) {
+            (Some(file), _) => message_content::encode_file(file).map_err(|_| "invalid file"),
+            (None, Some(r)) => message_content::encode_reaction(&r.target, &r.emoji, &r.action),
+            (None, None) => message_content::encode_text(&text, reply.as_deref()),
         };
         let plain = match plain { Ok(p) => Zeroizing::new(p), Err(_) => { self.fail("Messages can be up to 4000 characters.".into()); return Task::none(); } };
         let generation = self.generation;
@@ -1852,7 +1989,9 @@ impl App {
                     let context = crypto::context(&me, &peer.id, None).map_err(|e| e.to_string())?;
                     let envelope = crypto::encrypt(&key, &peer_key, &plain, &context).map_err(|e| e.to_string())?;
                     let stored = session.send_direct(&peer.id, envelope).await?;
-                    Ok(local(stored, text, reply, reaction))
+                    let mut message = local(stored, text, reply, reaction);
+                    message.file = file;
+                    Ok(message)
                 }, move |r| Msg::Sent(generation, r))
             }
             Mode::Community => {
@@ -1869,11 +2008,39 @@ impl App {
                         envelopes.push(serde_json::json!({ "recipientId": member.id, "version": 1, "iv": envelope.iv, "ciphertext": envelope.ciphertext }));
                     }
                     let stored = session.send_channel(&community_id, &channel, community.revision, envelopes).await?;
-                    Ok(local(stored, text, reply, reaction))
+                    let mut message = local(stored, text, reply, reaction);
+                    message.file = file;
+                    Ok(message)
                 }, move |r| Msg::Sent(generation, r))
             }
         }
     }
+}
+
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Windows would reject these characters in a suggested name.
+fn safe_file_name(name: &str) -> String {
+    let cleaned: String = name.chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).collect();
+    let cleaned = cleaned.trim_matches(['.', ' ']).to_owned();
+    if cleaned.is_empty() { "file".into() } else { cleaned }
+}
+
+async fn upload(session: Session, target: String, path: std::path::PathBuf) -> Result<message_content::FileMeta, String> {
+    let size = std::fs::metadata(&path).map_err(|_| "Could not read that file")?.len();
+    if size == 0 { return Err("That file is empty".into()); }
+    if size > message_content::MAX_FILE_BYTES as u64 { return Err("Files can be up to 8 MB".into()); }
+    let plain = Zeroizing::new(std::fs::read(&path).map_err(|_| "Could not read that file")?);
+    let (sealed, key, iv) = crypto::encrypt_file(&plain).map_err(str::to_owned)?;
+    let id = session.upload_file(&target, sealed).await?;
+    let name: String = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()).chars().take(200).collect();
+    Ok(message_content::FileMeta { id, key, iv, name, kind: "application/octet-stream".into(), size })
+}
+
+async fn save_file(session: Session, file: message_content::FileMeta, path: std::path::PathBuf) -> Result<(), String> {
+    let sealed = session.download_file(&file.id).await?;
+    let plain = Zeroizing::new(crypto::decrypt_file(&sealed, &file.key, &file.iv).map_err(str::to_owned)?);
+    std::fs::write(path, plain.as_slice()).map_err(|_| "Could not save the file".to_string())
 }
 
 /// The sender's view of a message it just encrypted and stored.
@@ -1882,6 +2049,6 @@ fn local(stored: api::MessageEnvelope, text: String, reply: Option<String>, reac
         id: stored.id, sender: stored.sender_id, receiver: stored.receiver_id, channel: stored.channel_id,
         created: chat::timestamp(&stored.created_at).unwrap_or_else(chat::now), created_at: stored.created_at,
         expires: stored.expires_at.as_deref().and_then(chat::timestamp), pinned: stored.pinned,
-        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, missed_call: false, unreadable: false,
+        text: if reaction.is_some() { String::new() } else { text }, reply_to: reply, reaction, missed_call: false, file: None, unreadable: false,
     }
 }

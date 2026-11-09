@@ -79,16 +79,16 @@ fn ringtone_sample(index: usize) -> f32 {
 }
 
 /// Loops the ringtone at any device rate.
-struct RingtonePlayer { position: f64, step: f64, length: usize }
+struct RingtonePlayer { position: f64, step: f64, length: usize, level: f32 }
 impl RingtonePlayer {
-    fn new(device_rate: f64) -> Self { Self { position: 0.0, step: RINGTONE_RATE / device_rate, length: (RINGTONE.len() - 44) / 2 } }
+    fn new(device_rate: f64, level: f32) -> Self { Self { position: 0.0, step: RINGTONE_RATE / device_rate, length: (RINGTONE.len() - 44) / 2, level } }
     fn next_sample(&mut self) -> f32 {
         let index = self.position as usize;
         let blend = (self.position - index as f64) as f32;
         let value = ringtone_sample(index) * (1.0 - blend) + ringtone_sample((index + 1) % self.length) * blend;
         self.position += self.step;
         if self.position >= self.length as f64 { self.position -= self.length as f64; }
-        value
+        value * self.level
     }
 }
 
@@ -97,18 +97,18 @@ impl RingtonePlayer {
 pub struct Ringtone { _stop: Option<std::sync::mpsc::Sender<()>> }
 impl Ringtone {
     pub fn silent() -> Self { Self { _stop: None } }
-    pub fn start(selected: Option<String>) -> Self {
+    pub fn start(selected: Option<String>, level: f32) -> Self {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         // The stream lives on its own thread because it cannot move between threads.
         std::thread::spawn(move || {
-            let Ok(stream) = open_ringtone(selected) else { return };
+            let Ok(stream) = open_ringtone(selected, level) else { return };
             if stream.play().is_ok() { let _ = stopped.recv(); }
         });
         Self { _stop: Some(stop) }
     }
 }
 
-fn open_ringtone(selected: Option<String>) -> Result<cpal::Stream, String> {
+fn open_ringtone(selected: Option<String>, level: f32) -> Result<cpal::Stream, String> {
     use cpal::{SampleFormat, StreamConfig};
     let device = output_device(selected)?;
     let supported = device.default_output_config().map_err(|_| "Could not set up your speakers.")?;
@@ -116,7 +116,7 @@ fn open_ringtone(selected: Option<String>) -> Result<cpal::Stream, String> {
     let config: StreamConfig = supported.into();
     let channels = usize::from(config.channels);
     if config.sample_rate.0 == 0 || channels == 0 { return Err("Invalid audio configuration.".into()); }
-    let mut player = RingtonePlayer::new(f64::from(config.sample_rate.0));
+    let mut player = RingtonePlayer::new(f64::from(config.sample_rate.0), level);
     let on_error = |_error| {};
     match format {
         SampleFormat::F32 => device.build_output_stream(&config, move |data: &mut [f32], _| fill(data, channels, || player.next_sample(), |v| v), on_error, None),
@@ -135,7 +135,7 @@ mod ringtone_tests {
         assert_eq!(u32::from_le_bytes(RINGTONE[24..28].try_into().unwrap()), 24_000);
         assert_eq!(u16::from_le_bytes(RINGTONE[22..24].try_into().unwrap()), 1, "mono");
         assert_eq!(u16::from_le_bytes(RINGTONE[34..36].try_into().unwrap()), 16, "16-bit");
-        let mut player = RingtonePlayer::new(48_000.0);
+        let mut player = RingtonePlayer::new(48_000.0, 1.0);
         let mut peak = 0f32;
         // Three times through at a typical device rate, crossing the seam twice.
         for _ in 0..(player.length * 6) { peak = peak.max(player.next_sample().abs()); }

@@ -9,12 +9,18 @@ export function validScreenSignal(signal) {
 }
 export function installCalls(io) {
   const calls = new Map(),
-    active = directCallUsers;
+    active = directCallUsers,
+    // A second call ringing for someone already talking: callee -> call id.
+    waiting = new Map();
+  const release = (user, call) => {
+    if (active.get(user) === call.id) active.delete(user);
+    if (waiting.get(user) === call.id) waiting.delete(user);
+  };
   const finish = (call, reason) => {
     clearTimeout(call.timer);
     calls.delete(call.id);
-    active.delete(call.caller);
-    active.delete(call.callee);
+    release(call.caller, call);
+    release(call.callee, call);
     io.to(call.callerSocket)
       .to(call.calleeSocket || call.callee)
       .emit("call:ended", { callId: call.id, reason });
@@ -45,12 +51,13 @@ export function installCalls(io) {
           to === socket.userId
         )
           return reply({ error: "Invalid call offer" });
+        // Someone in an answered call or a voice room can be offered one call to swap to.
+        const canWait = (Boolean(calls.get(active.get(to))?.calleeSocket) || (voiceRoomUsers.has(to) && !active.has(to))) && !waiting.has(to);
         if (
           calls.has(signal.callId) ||
           active.has(socket.userId) ||
-          active.has(to) ||
-          voiceRoomUsers.has(socket.userId) ||
-          voiceRoomUsers.has(to)
+          (active.has(to) && !canWait) ||
+          voiceRoomUsers.has(socket.userId)
         )
           return reply({ error: "This person is already in a call" });
         if (
@@ -66,7 +73,8 @@ export function installCalls(io) {
         };
         calls.set(call.id, call);
         active.set(call.caller, call.id);
-        active.set(call.callee, call.id);
+        if (active.has(call.callee) || voiceRoomUsers.has(call.callee)) waiting.set(call.callee, call.id);
+        else active.set(call.callee, call.id);
         call.timer = setTimeout(() => finish(call, "unanswered"), 60000);
         io.to(to).emit("call:signal", { from: socket.userId, signal });
         reply({ ok: true });
@@ -107,6 +115,11 @@ export function installCalls(io) {
           typeof signal.sdp.sdp !== "string"
         )
           return reply({ error: "Invalid call answer" });
+        // Answering a waiting call ends the one it replaces.
+        const replaced = calls.get(active.get(call.callee));
+        if (replaced && replaced !== call) finish(replaced, "ended");
+        waiting.delete(call.callee);
+        active.set(call.callee, call.id);
         call.calleeSocket = socket.id;
         clearTimeout(call.timer);
         io.to(call.callee)
@@ -134,6 +147,9 @@ export function installCalls(io) {
     });
     socket.on("disconnect", () => {
       clearInterval(timer);
+      const held = calls.get(waiting.get(socket.userId));
+      if (held && ![...io.sockets.sockets.values()].some((peer) => peer.userId === socket.userId))
+        finish(held, "peerDisconnected");
       const call = calls.get(active.get(socket.userId));
       if (
         call &&

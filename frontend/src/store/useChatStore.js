@@ -4,7 +4,8 @@ import { axiosInstance as api } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 import { encrypt, decrypt } from "../lib/crypto";
 import { mergeHistory, withoutExpired } from "../lib/history";
-import { encodeMessage, encodeMissedCall, encodeReaction, MISSED_CALL_TEXT } from "../lib/messageContent";
+import { deleteFile } from "../lib/attachments";
+import { encodeFile, encodeMessage, encodeMissedCall, encodeReaction, MISSED_CALL_TEXT } from "../lib/messageContent";
 import { useUnreadStore } from "./useUnreadStore";
 import { refreshedContact } from "../lib/contacts";
 import { candidatePosition, newer, readPosition, rememberPosition } from "../lib/offlineUnread";
@@ -177,11 +178,11 @@ export const useChatStore = create((set, get) => ({
       if (token === generation) set({ loadingOlder: false });
     }
   },
-  sendMessage: async ({ text, replyTo, reaction }) => {
+  sendMessage: async ({ text, replyTo, reaction, file }) => {
     try {
       const peer = get().selectedUser;
       const me = useAuthStore.getState().authUser._id;
-      const envelope = await encrypt(me, peer, reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo));
+      const envelope = await encrypt(me, peer, file ? encodeFile(file) : reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo));
       if (get().selectedUser?._id !== peer._id || get().selectedUser?.encryptionKey !== peer.encryptionKey || useAuthStore.getState().authUser?._id !== me)
         throw new Error("The conversation or contact key changed. Review the contact before sending.");
       const { data } = await api.post(`/messages/send/${peer._id}`, envelope);
@@ -190,7 +191,7 @@ export const useChatStore = create((set, get) => ({
         get().selectedUser?._id === peer._id &&
         !get().messages.some((m) => m._id === data._id)
       )
-        set({ messages: visibleMessages(mergeHistory(get().messages, [{ ...data, text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}) }])) });
+        set({ messages: visibleMessages(mergeHistory(get().messages, [{ ...data, text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}), ...(file ? { file } : {}) }])) });
       return true;
     } catch (e) {
       fail(e);
@@ -216,6 +217,7 @@ export const useChatStore = create((set, get) => ({
         deleted.add(data.id);
         set({ messages: get().messages.filter(item => item._id !== data.id) });
       }
+      if (message.file) deleteFile(message.file.id);
     } catch (e) { fail(e); }
   },
   pinMessage: async (message) => {

@@ -15,17 +15,16 @@ pub static MIC_LEVEL: AtomicU64 = AtomicU64::new(0);
 /// Mirrors the Voice setting, so changing it applies during a call.
 pub static NOISE_SUPPRESSION: AtomicBool = AtomicBool::new(true);
 
-/// RNNoise, a small neural network trained to keep speech and remove the rest.
-pub struct Denoiser { state: Box<nnnoiseless::DenoiseState<'static>> }
+/// DeepFilterNet3. The web app runs this same engine compiled to WebAssembly.
+pub struct Denoiser { engine: deep_filter_rt::tract::DfTract, input: ndarray::Array2<f32>, output: ndarray::Array2<f32> }
 impl Denoiser {
-    pub fn new() -> Self { Self { state: nnnoiseless::DenoiseState::new() } }
-    /// Cleans samples in place. Each 480-sample block is one RNNoise frame.
+    pub fn new() -> Self { Self { engine: deep_filter_rt::tract::DfTract::default(), input: ndarray::Array2::zeros((1, 480)), output: ndarray::Array2::zeros((1, 480)) } }
+    /// Cleans samples in place. Each 480-sample block is one 10 ms model frame.
     pub fn process(&mut self, samples: &mut [f32]) {
-        let (mut input, mut output) = ([0f32; 480], [0f32; 480]);
         for block in samples.chunks_exact_mut(480) {
-            for (to, from) in input.iter_mut().zip(block.iter()) { *to = from * 32768.0; }
-            self.state.process_frame(&mut output, &input);
-            for (to, from) in block.iter_mut().zip(output.iter()) { *to = (from / 32768.0).clamp(-1.0, 1.0); }
+            self.input.row_mut(0).iter_mut().zip(block.iter()).for_each(|(to, from)| *to = *from);
+            if self.engine.process(self.input.view(), self.output.view_mut()).is_err() { continue; }
+            block.iter_mut().zip(self.output.row(0).iter()).for_each(|(to, from)| *to = from.clamp(-1.0, 1.0));
         }
     }
 }
@@ -339,5 +338,24 @@ mod tests {
         mixer.push(1, 2, &[0.1]); let mut stereo = [0.0; 2]; renderer.fill(&mut stereo, 2, |v| v); assert_eq!(stereo, [0.1, 0.1]);
         mixer.push(1, 2, &vec![0.1; MAX_QUEUED * 2]); assert_eq!(mixer.sources.lock().unwrap()[&1].1.len(), MAX_QUEUED);
         mixer.remove(1); assert!(mixer.sources.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod denoiser_tests {
+    use super::*;
+    #[test]
+    fn steady_noise_is_removed() {
+        let mut denoiser = Denoiser::new();
+        let mut seed = 99u32;
+        let mut frame = |quiet: &mut f32, loud: &mut f32, measure: bool| {
+            let mut samples: Vec<f32> = (0..960).map(|_| { seed = seed.wrapping_mul(1664525).wrapping_add(1013904223); ((seed >> 8) as f32 / 8388608.0 - 1.0) * 0.05 }).collect();
+            if measure { *loud += samples.iter().map(|v| v * v).sum::<f32>(); }
+            denoiser.process(&mut samples);
+            if measure { *quiet += samples.iter().map(|v| v * v).sum::<f32>(); }
+        };
+        let (mut quiet, mut loud) = (0f32, 0f32);
+        for n in 0..200 { frame(&mut quiet, &mut loud, n >= 100); }
+        assert!(quiet < loud * 0.01, "noise energy {quiet} of {loud}");
     }
 }

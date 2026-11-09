@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { presenceLabel } from "../lib/presence";
+import PresenceControl from "../components/PresenceControl";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
   Check,
@@ -14,6 +16,7 @@ import {
   Search,
   Reply,
   Send,
+  Settings,
   ShieldCheck,
   Timer,
   Trash2,
@@ -32,24 +35,21 @@ import VoiceCallBanner from "../components/VoiceCallBanner";
 import ReactionBar from "../components/ReactionBar";
 import MessageText from "../components/MessageText";
 import CallNotice from "../components/CallNotice";
+import { initials } from "../lib/initials";
+import ComposerTools, { FileCard } from "../components/ComposerTools";
+import { fileLabel } from "../lib/messageContent";
 import { reactionSummary } from "../lib/reactions";
 import CommunityWorkspace from "../components/CommunityWorkspace";
 import ExperimentalContactVerification from "../components/ExperimentalContactVerification";
 import ExperimentalMatrixChat from "../components/ExperimentalMatrixChat";
 import { useConversationDraft } from "../store/useDraftStore";
 import { useHistoryScroll } from "../lib/useHistoryScroll";
-const initials = (name) =>
-  name
-    ?.split(" ")
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase() || "?";
 function Avatar({ user, online, large }) {
+  const status = useAuthStore((state) => state.presence[user?._id]);
   return (
     <span className={`avatar-tile ${large ? "large" : ""}`}>
       {initials(user?.fullName)}
-      {online && <i />}
+      {online && <i className={status ? `status-${status}` : undefined} />}
     </span>
   );
 }
@@ -63,7 +63,8 @@ export default function HomePage() {
       new URLSearchParams(window.location.search).has("invite") ||
       !!sessionStorage.getItem("sonar-invite"),
   );
-  const { authUser, onlineUsers, logout, socket } = useAuthStore();
+  const { authUser, onlineUsers, presence, logout, socket } = useAuthStore();
+  const statusText = (id, here) => (!onlineUsers.includes(id) ? "Offline" : presence[id] ? presenceLabel(presence[id]) : here);
   const {
     users,
     messages,
@@ -82,6 +83,7 @@ export default function HomePage() {
     loadingOlder,
     loadOlder,
   } = useChatStore();
+  const messageBox = useRef(null);
   const [query, setQuery] = useState(""),
     [peopleQuery, setPeopleQuery] = useState(""),
     [sending, setSending] = useState(false),
@@ -102,8 +104,8 @@ export default function HomePage() {
   const unreadChannels = useUnreadStore(state => state.channels);
   const hasUnreadChannels = Object.keys(unreadChannels).length > 0;
   const history = useHistoryScroll(messages, `dm:${peer?._id}:${onlyPins}`);
-  const voice = useVoiceCall(socket);
   const voiceRoom = useVoiceRoom(socket);
+  const voice = useVoiceCall(socket, Boolean(voiceRoom.room));
   useEffect(() => {
     const prune = () => {
       const now = Date.now();
@@ -255,13 +257,13 @@ export default function HomePage() {
           <ShieldCheck size={22} />
         </button>
         <div className="rail-bottom">
-          <span className="free-badge">FREE</span>
           <button
-            className="self-avatar"
-            title="Your account"
+            className="rail-button"
+            title="Settings"
+            aria-label="Settings"
             onClick={() => useAuthStore.setState({ settingsOpen: true })}
           >
-            {initials(authUser.fullName)}
+            <Settings size={22} />
           </button>
         </div>
       </nav>
@@ -332,9 +334,7 @@ export default function HomePage() {
                   <span>
                     <strong>{user.fullName}</strong>
                     <small>
-                      {onlineUsers.includes(user._id)
-                        ? "Around now"
-                        : "Offline"}
+                      {statusText(user._id, "Around now")}
                     </small>
                   </span>
                   {unread[user._id] && <span className="unread-dot" aria-label="New messages" title="New messages" />}
@@ -358,16 +358,11 @@ export default function HomePage() {
             <small>Messages disappear after 7 days.</small>
           </div>
         </div>
-        <footer className="user-footer">
-          <Avatar user={authUser} online />
-          <div>
-            <strong>{authUser.fullName}</strong>
-            <small>Personal space</small>
-          </div>
+        <PresenceControl>
           <button title="Sign out" className="icon-button" onClick={logout}>
             <LogOut size={17} />
           </button>
-        </footer>
+        </PresenceControl>
       </aside>
       <main className="conversation">
         <header className="chat-top">
@@ -390,11 +385,11 @@ export default function HomePage() {
                     <span
                       className={
                         onlineUsers.includes(peer._id)
-                          ? "green-dot"
+                          ? presence[peer._id] ? `status-dot status-${presence[peer._id]}` : "green-dot"
                           : "offline-dot"
                       }
                     />
-                    {onlineUsers.includes(peer._id) ? "Online" : "Offline"}
+                    {statusText(peer._id, "Online")}
                     <span className="header-separator">/</span> Direct message
                   </small>
                 </div>
@@ -453,7 +448,7 @@ export default function HomePage() {
             How it works <ArrowUpRight size={12} />
           </button>
         </div>
-        <VoiceCallBanner voice={voice} users={users} />
+        <VoiceCallBanner voice={voice} users={users} voiceRoom={voiceRoom} />
         <VoiceRoomBanner voiceRoom={voiceRoom} />
         <div
           className="message-scroll"
@@ -569,7 +564,7 @@ export default function HomePage() {
                           )}
                         </div>
                         {message.replyTo && <div className="reply-reference">Replying to: {visible.find(item => item._id === message.replyTo && !item.unreadable)?.text || "Original message unavailable"}</div>}
-                        {message.call === "missed" ? <CallNotice mine={sender._id === authUser._id} name={sender.fullName} /> : <MessageText text={message.text} onOpenCommunity={() => setCommunityMode(true)} />}
+                        {message.file ? <FileCard file={message.file} /> : message.call === "missed" ? <CallNotice mine={sender._id === authUser._id} name={sender.fullName} /> : <MessageText text={message.text} onOpenCommunity={() => setCommunityMode(true)} />}
                         {!onlyPins && <ReactionBar message={message} reactions={reactions[message._id]} me={authUser._id} disabled={message.unreadable} onReact={reaction => sendMessage({ reaction })} />}
                       </div>
                       <button className="pin-action" title="Reply to message" aria-label="Reply to message" disabled={message.unreadable} onClick={() => setReplyTo(message)}><Reply size={14} /></button>
@@ -601,6 +596,7 @@ export default function HomePage() {
             <form className="composer" onSubmit={submit}>
               <LockKeyhole size={18} />
               <textarea
+                ref={messageBox}
                 aria-label="Message"
                 rows={1}
                 maxLength={4000}
@@ -614,6 +610,15 @@ export default function HomePage() {
                     submit(e);
                   }
                 }}
+              />
+              <ComposerTools
+                textarea={messageBox}
+                value={text}
+                setValue={setText}
+                target={{ to: peer._id }}
+                disabled={!peer.encryptionKey}
+                stillHere={() => useChatStore.getState().selectedUser?._id === peer._id}
+                send={(file) => sendMessage({ text: fileLabel(file), file })}
               />
               <button
                 title="Send encrypted message"
@@ -683,10 +688,7 @@ export default function HomePage() {
                         setPanel(null);
                       }}
                     >
-                      <Avatar
-                        user={user}
-                        online={onlineUsers.includes(user._id)}
-                      />
+                      <Avatar user={user} online={onlineUsers.includes(user._id)} />
                       <span>
                         <strong>{user.fullName}</strong>
                         {user.username && <small>@{user.username}</small>}

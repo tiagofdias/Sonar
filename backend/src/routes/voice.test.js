@@ -189,6 +189,33 @@ test("authenticated direct-call signaling scopes call IDs, busy state, and clean
       },
     );
     await t.test(
+      "a second caller waits, and can be declined or swapped to",
+      async () => {
+        const first = randomUUID();
+        const offer = (id) => ({ type: "offer", callId: id, sdp: { type: "offer", sdp: "x" } });
+        const answer = (id) => ({ type: "answer", callId: id, sdp: { type: "answer", sdp: "y" } });
+        let arrival = next(b, "call:signal");
+        assert.equal((await send(a, bob, offer(first))).ok, true);
+        await arrival;
+        arrival = next(a, "call:signal");
+        assert.equal((await send(b, alice, answer(first))).ok, true);
+        await arrival;
+        const declined = randomUUID();
+        arrival = next(b, "call:signal");
+        assert.equal((await send(c, bob, offer(declined))).ok, true);
+        assert.equal((await arrival).signal.callId, declined);
+        await send(c, bob, { type: "hangup", callId: declined });
+        const replacement = randomUUID();
+        arrival = next(b, "call:signal");
+        assert.equal((await send(c, bob, offer(replacement))).ok, true);
+        await arrival;
+        const firstEnded = next(a, "call:ended");
+        assert.equal((await send(b, outsider, answer(replacement))).ok, true);
+        assert.equal((await firstEnded).callId, first);
+        assert.equal((await send(b, outsider, { type: "hangup", callId: replacement })).ok, true);
+      },
+    );
+    await t.test(
       "disconnect ends the peer call and releases the account",
       async () => {
         const nextCall = randomUUID(),

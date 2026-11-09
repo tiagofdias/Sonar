@@ -19,6 +19,10 @@ import User from "../src/models/user.model.js";
 import Message from "../src/models/message.model.js";
 import Community from "../src/models/community.model.js";
 import ChannelMessage from "../src/models/channelMessage.model.js";
+const openManage = async (page) => {
+  const toggle = page.getByRole("button", { name: "Manage community", exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+};
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const frontendRequire = createRequire(resolve(root, "frontend/package.json"));
@@ -121,7 +125,7 @@ try {
   await page.getByRole("button", { name: "Enter your space" }).click();
   await saveRecoveryKey(page);
   const tester = await User.findOne({ email: "browser@example.invalid" });
-  await page.getByTitle("Your account", { exact: true }).waitFor();
+  await page.getByTitle("Settings", { exact: true }).waitFor();
   const friendKeys = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true,
@@ -292,6 +296,7 @@ try {
     await page.getByLabel("Message general", { exact: true }).inputValue(),
     "General channel draft",
   );
+  await openManage(page);
   await page.getByRole("button", { name: "Delete a channel or room" }).click();
   await page.getByLabel("Channel or room").selectOption({ label: "sandbox (text)" });
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -324,7 +329,7 @@ try {
     .getByRole("button", { name: "Enter your space", exact: true })
     .click();
   await saveRecoveryKey(otherPage);
-  await otherPage.getByTitle("Your account", { exact: true }).waitFor();
+  await otherPage.getByTitle("Settings", { exact: true }).waitFor();
   await page.evaluate(async () => {
     const { useChatStore } = await import("/src/store/useChatStore.js");
     await useChatStore.getState().getUsers();
@@ -352,7 +357,7 @@ try {
   await otherPage.getByLabel("Message", { exact: true }).press("Enter");
   await otherPage.getByText("Arrived while away", { exact: true }).waitFor();
   await page.goto(frontend);
-  await page.getByTitle("Your account", { exact: true }).waitFor();
+  await page.getByTitle("Settings", { exact: true }).waitFor();
   await friendEntry.getByLabel("New messages").waitFor();
   await friendEntry.click();
   await page.getByText("Arrived while away", { exact: true }).waitFor();
@@ -385,7 +390,7 @@ try {
       constructor(title, options) { window.__sonarNotifications.push({ title, ...options }); }
     };
   });
-  await page.getByTitle("Your account", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   await page.getByRole("button", { name: "Privacy & device", exact: true }).click();
   await page.getByRole("button", { name: "Enable notifications", exact: true }).click();
   await page.getByRole("button", { name: "Close settings", exact: true }).click();
@@ -416,7 +421,7 @@ try {
     });
   await audioReceived(page);
   await audioReceived(otherPage);
-  // A raw microphone label here would mean RNNoise silently fell back.
+  // A raw microphone label here would mean the noise suppressor silently fell back.
   const sentLabels = await page.evaluate(() => window.__sonarTestConnections.filter((c) => c.connectionState === "connected").flatMap((c) => c.getSenders().map((s) => s.track?.label || "")));
   assert.ok(sentLabels.length && sentLabels.every((label) => !/fake/i.test(label)), `noise suppression not active: ${sentLabels}`);
   await page.locator(".call-banner .mic-speaking").waitFor({ timeout: 15000 });
@@ -431,7 +436,7 @@ try {
   assert.equal(await otherPage.evaluate(() => document.querySelector(".screen-tile video").volume), 0.25);
   await page.getByRole("button", { name: "Stop sharing your screen", exact: true }).click();
   await otherPage.locator(".screen-tile").waitFor({ state: "detached", timeout: 8000 });
-  await page.getByTitle("Your account", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   await page
     .getByRole("button", { name: "Voice & audio", exact: true })
     .click();
@@ -524,7 +529,7 @@ try {
   console.log(
     "PASS: two-browser voice transport, received audio packets, mute/deafen, and hangup track cleanup.",
   );
-  await page.getByTitle("Your account", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   await page
     .getByRole("button", { name: "Voice & audio", exact: true })
     .click();
@@ -601,7 +606,7 @@ try {
   const extraSessionPage = await extraSessionContext.newPage();
   await extraSessionPage.goto(frontend);
   assert.equal(await extraSessionPage.evaluate(async () => (await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "browser@example.invalid", password: "TenChars!!" }) })).status), 200);
-  await page.getByTitle("Your account", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   console.log("Browser: opening settings");
   await page
     .getByRole("button", { name: "Password & passkeys", exact: true })
@@ -686,7 +691,7 @@ try {
     .getByRole("button", { name: "Sign in with a passkey", exact: true })
     .click();
   await prepareAuthenticator(await loginPopup, savedCredential);
-  await page.getByTitle("Your account", { exact: true }).click();
+  await page.getByTitle("Settings", { exact: true }).click();
   await page
     .getByRole("button", { name: "Password & passkeys", exact: true })
     .click();
@@ -711,7 +716,7 @@ try {
   await page
     .getByRole("button", { name: "Enter your space", exact: true })
     .click();
-  await page.getByTitle("Your account", { exact: true }).waitFor();
+  await page.getByTitle("Settings", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     "PASS: browser enrollment, localhost popup, passkey login, and 10-character password change.",
@@ -725,7 +730,7 @@ try {
   await recoveryPage.getByLabel("Password", { exact: true }).fill("OriginalPass1");
   await recoveryPage.getByRole("button", { name: "Create your account" }).click();
   const firstRecoveryKey = await saveRecoveryKey(recoveryPage);
-  await recoveryPage.getByTitle("Your account", { exact: true }).waitFor();
+  await recoveryPage.getByTitle("Settings", { exact: true }).waitFor();
   const resetContext = await browser.newContext();
   const resetPage = await resetContext.newPage();
   await resetPage.goto(`${frontend}/login`);
@@ -739,7 +744,7 @@ try {
   await resetPage.getByLabel("Recovery key", { exact: true }).fill(firstRecoveryKey.toLowerCase());
   await resetPage.getByRole("button", { name: "Reset password" }).click();
   assert.notEqual(await saveRecoveryKey(resetPage), firstRecoveryKey);
-  await resetPage.getByTitle("Your account", { exact: true }).waitFor();
+  await resetPage.getByTitle("Settings", { exact: true }).waitFor();
   await recoveryContext.close();
   await resetContext.close();
   console.log("PASS: signup shows a recovery key, and it resets a forgotten password in a new browser.");
@@ -781,7 +786,7 @@ try {
       .getByRole("button", { name: "Enter your space", exact: true })
       .click();
     await saveRecoveryKey(roomPage);
-    await roomPage.getByTitle("Your account", { exact: true }).waitFor();
+    await roomPage.getByTitle("Settings", { exact: true }).waitFor();
     assert.equal(
       await roomPage.evaluate(async (token) => {
         const result = await fetch("/api/communities/join", {
@@ -817,7 +822,7 @@ try {
   await roomBrowsers[0].page.getByLabel("Message general", { exact: true }).press("Enter");
   await roomBrowsers[0].page.getByText("Community message while away", { exact: true }).waitFor();
   await page.goto(frontend);
-  await page.getByTitle("Your account", { exact: true }).waitFor();
+  await page.getByTitle("Settings", { exact: true }).waitFor();
   await page.getByLabel("New community messages").waitFor();
   await page.getByTitle("Communities", { exact: true }).click();
   await page.getByTitle("History crew", { exact: true }).click();
@@ -974,6 +979,7 @@ try {
     ),
     true,
   );
+  await openManage(page);
   await page.getByRole("button", { name: "Delete community", exact: true }).click();
   await page.getByRole("button", { name: "Delete community permanently", exact: true }).click();
   await page.getByText("Community deleted", { exact: true }).waitFor();

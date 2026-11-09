@@ -16,7 +16,7 @@ import { passwordRateLimit } from "../middleware/passwordRateLimit.js";
 import { loginRateLimit, signupRateLimit } from "../middleware/authRateLimit.js";
 import passkeyRoutes from "./passkey.route.js";
 import LoginSession from "../models/loginSession.model.js";
-import { io } from "../lib/socket.js";
+import { io, setPresence } from "../lib/socket.js";
 
 const router = express.Router();
 router.use("/passkeys", passkeyRoutes);
@@ -44,6 +44,22 @@ router.delete("/sessions/:id", protectRoute, async (req, res) => {
   } catch { res.status(503).json({ message: "Could not sign out that session" }); }
 });
 router.put("/update-profile", protectRoute, updateProfile);
+router.use("/avatar", (error, _req, res, next) => {
+  if (error?.type === "entity.too.large") return res.status(413).json({ message: "Pictures can be up to 2 MB" });
+  next(error);
+});
+router.put("/presence", protectRoute, async (req, res) => {
+  const { presence } = req.body;
+  if (!["online", "away", "busy", "offline"].includes(presence))
+    return res.status(400).json({ message: "Invalid status" });
+  try {
+    await User.updateOne({ _id: req.user._id }, { $set: { presence } });
+    setPresence(req.user._id, presence);
+    res.json({ presence });
+  } catch {
+    res.status(503).json({ message: "Could not change your status" });
+  }
+});
 router.put("/password", protectRoute, passwordRateLimit, changePassword);
 
 // Binds the first public key to an account, optionally with its encrypted
@@ -66,7 +82,7 @@ router.put("/encryption-key", protectRoute, async (req, res) => {
         : { _id: req.user._id, $or: [{ encryptionKey: null }, { encryptionKey: publicKey }] },
       { $set: { encryptionKey: publicKey, ...(parsed ? { keyBackup: parsed, recoveryVerifier: recoveryVerifier ?? null } : {}) } },
       { new: true },
-    ).select("_id fullName username email profilePic encryptionKey");
+    ).select("_id fullName username presence email profilePic encryptionKey");
     if (!user)
       return res.status(409).json({
         message:
@@ -110,7 +126,7 @@ router.post("/encryption-key/rotate", protectRoute, passwordRateLimit, async (re
       { _id: user._id, encryptionKey: user.encryptionKey ?? null },
       { $set: { encryptionKey: publicKey, keyBackup: parsed, recoveryVerifier: recoveryVerifier ?? null } },
       { new: true },
-    ).select("_id fullName username email profilePic encryptionKey");
+    ).select("_id fullName username presence email profilePic encryptionKey");
     if (!updated)
       return res.status(409).json({ message: "Your encryption key changed on another device. Sign in again." });
     res.json(updated);
@@ -163,12 +179,12 @@ router.post("/recover", loginRateLimit, async (req, res) => {
       { _id: user._id, password: user.password },
       { $set: { password }, $inc: { sessionVersion: 1 } },
       { new: true },
-    ).select("_id fullName username email profilePic encryptionKey sessionVersion");
+    ).select("_id fullName username presence email profilePic encryptionKey sessionVersion");
     if (!changed) return res.status(409).json({ message: "Please try again." });
     io.to(String(changed._id)).emit("sessionRevoked");
     io.in(String(changed._id)).disconnectSockets(true);
     await generateToken(changed._id, res, changed.sessionVersion || 0);
-    res.json({ _id: changed._id, fullName: changed.fullName, username: changed.username, email: changed.email, profilePic: changed.profilePic, encryptionKey: changed.encryptionKey });
+    res.json({ _id: changed._id, fullName: changed.fullName, username: changed.username, presence: changed.presence, email: changed.email, profilePic: changed.profilePic, encryptionKey: changed.encryptionKey });
   } catch {
     res.status(503).json({ message: "Could not reset the password" });
   }

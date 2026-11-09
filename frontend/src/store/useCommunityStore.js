@@ -1,10 +1,11 @@
+import { deleteFile } from "../lib/attachments";
 import { create } from "zustand";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 import { encrypt, decrypt } from "../lib/crypto";
 import { mergeHistory, withoutExpired } from "../lib/history";
-import { encodeMessage, encodeReaction } from "../lib/messageContent";
+import { encodeFile, encodeMessage, encodeReaction } from "../lib/messageContent";
 import { useDraftStore } from "./useDraftStore";
 import { useUnreadStore } from "./useUnreadStore";
 import { candidatePosition, newer, readChannelPosition, rememberChannelPosition } from "../lib/offlineUnread";
@@ -366,7 +367,7 @@ export const useCommunityStore = create((set, get) => ({
       if (token === generation) set({ loadingOlder: false });
     }
   },
-  send: async (text, replyTo, reaction) => {
+  send: async (text, replyTo, reaction, file) => {
     try {
       const target = get().channel?._id;
       if (!(await get().refresh())) return false;
@@ -376,7 +377,7 @@ export const useCommunityStore = create((set, get) => ({
       const envelopes = await Promise.all(
         community.memberDetails.map(async (peer) => ({
           recipientId: peer._id,
-          ...(await encrypt(me, peer, reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo), channel._id)),
+          ...(await encrypt(me, peer, file ? encodeFile(file) : reaction ? encodeReaction(reaction) : encodeMessage(text, replyTo), channel._id)),
         })),
       );
       const { data } = await api.post(
@@ -384,7 +385,7 @@ export const useCommunityStore = create((set, get) => ({
         { revision: community.revision, envelopes },
       );
       if (get().channel?._id === channel._id && !get().pinnedOnly)
-        set({ messages: upsert(get().messages, { ...data, text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}) }) });
+        set({ messages: upsert(get().messages, { ...data, ...(file ? { file } : {}), text: reaction ? "" : text, ...(replyTo ? { replyTo } : {}), ...(reaction ? { reaction } : {}) }) });
       return true;
     } catch (error) {
       fail(error);
@@ -402,6 +403,7 @@ export const useCommunityStore = create((set, get) => ({
     try {
       const { data } = await api.delete(`${base(community)}/channels/${message.channelId}/messages/${message._id}`);
       get().removeMessage(data);
+      if (message.file) deleteFile(message.file.id);
     } catch (error) { fail(error); }
   },
   pin: async (message) => {

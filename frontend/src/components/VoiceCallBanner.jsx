@@ -8,9 +8,10 @@ import {
   LockKeyhole,
   Mic,
   MicOff,
+  PhoneIncoming,
   PhoneOff,
 } from "lucide-react";
-export default function VoiceCallBanner({ voice, users = [] }) {
+export default function VoiceCallBanner({ voice, users = [], voiceRoom }) {
   const speaking = useMicActivity(voice?.micStream, Boolean(voice?.call && voice.call.status !== "incoming" && !voice.muted && !voice.deafened));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -28,6 +29,19 @@ export default function VoiceCallBanner({ voice, users = [] }) {
   return (
     <>
     <ScreenStage screen={voice.screen} nameOf={() => peerName} deafened={voice.deafened} />
+    {voice.waiting && (
+      <section className="call-banner call-waiting" aria-label="Second incoming call">
+        <PhoneIncoming size={23} />
+        <div>
+          <strong>Incoming call from {users.find((user) => user._id === voice.waiting.peer)?.fullName || "someone"}</strong>
+          <small>Swapping ends your current call</small>
+        </div>
+        <button className="primary compact" onClick={voice.swapCall}>Swap</button>
+        <button className="end-call" title="Decline call" aria-label="Decline waiting call" onClick={voice.declineWaiting}>
+          <PhoneOff size={18} />
+        </button>
+      </section>
+    )}
     <section className="call-banner" aria-label="Voice call">
       <AudioLines size={23} />
       <div>
@@ -46,7 +60,7 @@ export default function VoiceCallBanner({ voice, users = [] }) {
           {users.find((user) => user._id === call.peer)?.fullName ||
             call.name ||
             "Sonar member"}
-          {call.startedAt ? ` · ${duration}` : ""} · No recordings
+          {call.startedAt ? ` · ${duration}` : ""} · {call.status === "incoming" && voiceRoom?.room ? "Swapping leaves the voice room" : "No recordings"}
         </small>
       </div>
       <span className="voice-transport">
@@ -59,8 +73,12 @@ export default function VoiceCallBanner({ voice, users = [] }) {
         </button>
       )}
       {call.status === "incoming" ? (
-        <button className="primary compact" onClick={voice.accept}>
-          Accept
+        <button
+          className="primary compact"
+          title={voiceRoom?.room ? "Swapping leaves the voice room" : undefined}
+          onClick={() => { if (voiceRoom?.room) voiceRoom.leave(); voice.accept(); }}
+        >
+          {voiceRoom?.room ? "Swap" : "Accept"}
         </button>
       ) : (
         <>

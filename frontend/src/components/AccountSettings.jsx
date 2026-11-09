@@ -1,3 +1,4 @@
+import { initials } from "../lib/initials";
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
@@ -178,13 +179,7 @@ export default function AccountSettings() {
           <span className="eyebrow">YOUR SONAR</span>
           <h2 id="account-settings-title">Make it yours.</h2>
           <div className="settings-avatar">
-            {authUser.fullName
-              .trim()
-              .split(/\s+/)
-              .map((part) => part[0])
-              .slice(0, 2)
-              .join("")
-              .toUpperCase()}
+            {initials(authUser.fullName)}
           </div>
           <strong className="settings-user-name">{authUser.fullName}</strong>
           {authUser.username && <span className="settings-user-handle">@{authUser.username}</span>}

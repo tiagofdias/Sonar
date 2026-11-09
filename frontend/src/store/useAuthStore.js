@@ -27,6 +27,7 @@ export const useAuthStore = create((set, get) => ({
   isUpdatingProfile: false,
   isCheckingAuth: true,
   onlineUsers: [],
+  presence: {},
   socket: null,
   settingsOpen: false,
   clearSession: () => {
@@ -210,9 +211,23 @@ export const useAuthStore = create((set, get) => ({
     socket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
     });
+    socket.on("getPresence", (presence) => set({ presence }));
+    socket.on("ownPresence", ({ presence }) => {
+      if (get().authUser) set({ authUser: { ...get().authUser, presence } });
+    });
   },
   disconnectSocket: () => {
     get().socket?.disconnect();
-    set({ socket: null, onlineUsers: [] });
+    set({ socket: null, onlineUsers: [], presence: {} });
+  },
+  setPresence: async (presence) => {
+    const previous = get().authUser?.presence;
+    set({ authUser: { ...get().authUser, presence } });
+    try {
+      await axiosInstance.put("/auth/presence", { presence });
+    } catch {
+      set({ authUser: { ...get().authUser, presence: previous } });
+      toast.error("Could not change your status");
+    }
   },
 }));

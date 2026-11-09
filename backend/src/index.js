@@ -15,6 +15,8 @@ import authRoutes from "./routes/auth.route.js";
 import messageRoutes from "./routes/message.route.js";
 import communityRoutes from "./routes/community.route.js";
 import voiceRoutes from "./routes/voice.route.js";
+import attachmentRoutes from "./routes/attachment.route.js";
+import Attachment from "./models/attachment.model.js";
 import { createMatrixDeviceRouter } from "./routes/matrixDevice.route.js";
 import { createMatrixMessagingRouter } from "./routes/matrixMessaging.route.js";
 import { app, server, allowedOrigins, io } from "./lib/socket.js";
@@ -81,6 +83,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/communities", communityRoutes);
 app.use("/api/voice", voiceRoutes);
+app.use("/api/attachments", attachmentRoutes);
 // Experimental device registration is off by default and requires a stable,
 // operator-configured identity domain. Existing legacy keys are never changed.
 if (process.env.SONAR_MATRIX_EXPERIMENTAL === "true") {
@@ -153,6 +156,7 @@ try {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) throw new Error("JWT_SECRET must contain at least 32 characters");
   await connectDB();
   await ensureMessageRetentionIndexes({ matrix: process.env.SONAR_MATRIX_EXPERIMENTAL === "true" });
+  await Attachment.collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   await ensureUsernames();
   server.listen(PORT, () => console.log(`Sonar listening on port ${PORT}`));
 } catch (error) {

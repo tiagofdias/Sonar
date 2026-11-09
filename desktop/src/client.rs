@@ -115,6 +115,24 @@ impl Session {
         if let Some(backup) = key_backup { body["keyBackup"] = serde_json::to_value(backup).map_err(|_| "Invalid key")?; }
         self.send(Method::PUT, "api/auth/password", Some(body), "Could not change password").await.map(|_| ())
     }
+    /// Stores already-encrypted bytes; `target` is `to=<id>` or `community=<id>`.
+    pub async fn upload_file(&self, target: &str, ciphertext: Vec<u8>) -> Result<String, String> {
+        #[derive(Deserialize)] struct Body { id: String }
+        let url = self.base.join(&format!("api/attachments?{target}")).map_err(|_| "Invalid server address.")?;
+        let response = self.client.post(url).header(header::COOKIE, &self.cookie).header(header::ORIGIN, self.origin()).header(header::CONTENT_TYPE, "application/octet-stream").body(ciphertext).send().await.map_err(|_| UNREACHABLE)?;
+        if !response.status().is_success() { return Err(failure(response, "Could not send the file").await); }
+        Ok(response.json::<Body>().await.map_err(|_| "Unexpected response from Sonar.")?.id)
+    }
+    pub async fn download_file(&self, id: &str) -> Result<Vec<u8>, String> {
+        let response = self.send(Method::GET, &format!("api/attachments/{}", check_id(id)?), None, "This file is no longer available").await?;
+        let bytes = response.bytes().await.map_err(|_| "Could not download the file.")?;
+        if bytes.len() > crate::message_content::MAX_FILE_BYTES + 16 { return Err("Unexpected response from Sonar.".into()); }
+        Ok(bytes.to_vec())
+    }
+    pub async fn delete_file(&self, id: &str) -> Result<(), String> { self.send(Method::DELETE, &format!("api/attachments/{}", check_id(id)?), None, "Could not delete the file").await.map(|_| ()) }
+    pub async fn set_presence(&self, presence: &str) -> Result<(), String> {
+        self.send(Method::PUT, "api/auth/presence", Some(json!({ "presence": presence })), "Could not change your status").await.map(|_| ())
+    }
     pub async fn update_profile_details(&self, name: &str, username: &str) -> Result<Account, String> {
         self.call(Method::PUT, "api/auth/update-profile", Some(json!({ "fullName": name.trim(), "username": username })), "Could not update profile").await
     }

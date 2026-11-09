@@ -7,6 +7,7 @@ import User from "../models/user.model.js";
 import { validSession, sessionHash } from "./sessions.js";
 import { installCalls } from "./calls.js";
 import { installVoiceRooms } from "./voiceRooms.js";
+import { voiceRoomUsers } from "./voiceActivity.js";
 import { watchSocketSession } from "./socketSession.js";
 const app = express();
 const server = http.createServer(app);
@@ -39,10 +40,11 @@ io.use(async (socket, next) => {
     );
     const payload = jwt.verify(cookies.jwt, process.env.JWT_SECRET);
     if (!Number.isFinite(payload.exp)) throw new Error();
-    const user = await User.findById(payload.userId).select("sessionVersion");
+    const user = await User.findById(payload.userId).select("sessionVersion presence");
     if (!user || (payload.sessionVersion || 0) !== (user.sessionVersion || 0) || !(await validSession(payload)))
       throw new Error();
     socket.userId = String(payload.userId);
+    socket.presence = user.presence || "online";
     socket.sessionVersion = payload.sessionVersion || 0;
     socket.sessionId = payload.sessionId;
     socket.tokenExpiresAt = payload.exp;
@@ -52,8 +54,22 @@ io.use(async (socket, next) => {
     next(new Error("Authentication required"));
   }
 });
+// Each account's chosen status. "offline" hides a connected account from everyone.
+const chosenPresence = new Map();
+function broadcast() {
+  const connected = [...new Set([...io.sockets.sockets.values()].map((s) => s.userId))];
+  const visible = connected.filter((id) => chosenPresence.get(id) !== "offline");
+  io.emit("getOnlineUsers", visible);
+  // Being in a voice room always reads as available, because people can still be called there.
+  io.emit("getPresence", Object.fromEntries(visible.flatMap((id) => (voiceRoomUsers.has(id) ? [[id, "room"]] : ["away", "busy"].includes(chosenPresence.get(id)) ? [[id, chosenPresence.get(id)]] : []))));
+}
+export function setPresence(userId, presence) {
+  chosenPresence.set(String(userId), presence);
+  broadcast();
+  io.to(String(userId)).emit("ownPresence", { presence });
+}
 const connectCalls = installCalls(io);
-const connectVoiceRooms = installVoiceRooms(io);
+const connectVoiceRooms = installVoiceRooms(io, broadcast);
 io.on("connection", (socket) => {
   socket.join(socket.userId);
   if (socket.sessionHash) socket.join(`session:${socket.sessionHash}`);
@@ -75,10 +91,7 @@ io.on("connection", (socket) => {
       next(new Error("Session could not be verified"));
     }
   });
-  const broadcast = () =>
-    io.emit("getOnlineUsers", [
-      ...new Set([...io.sockets.sockets.values()].map((s) => s.userId)),
-    ]);
+  chosenPresence.set(socket.userId, socket.presence);
   broadcast();
   connectCalls(socket);
   connectVoiceRooms(socket);

@@ -1,4 +1,4 @@
-// Writes Sonar's logo (a boat sending sonar waves downward) for both apps, and
+// Writes Sonar's logo (a submarine sending a sonar pulse) for both apps, and
 // the desktop app's window and taskbar icons.
 // Run from the repo: node desktop/scripts/generate-logo.mjs (needs backend deps and Microsoft Edge).
 import { createRequire } from "node:module";
@@ -9,18 +9,19 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const { chromium } = createRequire(resolve(root, "backend/package.json"))("playwright");
 
-const LIGHT = "#d4c1ff", ACCENT = "#a68be7";
-const art = `<path d="M9 25H55L47.5 37H16.5Z" fill="${LIGHT}" stroke="${LIGHT}" stroke-width="2" stroke-linejoin="round"/>
-<rect x="24" y="14" width="15" height="11" rx="2" fill="${ACCENT}"/>
-<path d="M31.5 14V5" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round"/>
-<g fill="none" stroke-linecap="round" stroke-width="3.6">
-<path d="M24.3 44.4A10 10 0 0 0 39.7 44.4" stroke="${LIGHT}"/>
-<path d="M19 48.9A17 17 0 0 0 45 48.9" stroke="${ACCENT}"/>
-<path d="M13.6 53.4A24 24 0 0 0 50.4 53.4" stroke="${LIGHT}" opacity=".55"/>
+const LIGHT = "#70eeff", ACCENT = "#84dfeb";
+// A submarine sending a sonar pulse ahead. The portholes are real holes, so the
+// mark works on any background.
+const art = `<path fill="${LIGHT}" fill-rule="evenodd" d="M15.5 25H36.5A9.5 9.5 0 0 1 36.5 44H15.5A9.5 9.5 0 0 1 15.5 25ZM17 31.9a2.6 2.6 0 1 0 0 5.2a2.6 2.6 0 1 0 0-5.2ZM26 31.9a2.6 2.6 0 1 0 0 5.2a2.6 2.6 0 1 0 0-5.2ZM35 31.9a2.6 2.6 0 1 0 0 5.2a2.6 2.6 0 1 0 0-5.2Z"/>
+<path d="M20 25V19Q20 17 22 17H30Q32 17 32 19V25Z" fill="${ACCENT}"/>
+<path d="M26 17V9H33" fill="none" stroke="${LIGHT}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<g fill="none" stroke-linecap="round" stroke-width="3.4">
+<path d="M51 28A9 9 0 0 1 51 41" stroke="${LIGHT}"/>
+<path d="M56.5 23A17 17 0 0 1 56.5 46" stroke="${ACCENT}"/>
 </g>`;
 const mark = (size) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 64 64">${art}</svg>\n`;
 // Icons sit on a dark tile so they stay readable on a light Windows taskbar.
-const tile = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1f1b2b"/>${art}</svg>`;
+const tile = `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#112330"/>${art}</svg>`;
 
 writeFileSync(resolve(root, "desktop/assets/sonar-mark.svg"), mark(43));
 writeFileSync(resolve(root, "frontend/public/sonar-mark.svg"), mark(64));

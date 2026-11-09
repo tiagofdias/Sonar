@@ -1,19 +1,30 @@
 const PREFIX = "sonar-reply-v1:";
 const REACTION_PREFIX = "sonar-reaction-v1:";
 const CALL_PREFIX = "sonar-call-v1:";
+const FILE_PREFIX = "sonar-file-v1:";
 export const MISSED_CALL_TEXT = "Missed voice call";
 export const REACTION_EMOJI = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F389}"];
 const messageId = /^[a-f0-9]{24}$/i;
 // Only the reply target ID is carried inside encrypted content. No copied quote is stored.
 export function encodeMessage(text, replyTo = null) {
   if (replyTo && !messageId.test(replyTo)) throw new Error("Invalid reply target");
-  if (replyTo || text.startsWith(PREFIX) || text.startsWith(REACTION_PREFIX) || text.startsWith(CALL_PREFIX))
+  if (replyTo || text.startsWith(PREFIX) || text.startsWith(REACTION_PREFIX) || text.startsWith(CALL_PREFIX) || text.startsWith(FILE_PREFIX))
     return PREFIX + JSON.stringify({ text, ...(replyTo ? { replyTo } : {}) });
   return text;
 }
 // A call that rang and was never answered, sent by the caller's app.
 export function encodeMissedCall() {
   return CALL_PREFIX + JSON.stringify({ event: "missed" });
+}
+const validFile = (file) =>
+  /^[a-f0-9]{24}$/i.test(file?.id) && /^[A-Za-z0-9+/]{43}=$/.test(file.key) && /^[A-Za-z0-9+/]{16}$/.test(file.iv) &&
+  typeof file.name === "string" && file.name.length > 0 && file.name.length <= 255 &&
+  typeof file.type === "string" && file.type.length <= 120 &&
+  Number.isInteger(file.size) && file.size > 0 && file.size <= 8388608;
+export const fileLabel = (file) => `📎 ${file.name}`;
+export function encodeFile(file) {
+  if (!validFile(file)) throw new Error("Invalid file");
+  return FILE_PREFIX + JSON.stringify({ id: file.id, key: file.key, iv: file.iv, name: file.name, type: file.type, size: file.size });
 }
 export function encodeReaction(reaction) {
   if (!validReaction(reaction)) throw new Error("Invalid reaction");
@@ -24,6 +35,13 @@ function validReaction(reaction) {
     REACTION_EMOJI.includes(reaction.emoji) && ["add", "remove"].includes(reaction.action);
 }
 export function decodeMessage(value) {
+  if (value.startsWith(FILE_PREFIX)) {
+    try {
+      const file = JSON.parse(value.slice(FILE_PREFIX.length));
+      if (validFile(file)) return { text: fileLabel(file), file };
+    } catch { /* Preserve invalid content as text. */ }
+    return { text: value };
+  }
   if (value.startsWith(CALL_PREFIX)) {
     try {
       if (JSON.parse(value.slice(CALL_PREFIX.length))?.event === "missed") return { text: MISSED_CALL_TEXT, call: "missed" };

@@ -22,6 +22,28 @@ fn cipher(private: &SecretKey, peer_public: &str) -> Result<Aes256Gcm, &'static 
     let shared = diffie_hellman(private.to_nonzero_scalar(), public.as_affine());
     Aes256Gcm::new_from_slice(shared.raw_secret_bytes()).map_err(|_| "invalid shared key")
 }
+const FILE_AAD: &[u8] = b"sonar-file-v1";
+
+/// Encrypts a file with a new random key. Returns (ciphertext, key, iv) in the
+/// same format the web app uses.
+pub fn encrypt_file(plain: &[u8]) -> Result<(Vec<u8>, String, String), &'static str> {
+    use rand_core::RngCore;
+    let (mut key, mut iv) = ([0u8; 32], [0u8; 12]);
+    rand_core::OsRng.fill_bytes(&mut key);
+    rand_core::OsRng.fill_bytes(&mut iv);
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| "invalid key")?;
+    let sealed = cipher.encrypt(Nonce::from_slice(&iv), Payload { msg: plain, aad: FILE_AAD }).map_err(|_| "encryption failed")?;
+    Ok((sealed, STANDARD.encode(key), STANDARD.encode(iv)))
+}
+
+pub fn decrypt_file(sealed: &[u8], key: &str, iv: &str) -> Result<Vec<u8>, &'static str> {
+    let key = STANDARD.decode(key).map_err(|_| "invalid key")?;
+    let iv = STANDARD.decode(iv).map_err(|_| "invalid iv")?;
+    if iv.len() != 12 { return Err("invalid iv"); }
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| "invalid key")?;
+    cipher.decrypt(Nonce::from_slice(&iv), Payload { msg: sealed, aad: FILE_AAD }).map_err(|_| "This file could not be decrypted")
+}
+
 pub fn context(sender: &str, receiver: &str, channel: Option<&str>) -> Result<String, &'static str> {
     fn valid(value: &str) -> bool { value.len() == 24 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) }
     if !valid(sender) || !valid(receiver) || channel.is_some_and(|value| !valid(value)) {

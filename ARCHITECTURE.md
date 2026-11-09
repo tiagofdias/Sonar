@@ -79,9 +79,13 @@ Reference: [WebRTC security architecture](https://www.rfc-editor.org/rfc/rfc8827
 
 The green microphone indicator is computed locally from the captured audio level (RMS above 0.01, held 300 ms, off while muted or deafened). The level is never stored or sent.
 
+### File attachments
+
+Files are encrypted on the sender's device with a new AES-256-GCM key per file. The server stores only ciphertext, in MongoDB, for 7 days; the key, name and type travel inside the end-to-end encrypted message. Limits protect the free database: 8 MB per file, 64 MB per account and 256 MB in total. A file can be fetched by its sender, its direct recipient or current community members, and is always saved as a download, never displayed or run.
+
 ### Noise suppression
 
-Both apps clean the microphone with RNNoise, on the sender's device, before it is encoded. The desktop app uses the `nnnoiseless` crate. The web app runs a WebAssembly build in an AudioWorklet from `frontend/public/rnnoise`, copied from `@shiguredo/rnnoise-wasm` (Apache-2.0). The browser's own filter is turned off so the two do not stack, and is used only if RNNoise cannot start.
+Both apps clean the microphone with DeepFilterNet3 (MIT or Apache-2.0), on the sender's device, before it is encoded. The desktop app uses the `deep-filter-rt` crate directly. The web app runs the same crate compiled to WebAssembly in an AudioWorklet (`frontend/wasm/deepfilter`, built to `frontend/public/deepfilter/engine.bin`), so results match. The browser's own filter is turned off so the two do not stack, and is used only if the engine cannot start.
 
 ### Screen sharing
 

@@ -232,6 +232,8 @@ pub fn events(auth: &Auth) -> impl Stream<Item = (u64, Event)> + 'static {
             .on("communityRemoved", data_handler(sender.clone(), "communityRemoved"))
             .on("voice:room-state", data_handler(sender.clone(), "voice:room-state"))
             .on("voice:room-signal", data_handler(sender.clone(), "voice:room-signal"))
+            .on("getPresence", data_handler(sender.clone(), "getPresence"))
+            .on("ownPresence", data_handler(sender.clone(), "ownPresence"))
             .on("voice:room-left", data_handler(sender.clone(), "voice:room-left"))
             .on("sessionRevoked", move |_, _| {
                 let mut sender = revoked_sender.clone();

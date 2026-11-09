@@ -11,6 +11,8 @@ pub struct Account {
     #[serde(default)]
     pub username: String,
     #[serde(default)]
+    pub presence: String,
+    #[serde(default)]
     pub email: String,
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,

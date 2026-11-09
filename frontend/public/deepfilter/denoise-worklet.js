@@ -1,16 +1,13 @@
-// Runs RNNoise on the audio thread. Web Audio delivers 128 samples at a time and
-// RNNoise needs 480, so samples are queued in and out; this adds 10 ms of delay.
-import "./worklet-shim.js";
-import { Rnnoise } from "./rnnoise.js";
-
+// Runs DeepFilterNet3 on the audio thread: the same engine, compiled from the
+// same Rust, as the desktop app. Web Audio delivers 128 samples at a time and
+// the model needs 480, so samples are queued in and out.
 const FRAME = 480;
 const CAPACITY = FRAME * 8;
 
 class Denoise extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
     this.enabled = true;
-    this.state = null;
     this.input = new Float32Array(FRAME);
     this.filled = 0;
     this.output = new Float32Array(CAPACITY);
@@ -20,20 +17,25 @@ class Denoise extends AudioWorkletProcessor {
     this.port.onmessage = ({ data }) => {
       if (typeof data?.enabled === "boolean") this.enabled = data.enabled;
     };
-    Rnnoise.load()
-      .then((rnnoise) => {
-        this.state = rnnoise.createDenoiseState();
-        this.port.postMessage({ ready: true });
-      })
-      .catch((error) => this.port.postMessage({ failed: String(error?.stack || error) }));
+    try {
+      this.exports = new WebAssembly.Instance(options.processorOptions.module, {}).exports;
+      this.engine = this.exports.df_create();
+      // The first frame is the slowest; get it out of the way before audio flows.
+      this.exports.df_process(this.engine);
+      this.port.postMessage({ ready: true });
+    } catch (error) {
+      this.engine = null;
+      this.port.postMessage({ failed: String(error?.stack || error) });
+    }
   }
 
   finishFrame() {
     const frame = this.input;
-    if (this.state && this.enabled) {
-      for (let i = 0; i < FRAME; i++) frame[i] *= 32768;
-      this.state.processFrame(frame);
-      for (let i = 0; i < FRAME; i++) frame[i] = Math.max(-1, Math.min(1, frame[i] / 32768));
+    if (this.engine && this.enabled) {
+      const pointer = this.exports.df_frame(this.engine);
+      new Float32Array(this.exports.memory.buffer, pointer, FRAME).set(frame);
+      this.exports.df_process(this.engine);
+      frame.set(new Float32Array(this.exports.memory.buffer, pointer, FRAME));
     }
     for (let i = 0; i < FRAME; i++) {
       this.output[(this.read + this.available) % CAPACITY] = frame[i];
