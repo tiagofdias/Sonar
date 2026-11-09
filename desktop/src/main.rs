@@ -34,6 +34,7 @@ mod store;
 mod taskbar;
 mod theme;
 mod ui;
+mod update;
 mod wheel;
 mod screen;
 mod screen_audio;
@@ -59,6 +60,10 @@ use zeroize::{Zeroize, Zeroizing};
 /// Windows uses the large icon on the taskbar and Iced only sets the small one,
 /// so hand it the .exe's own icon once the window exists.
 #[cfg(windows)]
+fn first_update_check() -> Task<Msg> {
+    Task::perform(tokio::time::sleep(std::time::Duration::from_secs(10)), |_| Msg::UpdateCheck)
+}
+
 fn set_taskbar_icon() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use windows_sys::core::BOOL;
@@ -221,6 +226,7 @@ pub struct App {
     pub unread_direct: HashSet<String>,
     unread_counts: HashMap<String, u32>,
     shown_badge: u32,
+    pub update_ready: Option<String>,
     last_chime: Option<std::time::Instant>,
     pub unread_channels: HashSet<String>,
     // Composer.
@@ -301,6 +307,9 @@ pub struct App {
 #[derive(Clone, Debug)]
 pub enum Msg {
     Tick,
+    UpdateCheck,
+    UpdateChecked(Result<Option<String>, String>),
+    UpdateRestart,
     // Authentication.
     Restored(Result<Session, String>),
     AuthField(u8, String),
@@ -482,7 +491,7 @@ impl App {
             live_generation: 0, live_connected: false, socket: None, online: HashSet::new(),
             mode: Mode::Direct, people: Vec::new(), people_loaded: false, query: String::new(), peer: None,
             communities: Vec::new(), community: None, channel: None, members_open: false, thread: Thread::default(),
-            unread_counts: HashMap::new(), shown_badge: 0, last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
+            unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
             invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
@@ -509,17 +518,18 @@ impl App {
                 app.screen = Screen::Boot;
                 tasks.push(Task::perform(client::restore(server, cookie), Msg::Restored));
             }
+            tasks.push(first_update_check());
             return (app, Task::batch(tasks));
         }
         let task = match saved {
             Some((server, cookie)) => Task::perform(client::restore(server, cookie), Msg::Restored),
             None => Task::none(),
         };
-        (app, task)
+        (app, Task::batch([task, first_update_check()]))
     }
 
     fn subscription(&self) -> Subscription<Msg> {
-        let mut list = vec![iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Msg::Tick)];
+        let mut list = vec![iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Msg::Tick), iced::time::every(std::time::Duration::from_secs(6 * 60 * 60)).map(|_| Msg::UpdateCheck)];
         if let (Some(session), Screen::Main) = (&self.session, self.screen) {
             list.push(Subscription::run_with(session.live_auth(self.live_generation), live::events).map(|(generation, event)| Msg::Live(generation, event)));
             list.push(iced::time::every(std::time::Duration::from_secs(30)).map(|_| Msg::Refresh));
@@ -958,6 +968,18 @@ impl App {
                 return Task::done(Msg::Script);
             }
             Msg::Noop => {}
+            Msg::UpdateCheck => return Task::perform(update::check(), Msg::UpdateChecked),
+            Msg::UpdateChecked(result) => if let Ok(Some(version)) = result { self.update_ready = Some(version); },
+            Msg::UpdateRestart => {
+                if self.call.is_none() && self.room.is_none() {
+                    if let Some(version) = self.update_ready.clone() {
+                        match update::restart(&version) {
+                            Ok(()) => return iced::exit(),
+                            Err(_) => self.toast(ToastKind::Error, "Sonar could not update itself. Download the new version from the website."),
+                        }
+                    }
+                }
+            }
 
             // ----- Authentication -------------------------------------------------
             Msg::Restored(result) => match result {
@@ -2008,6 +2030,7 @@ impl App {
                 let path = std::path::PathBuf::from(value.clone());
                 return Task::batch([Task::perform(async move { save_file(session, file, path).await }, |result| Msg::Done(result, "File saved")), next()]);
             }
+            "updaterestart" => Some(Msg::UpdateRestart),
             "friendadd" => { self.people_query = value.clone(); Some(Msg::SendFriendRequest) }
             "friendaccept" => self.friend_requests.incoming.first().map(|p| Msg::AnswerFriendRequest(p.id.clone(), true)),
             "emoji" => Some(Msg::ToggleEmoji),
@@ -2040,7 +2063,7 @@ impl App {
     fn debug_state(&self) -> String {
         let texts: Vec<&str> = self.thread.messages.iter().filter(|m| m.reaction.is_none()).map(|m| m.text.as_str()).collect();
         let reactions = chat::reactions(&self.thread.messages, self.now);
-        format!("{}", serde_json::json!({ "shownBadge": self.shown_badge, "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
+        format!("{}", serde_json::json!({ "updateReady": self.update_ready, "shownBadge": self.shown_badge, "waiting": self.waiting.as_ref().map(|c| c.from.clone()), "callPeer": self.call.as_ref().map(|c| c.spec.peer.clone()), "presence": self.presence, "myStatus": self.session.as_ref().map(|s| s.account.presence.clone()), "screenViews": self.screen_views.iter().map(|(k, v)| (k.clone(), format!("{}x{}", v.1, v.2))).collect::<HashMap<_, _>>(), "screenSharing": self.screen_sharing, "ringing": self.ringtone.is_some(), "screen": format!("{:?}", self.screen), "unlock": format!("{:?}", self.unlock_reason), "recoveryKey": self.new_recovery.clone(), "backup": self.backup_kind, "micLevel": self.mic_level, "peer": self.peer.clone(), "online": self.online.len(), "live": self.live_connected, "people": self.people.len(), "passkeys": self.passkeys.as_ref().map(|p| p.len()), "sent": voice_transport::PACKETS_SENT.load(std::sync::atomic::Ordering::Relaxed), "received": voice_transport::PACKETS_RECEIVED.load(std::sync::atomic::Ordering::Relaxed), "capturePeak": voice_audio::CAPTURE_PEAK.load(std::sync::atomic::Ordering::Relaxed), "texts": texts, "reactions": reactions.len(), "call": self.call.as_ref().map(|c| format!("{:?}", c.status)), "room": self.room.as_ref().map(|r| format!("{} people, {} connected", r.participants.len(), r.connections)), "incoming": self.incoming.is_some(), "unread": self.unread_direct.len() + self.unread_channels.len(), "toasts": self.toasts.iter().map(|t| t.text.clone()).collect::<Vec<_>>() }))
     }
 
     /// Where an attachment is being sent, as the upload's query string.

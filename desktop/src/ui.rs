@@ -645,6 +645,7 @@ fn conversation(app: &App) -> E<'_> {
     let retention = column![container(banner).width(FILL).center_x(FILL).padding([12, 20]).style(t::fill(rgb(0x1b2025))), t::rule(rgb(0x232a31), true)];
 
     let mut main = Column::new().push(top).push(retention);
+    if let Some(banner) = update_banner(app) { main = main.push(banner); }
     if let Some(banner) = waiting_banner(app) { main = main.push(banner); }
     if let Some(banner) = call_banner(app) { main = main.push(banner); }
     let thread: E = match app.mode {
@@ -700,6 +701,17 @@ fn voice_rooms<'a>(app: &'a App, community: &'a crate::api::Community) -> E<'a> 
 }
 
 /// A second call arriving during a connected call. Mirrors VoiceCallBanner.jsx.
+fn update_banner(app: &App) -> Option<E<'_>> {
+    if app.call.is_some() || app.room.is_some() { return None; }
+    let version = app.update_ready.as_ref()?;
+    Some(container(container(row![
+        t::icon(Icon::Download, 20.0, rgb(0xd7f3ff)),
+        column![text("A new version of Sonar is ready").size(15).font(t::semibold()).color(rgb(0xd7f3ff)), text(format!("Version {version}")).size(13).color(rgb(0xa9d8ee))].spacing(4).width(FILL),
+        button(text("Restart to update").size(15).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 14]).style(t::primary()).on_press(Msg::UpdateRestart),
+    ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x12405f), rgb(0x3f9dff), 9.0)))
+        .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into())
+}
+
 fn waiting_banner(app: &App) -> Option<E<'_>> {
     let in_room = app.waiting.is_none();
     let waiting = app.waiting.as_ref().or(app.incoming.as_ref().filter(|_| app.room.is_some()))?;
