@@ -84,8 +84,12 @@ fn danger<'a>(label: impl Into<String>, on: Option<Msg>) -> E<'a> {
     button(text(label).size(15).color(Color::WHITE).font(t::semibold())).padding([13, 18]).style(t::danger()).on_press_maybe(on).into()
 }
 /// The microphone toggle; green while the mic is picking up sound.
+fn call_btn<'a>(icon: Icon, size: f32, on: Option<Msg>, active: bool) -> E<'a> {
+    let color = if active { rgb(0x70eeff) } else { rgb(0xd7f3ff) };
+    button(container(t::icon(icon, size, color)).center_x(30).center_y(32)).padding(0).width(30).height(32).style(t::call_control(active)).on_press_maybe(on).into()
+}
 fn mic_btn<'a>(muted: bool, speaking: bool, on: Msg) -> E<'a> {
-    if !speaking || muted { return icon_btn(if muted { Icon::MicOff } else { Icon::Mic }, 18.0, Some(on), muted); }
+    if !speaking || muted { return call_btn(if muted { Icon::MicOff } else { Icon::Mic }, 18.0, Some(on), muted); }
     button(container(t::icon(Icon::Mic, 18.0, rgb(0x7fdc9a))).center_x(30).center_y(32)).padding(0).width(30).height(32).style(t::mic_speaking()).on_press(on).into()
 }
 fn lead_icon<'a>(icon: Icon, label: impl text::IntoFragment<'a>, color: Color, icon_size: f32, size: f32, gap: f32) -> Row<'a, Msg> {
@@ -136,7 +140,7 @@ fn boot<'a>() -> E<'a> {
 
 fn screen_button<'a>(app: &'a App) -> E<'a> {
     let sharing = app.screen_sharing.is_some();
-    icon_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
+    call_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
 }
 
 fn screen_volume<'a>(app: &'a App, id: &'a str) -> E<'a> {
@@ -459,7 +463,7 @@ fn person_row<'a>(name: &str, sub: &str, index: usize, dot: Option<Color>, chose
     if let Some(item) = last { content = content.push(item); }
     let inner = button(content).width(FILL).padding([11, 10]).style(t::person_row(chosen)).on_press_maybe(on);
     if chosen {
-        stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0xd0d7dc).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
+        stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0x70eeff).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
     } else { inner.into() }
 }
 fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: Option<(Icon, &'a str, &'a str)>, app: &'a App) -> E<'a> {
@@ -707,14 +711,14 @@ fn waiting_banner(app: &App) -> Option<E<'_>> {
 
 fn call_banner(app: &App) -> Option<E<'_>> {
     let name = |id: &str| app.person(id).map(|p| p.name.clone()).or_else(|| app.member(id).map(|p| p.name.clone())).unwrap_or_else(|| "Someone".into());
-    let style = t::panel(rgb(0x232a31), rgb(0x74808b), 9.0);
+    let style = t::panel(rgb(0x12405f), rgb(0x3f9dff), 9.0);
     // Mirrors VoiceCallBanner.jsx: same titles, subtitle and controls.
-    let pill = |relay: bool| -> E { container(lead_icon(Icon::LockKeyhole, if relay { "Relay only" } else { "Encrypted audio" }, rgb(0xa6aeb4), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x2a3139), rgb(0x74808b), 5.0)).into() };
+    let pill = |relay: bool| -> E { container(lead_icon(Icon::LockKeyhole, if relay { "Relay only" } else { "Encrypted audio" }, rgb(0xbfeaff), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x0f3147), rgb(0x3f9dff), 5.0)).into() };
     let end_call = |on: Msg| -> E { button(t::icon(Icon::PhoneOff, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(on).into() };
     let content: E = if let Some(incoming) = app.incoming.as_ref().filter(|_| app.room.is_none()) {
         row![
-            t::icon(Icon::AudioLines, 23.0, rgb(0xd0d7dc)),
-            column![text("Incoming voice call").size(15).font(t::semibold()).color(rgb(0xd0d7dc)), text(format!("{} · No recordings", name(&incoming.from))).size(13).color(rgb(0x98a1a8))].spacing(4).width(FILL),
+            t::icon(Icon::AudioLines, 23.0, rgb(0x70eeff)),
+            column![text("Incoming voice call").size(15).font(t::semibold()).color(rgb(0xeafaff)), text(format!("{} · No recordings", name(&incoming.from))).size(13).color(rgb(0xa9d8ee))].spacing(4).width(FILL),
             pill(app.settings.relay_only),
             button(text("Accept").size(15).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 14]).style(t::primary()).on_press_maybe((app.call.is_none() && app.room.is_none()).then_some(Msg::AcceptCall)),
             end_call(Msg::DeclineCall),
@@ -722,27 +726,27 @@ fn call_banner(app: &App) -> Option<E<'_>> {
     } else if let Some(room) = &app.room {
         let joining = room.spec.is_none() || room.controls.is_none();
         return Some(container(container(row![
-            t::icon(Icon::Volume, 23.0, rgb(0xd0d7dc)),
+            t::icon(Icon::Volume, 23.0, rgb(0x70eeff)),
             column![
-                text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xd0d7dc)),
-                text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0x98a1a8)),
+                text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xeafaff)),
+                text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0xa9d8ee)),
             ].spacing(4).width(FILL),
-            container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xa6aeb4), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x2a3139), rgb(0x74808b), 5.0)),
+            container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xbfeaff), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x0f3147), rgb(0x3f9dff), 5.0)),
             mic_btn(room.muted, app.mic_active && !room.deafened, Msg::RoomMute),
-            icon_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
+            call_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
             screen_button(app),
             button(t::icon(Icon::LogOut, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::LeaveRoom),
-        ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x21272e), rgb(0x74808b), 9.0)))
+        ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x12405f), rgb(0x3f9dff), 9.0)))
             .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into());
     } else if let Some(call) = &app.call {
         let title = match call.status { CallStatus::Calling => "Calling...", CallStatus::Connecting => "Connecting voice...", CallStatus::Connected => "Voice connected" };
         let duration = call.started.map(|s| { let secs = s.elapsed().as_secs(); format!(" · {}:{:02}", secs / 60, secs % 60) }).unwrap_or_default();
         row![
-            t::icon(Icon::AudioLines, 23.0, rgb(0xd0d7dc)),
-            column![text(title).size(15).font(t::semibold()).color(rgb(0xd0d7dc)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0x98a1a8))].spacing(4).width(FILL),
+            t::icon(Icon::AudioLines, 23.0, rgb(0x70eeff)),
+            column![text(title).size(15).font(t::semibold()).color(rgb(0xeafaff)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0xa9d8ee))].spacing(4).width(FILL),
             pill(call.spec.relay_only),
             mic_btn(call.muted, app.mic_active && !call.deafened, Msg::Mute),
-            icon_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
+            call_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
             if call.status == CallStatus::Connected { screen_button(app) } else { space().width(0).into() },
             end_call(Msg::Hangup),
         ].spacing(14).align_y(Vertical::Center).into()

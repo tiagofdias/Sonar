@@ -245,7 +245,7 @@ p {
   border-radius: 4px;
 }
 .nav-row.selected {
-  background: #272e37;
+  background: #163447;
   color: #d0d7dc;
 }
 .nav-row:hover {
@@ -309,8 +309,8 @@ p {
   background: #1d2329;
 }
 .person.chosen {
-  background: #21272d;
-  box-shadow: inset 2px 0 #d0d7dc;
+  background: #163447;
+  box-shadow: inset 2px 0 #70eeff;
 }
 .avatar-tile {
   display: inline-flex;
@@ -2230,11 +2230,11 @@ p {
   min-width: 100px;
 }
 .call-banner .icon-button {
-  color: #d0d7dc;
+  color: #d7f3ff;
 }
 .call-banner .icon-button.accent {
-  background: #353e48;
-  color: #d0d7dc;
+  background: #1d5a7d;
+  color: #70eeff;
 }
 .microphone-meter {
   height: 10px;
@@ -2406,10 +2406,6 @@ p {
 .room-participants li > svg {
   flex-shrink: 0;
   color: #d0d7dc;
-}
-.room-call-banner {
-  background: #21272e;
-  border-color: #74808b;
 }
 .voice-room-entry button:hover:not(:disabled) {
   background: #222930;
@@ -2928,4 +2924,21 @@ p {
   padding: 2px 12px 14px;
   font-size: 13px;
   color: #89939a;
+}
+/* The live call stands out: blue is kept for what is active right now. */
+.call-banner {
+  background: #12405f;
+  border-color: #3f9dff;
+  color: #eafaff;
+}
+.call-banner > svg {
+  color: #70eeff;
+}
+.call-banner small {
+  color: #a9d8ee;
+}
+.call-banner .voice-transport {
+  background: #0f3147;
+  border-color: #3f9dff;
+  color: #bfeaff;
 }

@@ -133,15 +133,18 @@ pub fn danger() -> ButtonStyle { btn(Some(DANGER), Some(rgb(0xb05269)), Color::W
 pub fn icon_button(active: bool) -> ButtonStyle {
     if active { btn(None, Some(rgba(0xffffff08)), ACCENT, ACCENT, None, 7.0) } else { btn(None, Some(rgba(0xffffff08)), rgb(0x8c969d), rgb(0xd0d7dc), None, 7.0) }
 }
+pub fn call_control(active: bool) -> ButtonStyle {
+    if active { btn(Some(rgb(0x1d5a7d)), Some(rgb(0x1d5a7d)), rgb(0x70eeff), rgb(0x70eeff), None, 7.0) } else { btn(None, Some(rgba(0xffffff14)), rgb(0xd7f3ff), rgb(0xffffff), None, 7.0) }
+}
 pub fn rail_button(active: bool) -> ButtonStyle {
     if active { btn(Some(rgb(0x282f37)), Some(rgb(0x282f37)), rgb(0x70eeff), rgb(0x70eeff), None, 13.0) } else { btn(None, Some(rgb(0x1c2127)), rgb(0x76828d), rgb(0xd0d7dc), None, 13.0) }
 }
 pub fn nav_row(selected: bool) -> ButtonStyle {
-    if selected { btn(Some(rgb(0x272e37)), Some(rgb(0x20252c)), rgb(0xd0d7dc), rgb(0xd0d7dc), None, 7.0) } else { btn(None, Some(rgb(0x20252c)), rgb(0x98a1a7), rgb(0x98a1a7), None, 7.0) }
+    if selected { btn(Some(rgb(0x163447)), Some(rgb(0x163447)), rgb(0xd0d7dc), rgb(0xd0d7dc), None, 7.0) } else { btn(None, Some(rgb(0x20252c)), rgb(0x98a1a7), rgb(0x98a1a7), None, 7.0) }
 }
 pub fn danger_row() -> ButtonStyle { btn(None, Some(rgb(0x20252c)), rgb(0xc28b98), rgb(0xc28b98), None, 7.0) }
 pub fn person_row(chosen: bool) -> ButtonStyle {
-    if chosen { btn(Some(rgb(0x21272d)), Some(rgb(0x21272d)), TEXT, TEXT, None, 8.0) } else { btn(None, Some(rgb(0x1d2329)), TEXT, TEXT, None, 8.0) }
+    if chosen { btn(Some(rgb(0x163447)), Some(rgb(0x163447)), TEXT, TEXT, None, 8.0) } else { btn(None, Some(rgb(0x1d2329)), TEXT, TEXT, None, 8.0) }
 }
 pub fn plain(color: Color, hover: Color) -> ButtonStyle { btn(None, None, color, hover, None, 0.0) }
 pub fn community_icon(active: bool) -> ButtonStyle {
