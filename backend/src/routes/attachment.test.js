@@ -8,6 +8,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import attachmentRoutes, { MAX_FILE_BYTES } from "./attachment.route.js";
 import Attachment from "../models/attachment.model.js";
 import User from "../models/user.model.js";
+import { befriend } from "../lib/friends.js";
 import Community from "../models/community.model.js";
 
 test("encrypted files are limited, access-controlled and owner-deletable", async () => {
@@ -18,6 +19,7 @@ test("encrypted files are limited, access-controlled and owner-deletable", async
     await mongoose.connect(database.getUri("sonar-attachment-tests"));
     const make = (name) => User.create({ fullName: name, email: `${name}@example.invalid`, password: "hashed-password" });
     const [alice, bob, eve, dan] = await Promise.all(["alice", "bob", "eve", "dan"].map(make));
+    await befriend(alice._id, bob._id);
     const community = await Community.create({ name: "Crew", ownerId: alice._id, members: [alice._id, dan._id], channels: [{ name: "general" }] });
     const app = express();
     app.use(cookieParser());

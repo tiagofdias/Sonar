@@ -1,4 +1,5 @@
 import express from "express";
+import { areFriends } from "../lib/friends.js";
 import mongoose from "mongoose";
 import Attachment from "../models/attachment.model.js";
 import Community from "../models/community.model.js";
@@ -27,7 +28,7 @@ router.post(
     if (!valid(to || community)) return res.status(400).json({ message: "Invalid file upload" });
     try {
       if (to) {
-        if (!(await User.exists({ _id: to }))) return res.status(404).json({ message: "This person is unavailable" });
+        if (!(await areFriends(req.user._id, to))) return res.status(403).json({ message: "You can only send files to friends" });
       } else if (!(await Community.exists({ _id: community, members: req.user._id }))) {
         return res.status(404).json({ message: "Community unavailable" });
       }

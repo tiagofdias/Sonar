@@ -8,6 +8,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import messageRoutes from "./message.route.js";
 import communityRoutes from "./community.route.js";
 import User from "../models/user.model.js";
+import { befriend } from "../lib/friends.js";
 import Message from "../models/message.model.js";
 import Community from "../models/community.model.js";
 import ChannelMessage from "../models/channelMessage.model.js";
@@ -23,6 +24,7 @@ test("cursor history preserves ordering, visibility, expiry, and independent pin
         password: "unused-test-hash",
       })),
     );
+    await befriend(alice._id, bob._id);
     const community = await Community.create({
       name: "History crew",
       ownerId: alice._id,
@@ -186,10 +188,9 @@ test("cursor history preserves ordering, visibility, expiry, and independent pin
           { _id: channel[60]._id },
           { expiresAt: new Date(0) },
         );
-        assert.deepEqual(
-          (await request(`/messages/${bob._id}?page=true`, outsider)).body
-            .messages,
-          [],
+        assert.equal(
+          (await request(`/messages/${bob._id}?page=true`, outsider)).status,
+          403,
         );
         assert.equal(
           (await request(paths[1] + "?page=true", outsider)).status,
@@ -242,7 +243,7 @@ test("cursor history preserves ordering, visibility, expiry, and independent pin
       assert.equal(await remove(alice), 200);
       assert.equal(await Message.exists({ _id: target }), null);
       assert.equal(await remove(alice), 404);
-      assert.equal((await request(`${paths[0]}?page=true&pinned=true`, bob)).body.messages.length, 0);
+      assert.equal((await request(`${paths[0]}?page=true&pinned=true`)).body.messages.length, 0);
     });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));

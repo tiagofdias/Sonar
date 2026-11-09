@@ -262,6 +262,7 @@ pub struct App {
     pub profile_name: String,
     pub profile_username: String,
     pub people_query: String,
+    pub friend_requests: api::FriendRequests,
     pub mic_active: bool,
     pub mic_until: Option<std::time::Instant>,
     pub passwords: [String; 3],
@@ -372,6 +373,11 @@ pub enum Msg {
     Pulse,
     ToggleManage,
     PickEmoji(&'static str),
+    FriendRequests(Result<api::FriendRequests, String>),
+    SendFriendRequest,
+    FriendRequestSent(Result<(), String>),
+    AnswerFriendRequest(String, bool),
+    FriendsChanged(Result<(), String>),
     AttachFile,
     FileReady(u64, Result<Option<message_content::FileMeta>, String>),
     DownloadFile(message_content::FileMeta),
@@ -476,7 +482,7 @@ impl App {
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
             invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
-            settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
+            settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
             call: None, incoming: None, early_candidates: Vec::new(), room: None, rooms: HashMap::new(), toasts: Vec::new(), toast_id: 0, script: Default::default(), probe: None,
@@ -673,9 +679,20 @@ impl App {
         let generation = self.generation;
         let other = session.clone();
         Task::batch([
+            self.refresh_friends(),
             Task::perform(async move { session.people().await }, move |result| Msg::People(generation, result)),
             Task::perform(async move { other.communities().await }, move |result| Msg::Communities(generation, result)),
         ])
+    }
+
+    fn refresh_friends(&self) -> Task<Msg> {
+        let Some(session) = self.session.clone() else { return Task::none() };
+        Task::perform(async move { session.friend_requests().await }, Msg::FriendRequests)
+    }
+    fn refresh_people(&self) -> Task<Msg> {
+        let Some(session) = self.session.clone() else { return Task::none() };
+        let generation = self.generation;
+        Task::batch([self.refresh_friends(), Task::perform(async move { session.people().await }, move |result| Msg::People(generation, result))])
     }
 
     fn load_thread(&mut self, before: Option<String>) -> Task<Msg> {
@@ -1071,6 +1088,8 @@ impl App {
                 }
                 live::Event::MatrixChanged => {}
                 live::Event::Data(name, value) => match name {
+                    "friendsChanged" => return self.refresh_people(),
+                    "friendRequest" => { let who = value.get("fullName").and_then(|v| v.as_str()).unwrap_or("Someone").to_owned(); self.toast(ToastKind::Success, format!("{who} sent you a friend request")); }
                     "newMessage" => self.receive_direct(value, false),
                     "messageUpdated" => self.receive_direct(value, true),
                     "messageDeleted" | "channelMessageDeleted" => {
@@ -1150,6 +1169,7 @@ impl App {
             Msg::Refresh => return self.refresh(),
             Msg::People(_, result) if self.session.is_some() => match result {
                 Ok(people) => {
+                    if !self.people_loaded && people.is_empty() { self.panel = Some(Panel::People); }
                     self.people = people;
                     self.people_loaded = true;
                     if let Some(peer) = &self.peer { if !self.people.iter().any(|p| &p.id == peer) { return self.open_peer(None); } }
@@ -1178,6 +1198,21 @@ impl App {
             }
             Msg::Query(value) => self.query = value,
             Msg::PeopleQuery(value) => self.people_query = value,
+            Msg::FriendRequests(result) => { if let Ok(requests) = result { self.friend_requests = requests; } }
+            Msg::SendFriendRequest => {
+                let username = self.people_query.trim().to_owned();
+                let Some(session) = self.session.clone().filter(|_| !username.is_empty()) else { return Task::none() };
+                return Task::perform(async move { session.send_friend_request(&username).await }, Msg::FriendRequestSent);
+            }
+            Msg::FriendRequestSent(result) => match result {
+                Ok(()) => { self.people_query.clear(); self.toast(ToastKind::Success, "Friend request sent"); return self.refresh_people(); }
+                Err(error) => self.fail(error),
+            },
+            Msg::AnswerFriendRequest(id, accept) => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                return Task::perform(async move { session.answer_friend_request(&id, accept).await }, Msg::FriendsChanged);
+            }
+            Msg::FriendsChanged(result) => { if let Err(error) = result { self.fail(error); } return self.refresh_people(); }
             Msg::ProfileUsername(value) => self.profile_username = value.trim_start_matches('@').to_lowercase(),
             Msg::MicPoll => {
                 let now = std::time::Instant::now();
@@ -1923,6 +1958,8 @@ impl App {
                 let path = std::path::PathBuf::from(value.clone());
                 return Task::batch([Task::perform(async move { save_file(session, file, path).await }, |result| Msg::Done(result, "File saved")), next()]);
             }
+            "friendadd" => { self.people_query = value.clone(); Some(Msg::SendFriendRequest) }
+            "friendaccept" => self.friend_requests.incoming.first().map(|p| Msg::AnswerFriendRequest(p.id.clone(), true)),
             "emoji" => Some(Msg::ToggleEmoji),
             "statusmenu" => Some(Msg::ToggleStatusMenu),
             "status" => Some(Msg::SetStatus(match value.as_str() { "away" => "away", "busy" => "busy", "offline" => "offline", _ => "online" })),

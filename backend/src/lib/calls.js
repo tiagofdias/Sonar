@@ -1,5 +1,6 @@
 // Transient signaling state only. No audio or call history is stored.
 import { directCallUsers, voiceRoomUsers } from "./voiceActivity.js";
+import { areFriends } from "./friends.js";
 export function validScreenSignal(signal) {
   if (signal.type === "screen-stop") return true;
   if (signal.type === "screen-ice")
@@ -30,7 +31,7 @@ export function installCalls(io) {
     const timer = setInterval(() => {
       count = 0;
     }, 10000);
-    socket.on("call:signal", ({ to, signal } = {}, ack = () => {}) => {
+    socket.on("call:signal", async ({ to, signal } = {}, ack = () => {}) => {
       const reply = (data) => {
         if (typeof ack === "function") ack(data);
       };
@@ -51,6 +52,8 @@ export function installCalls(io) {
           to === socket.userId
         )
           return reply({ error: "Invalid call offer" });
+        const friends = await areFriends(socket.userId, to).catch(() => false);
+        if (!friends) return reply({ error: "You can only call your friends" });
         // Someone in an answered call or a voice room can be offered one call to swap to.
         const canWait = (Boolean(calls.get(active.get(to))?.calleeSocket) || (voiceRoomUsers.has(to) && !active.has(to))) && !waiting.has(to);
         if (

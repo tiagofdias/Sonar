@@ -29,6 +29,11 @@ pub struct Person {
     #[serde(rename = "encryptionKey", default)]
     pub encryption_key: Option<String>,
 }
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct FriendRequests {
+    pub incoming: Vec<Person>,
+    pub outgoing: Vec<Person>,
+}
 #[derive(Clone, Debug, Deserialize)]
 pub struct Community {
     #[serde(rename = "_id")]

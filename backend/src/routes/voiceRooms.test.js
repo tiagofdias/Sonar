@@ -10,6 +10,7 @@ import { app, server, io } from "../lib/socket.js";
 import communityRoutes from "./community.route.js";
 import Community from "../models/community.model.js";
 import User from "../models/user.model.js";
+import { befriend } from "../lib/friends.js";
 test("voice-room membership, capacity, session routing, and revocation", async (t) => {
   const database = await MongoMemoryReplSet.create({ replSet: { count: 1, ip: "127.0.0.1" } }),
     sockets = [];
@@ -23,6 +24,8 @@ test("voice-room membership, capacity, session routing, and revocation", async (
       })),
     );
     const [alice, bob, outsider] = users;
+    for (const [index, one] of users.entries())
+      for (const other of users.slice(index + 1)) await befriend(one._id, other._id);
     const community = await Community.create({
       name: "Voice crew",
       ownerId: alice._id,

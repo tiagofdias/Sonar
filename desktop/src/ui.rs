@@ -512,7 +512,7 @@ fn sidebar(app: &App) -> E<'_> {
                 list = list.push(person_row(&person.name, app.status_text(&person.id, "Around now"), index, app.avatar_dot(&person.id), app.peer.as_deref() == Some(&person.id), trailing, Some(Msg::OpenPeer(Some(person.id.clone())))));
             }
             if app.people_loaded && app.people.is_empty() {
-                list = list.push(container(body("Your space starts with a hello. Invite someone to create a Sonar account, then find them here.", 15.0, rgb(0x7f8a94), 1.8)).padding(12));
+                list = list.push(container(body("Your space starts with a hello. Go to People and add someone by their username.", 15.0, rgb(0x7f8a94), 1.8)).padding(12));
             }
             let search = container(row![
                 t::icon(Icon::Search, 15.0, rgb(0x74808b)),
@@ -522,7 +522,7 @@ fn sidebar(app: &App) -> E<'_> {
             let content = column![
                 container(text(t::tracked("YOUR SPACE")).size(12).font(t::bold()).color(rgb(0x74808b))).padding(Padding { left: 11.0, bottom: 13.0, ..Padding::ZERO }),
                 nav_row(Some(Icon::MessageCircle), "Direct messages", Some(badge.into()), true, Some(Msg::OpenPanel(None))),
-                nav_row(Some(Icon::Users), "People", Some(t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))), false, Some(Msg::OpenPanel(Some(Panel::People)))),
+                nav_row(Some(Icon::Users), "People", Some(if app.friend_requests.incoming.is_empty() { t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7)).into() } else { E::from(container(text(app.friend_requests.incoming.len().to_string()).size(13).color(rgb(0x70eeff))).padding([1, 6]).style(t::panel(rgb(0x74808b), rgb(0x74808b), 4.0))) }), false, Some(Msg::OpenPanel(Some(Panel::People)))),
                 section("CONVERSATIONS", Some(icon_btn(Icon::Search, 15.0, Some(Msg::OpenPanel(Some(Panel::People))), false))),
                 container(search).padding(Padding { left: 5.0, right: 5.0, bottom: 13.0, ..Padding::ZERO }),
                 list,
@@ -1025,15 +1025,29 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
     let content: E = match panel {
         Panel::People => {
             let mut people = Column::new().spacing(6).padding(Padding { top: 20.0, ..Padding::ZERO });
-            let found: Vec<_> = app.people.iter().filter(|p| matches_person(p, &app.people_query)).collect();
-            if !app.people.is_empty() && found.is_empty() { people = people.push(body("No one matches that username.", 15.0, rgb(0x929ca3), 1.8)); }
-            for (index, person) in found.into_iter().enumerate() {
+            let section = |label: &'static str| -> E<'_> { container(t::eyebrow(label, 10.0, t::EYEBROW)).padding(Padding { top: 12.0, bottom: 2.0, ..Padding::ZERO }).into() };
+            let small = |label: &'static str, primary: bool, on: Msg| -> E<'_> { button(text(label).size(13).font(t::semibold()).color(if primary { rgb(0x1e2329) } else { rgb(0xd0d7dc) })).padding([6, 11]).style(if primary { t::primary() } else { t::secondary() }).on_press(on).into() };
+            let request = |person: &crate::api::Person, index: usize, actions: Vec<E<'static>>| -> E<'static> {
+                let mut line = row![avatar(&person.name, index, None, 35.0), column![text(person.name.clone()).size(15).font(t::semibold()).color(t::TEXT), text(format!("@{}", person.username)).size(13).color(rgb(0x78848e))].spacing(3).width(FILL)].spacing(11).align_y(Vertical::Center);
+                for action in actions { line = line.push(action); }
+                container(line).padding([8, 10]).into()
+            };
+            if !app.friend_requests.incoming.is_empty() { people = people.push(section("FRIEND REQUESTS")); }
+            for (index, person) in app.friend_requests.incoming.iter().enumerate() {
+                people = people.push(request(person, index, vec![small("Accept", true, Msg::AnswerFriendRequest(person.id.clone(), true)), small("Decline", false, Msg::AnswerFriendRequest(person.id.clone(), false))]));
+            }
+            if !app.friend_requests.outgoing.is_empty() { people = people.push(section("WAITING FOR A REPLY")); }
+            for (index, person) in app.friend_requests.outgoing.iter().enumerate() {
+                people = people.push(request(person, index, vec![small("Cancel", false, Msg::AnswerFriendRequest(person.id.clone(), false))]));
+            }
+            if !app.people.is_empty() { people = people.push(section("YOUR FRIENDS")); }
+            for (index, person) in app.people.iter().enumerate() {
                 people = people.push(person_row(&person.name, &format!("@{}", person.username), index, app.avatar_dot(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x98a1a7))], Some(Msg::OpenPeer(Some(person.id.clone())))));
             }
-            if app.people.is_empty() { people = people.push(body("No other members yet. Share this app's address with a friend.", 15.0, rgb(0x929ca3), 1.8)); }
+            if app.people.is_empty() && app.friend_requests.incoming.is_empty() && app.friend_requests.outgoing.is_empty() { people = people.push(body("No friends yet. Send a request to get started.", 15.0, rgb(0x929ca3), 1.8)); }
             column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Your people, a little closer."),
-                body("Choose someone to start an encrypted conversation. New members appear here after signing up.", 15.0, rgb(0x9099a0), 1.8),
-                container(container(row![t::icon(Icon::Search, 15.0, rgb(0x74808b)), text_input("Find by username or name", &app.people_query).on_input(Msg::PeopleQuery).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0))).padding(Padding { top: 20.0, ..Padding::ZERO }),
+                body("Add someone by their username. Once they accept, you can message and call each other.", 15.0, rgb(0x9099a0), 1.8),
+                container(row![container(row![t::icon(Icon::Search, 15.0, rgb(0x74808b)), text_input("Their username", &app.people_query).on_input(Msg::PeopleQuery).on_submit(Msg::SendFriendRequest).size(14).padding(0).style(t::bare_input())].spacing(8).align_y(Vertical::Center)).padding([9, 10]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x222930), 6.0)), button(text("Send request").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 12]).style(t::primary()).on_press_maybe((!app.people_query.trim().is_empty()).then_some(Msg::SendFriendRequest))].spacing(10).align_y(Vertical::Center)).padding(Padding { top: 20.0, ..Padding::ZERO }),
                 scroll_area(people).height(Length::Shrink)].into()
         }
         Panel::Privacy => {

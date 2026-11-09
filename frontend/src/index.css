@@ -965,6 +965,23 @@ p {
 .modal-people {
   margin-top: 20px;
 }
+.friend-add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.friend-add .modal-search {
+  flex: 1;
+  margin: 0;
+}
+.modal-people .eyebrow {
+  display: block;
+  margin: 18px 0 8px;
+}
+.friend-request > span:nth-of-type(2) {
+  flex: 1;
+  min-width: 0;
+}
 .modal-people .person {
   margin-top: 6px;
 }

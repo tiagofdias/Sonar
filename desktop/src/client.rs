@@ -130,6 +130,15 @@ impl Session {
         Ok(bytes.to_vec())
     }
     pub async fn delete_file(&self, id: &str) -> Result<(), String> { self.send(Method::DELETE, &format!("api/attachments/{}", check_id(id)?), None, "Could not delete the file").await.map(|_| ()) }
+    pub async fn friend_requests(&self) -> Result<crate::api::FriendRequests, String> { self.call(Method::GET, "api/friends", None, "Could not load friend requests").await }
+    pub async fn send_friend_request(&self, username: &str) -> Result<(), String> {
+        self.send(Method::POST, "api/friends/request", Some(json!({ "username": username })), "Could not send the friend request").await.map(|_| ())
+    }
+    pub async fn answer_friend_request(&self, id: &str, accept: bool) -> Result<(), String> {
+        let id = check_id(id)?;
+        if accept { self.send(Method::POST, &format!("api/friends/{id}/accept"), None, "Could not accept the request").await.map(|_| ()) }
+        else { self.send(Method::DELETE, &format!("api/friends/{id}"), None, "Could not remove the request").await.map(|_| ()) }
+    }
     pub async fn set_presence(&self, presence: &str) -> Result<(), String> {
         self.send(Method::PUT, "api/auth/presence", Some(json!({ "presence": presence })), "Could not change your status").await.map(|_| ())
     }

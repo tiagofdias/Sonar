@@ -10,6 +10,7 @@ import { io as client } from "socket.io-client";
 import { app, server, io } from "../lib/socket.js";
 import voiceRoutes, { voiceConfiguration } from "./voice.route.js";
 import User from "../models/user.model.js";
+import { befriend } from "../lib/friends.js";
 test("TURN config uses expiring anonymous credentials and fails closed", () => {
   const secret = "test-only-shared-secret",
     now = 1700000000000;
@@ -55,6 +56,9 @@ test("authenticated direct-call signaling scopes call IDs, busy state, and clean
         password: "unused-test-hash",
       })),
     );
+    await befriend(alice._id, bob._id);
+    await befriend(alice._id, outsider._id);
+    await befriend(bob._id, outsider._id);
     app.use(cookieParser());
     app.use("/api/voice", voiceRoutes);
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

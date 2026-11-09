@@ -15,6 +15,8 @@ import authRoutes from "./routes/auth.route.js";
 import messageRoutes from "./routes/message.route.js";
 import communityRoutes from "./routes/community.route.js";
 import voiceRoutes from "./routes/voice.route.js";
+import friendsRoutes from "./routes/friends.route.js";
+import { seedFriendsFromMessages } from "./lib/friends.js";
 import attachmentRoutes from "./routes/attachment.route.js";
 import Attachment from "./models/attachment.model.js";
 import { createMatrixDeviceRouter } from "./routes/matrixDevice.route.js";
@@ -81,6 +83,7 @@ app.get("/health", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/friends", friendsRoutes);
 app.use("/api/communities", communityRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/attachments", attachmentRoutes);
@@ -158,6 +161,7 @@ try {
   await ensureMessageRetentionIndexes({ matrix: process.env.SONAR_MATRIX_EXPERIMENTAL === "true" });
   await Attachment.collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   await ensureUsernames();
+  await seedFriendsFromMessages();
   server.listen(PORT, () => console.log(`Sonar listening on port ${PORT}`));
 } catch (error) {
   console.error(error.message);

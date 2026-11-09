@@ -36,6 +36,7 @@ import ReactionBar from "../components/ReactionBar";
 import MessageText from "../components/MessageText";
 import CallNotice from "../components/CallNotice";
 import { initials } from "../lib/initials";
+import toast from "react-hot-toast";
 import ComposerTools, { FileCard } from "../components/ComposerTools";
 import { fileLabel } from "../lib/messageContent";
 import { reactionSummary } from "../lib/reactions";
@@ -71,6 +72,7 @@ export default function HomePage() {
     selectedUser: peer,
     setSelectedUser,
     getUsers,
+    friendRequests,
     getMessages,
     sendMessage,
     pinMessage,
@@ -118,15 +120,28 @@ export default function HomePage() {
     return () => { clearInterval(timer); document.removeEventListener("visibilitychange", prune); };
   }, []);
   useEffect(() => {
-    getUsers();
+    const { getFriendRequests } = useChatStore.getState();
+    // Someone with nobody yet is taken straight to where they can add people.
+    Promise.all([getUsers(), getFriendRequests()]).then(() => {
+      if (!useChatStore.getState().users.length) setPanel("people");
+    });
     useCommunityStore.getState().load();
     const timer = setInterval(() => {
       getUsers();
+      getFriendRequests();
       useCommunityStore.getState().load();
       setNow(Date.now());
     }, 30000);
     return () => clearInterval(timer);
   }, [getUsers]);
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => { getUsers(); useChatStore.getState().getFriendRequests(); };
+    const asked = ({ fullName }) => toast(`${fullName} sent you a friend request`);
+    socket.on("friendsChanged", refresh);
+    socket.on("friendRequest", asked);
+    return () => { socket.off("friendsChanged", refresh); socket.off("friendRequest", asked); };
+  }, [socket, getUsers]);
   useEffect(() => {
     const update = () => {
       useUnreadStore.getState().setActivePeer(!communityMode && !onlyPins && !document.hidden ? peer?._id || null : null);
@@ -294,7 +309,7 @@ export default function HomePage() {
             <span>{users.length}</span>
           </button>
           <button className="nav-row" onClick={() => setPanel("people")}>
-            <Users size={18} /> People <ArrowUpRight size={15} />
+            <Users size={18} /> People {friendRequests.incoming.length > 0 ? <span>{friendRequests.incoming.length}</span> : <ArrowUpRight size={15} />}
           </button>
           <div className="sidebar-section">
             <span>CONVERSATIONS</span>
@@ -345,8 +360,8 @@ export default function HomePage() {
               ))}
             {!isUsersLoading && !users.length && (
               <p className="empty-people">
-                Your space starts with a hello. Invite someone to create a Sonar
-                account, then find them here.
+                Your space starts with a hello. Go to People and add someone by
+                their username.
               </p>
             )}
           </div>
@@ -666,20 +681,53 @@ export default function HomePage() {
                 <Users className="accent" size={28} />
                 <h2>Your people, a little closer.</h2>
                 <p>
-                  Choose someone to start an encrypted conversation. New members
-                  appear here after signing up.
+                  Add someone by their username. Once they accept, you can
+                  message and call each other.
                 </p>
-                <label className="search-box modal-search">
-                  <Search size={15} />
-                  <input
-                    aria-label="Find people by username"
-                    placeholder="Find by username or name"
-                    value={peopleQuery}
-                    onChange={(e) => setPeopleQuery(e.target.value)}
-                  />
-                </label>
+                <form
+                  className="friend-add"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (peopleQuery.trim() && await useChatStore.getState().sendFriendRequest(peopleQuery)) setPeopleQuery("");
+                  }}
+                >
+                  <label className="search-box modal-search">
+                    <Search size={15} />
+                    <input
+                      aria-label="Friend's username"
+                      placeholder="Their username"
+                      value={peopleQuery}
+                      onChange={(e) => setPeopleQuery(e.target.value)}
+                    />
+                  </label>
+                  <button className="primary compact" disabled={!peopleQuery.trim()}>Send request</button>
+                </form>
                 <div className="modal-people">
-                  {users.filter((user) => matches(user, peopleQuery)).map((user) => (
+                  {friendRequests.incoming.length > 0 && <span className="eyebrow">FRIEND REQUESTS</span>}
+                  {friendRequests.incoming.map((user) => (
+                    <div className="person friend-request" key={user._id}>
+                      <Avatar user={user} />
+                      <span>
+                        <strong>{user.fullName}</strong>
+                        <small>@{user.username}</small>
+                      </span>
+                      <button className="primary compact" onClick={() => useChatStore.getState().answerFriendRequest(user._id, true)}>Accept</button>
+                      <button className="secondary compact" onClick={() => useChatStore.getState().answerFriendRequest(user._id, false)}>Decline</button>
+                    </div>
+                  ))}
+                  {friendRequests.outgoing.length > 0 && <span className="eyebrow">WAITING FOR A REPLY</span>}
+                  {friendRequests.outgoing.map((user) => (
+                    <div className="person friend-request" key={user._id}>
+                      <Avatar user={user} />
+                      <span>
+                        <strong>{user.fullName}</strong>
+                        <small>@{user.username}</small>
+                      </span>
+                      <button className="secondary compact" onClick={() => useChatStore.getState().answerFriendRequest(user._id, false)}>Cancel</button>
+                    </div>
+                  ))}
+                  {users.length > 0 && <span className="eyebrow">YOUR FRIENDS</span>}
+                  {users.map((user) => (
                     <button
                       className="person"
                       key={user._id}
@@ -696,12 +744,8 @@ export default function HomePage() {
                       <ArrowUpRight size={17} />
                     </button>
                   ))}
-                  {users.length > 0 && !users.some((user) => matches(user, peopleQuery)) && <p>No one matches that username.</p>}
-                  {!users.length && (
-                    <p>
-                      No other members yet. Share this app&apos;s address with a
-                      friend.
-                    </p>
+                  {!users.length && !friendRequests.incoming.length && !friendRequests.outgoing.length && (
+                    <p>No friends yet. Send a request to get started.</p>
                   )}
                 </div>
               </>

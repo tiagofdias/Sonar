@@ -100,6 +100,30 @@ export const useChatStore = create((set, get) => ({
       if (token === usersGeneration) set({ isUsersLoading: false });
     }
   },
+  friendRequests: { incoming: [], outgoing: [] },
+  getFriendRequests: async () => {
+    try {
+      set({ friendRequests: (await api.get("/friends")).data });
+    } catch { /* The next refresh tries again. */ }
+  },
+  sendFriendRequest: async (username) => {
+    try {
+      const { data } = await api.post("/friends/request", { username });
+      toast.success(data.status === "accepted" ? "You're friends now" : "Friend request sent");
+      return true;
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Could not send the friend request");
+      return false;
+    }
+  },
+  answerFriendRequest: async (id, accept) => {
+    try {
+      await (accept ? api.post(`/friends/${id}/accept`) : api.delete(`/friends/${id}`));
+    } catch (e) {
+      toast.error(e.response?.data?.message || "That request is no longer available");
+    }
+    await Promise.all([get().getUsers(), get().getFriendRequests()]);
+  },
   setSelectedUser: (user) => {
     deleted.clear();
     generation++;

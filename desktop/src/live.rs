@@ -222,6 +222,8 @@ pub fn events(auth: &Auth) -> impl Stream<Item = (u64, Event)> + 'static {
                 let mut sender = ended_sender.clone();
                 async move { if let Some(id) = ended(payload) { let _ = sender.send(Event::CallEnded(id)).await; } }.boxed()
             })
+            .on("friendsChanged", data_handler(sender.clone(), "friendsChanged"))
+            .on("friendRequest", data_handler(sender.clone(), "friendRequest"))
             .on("newMessage", data_handler(sender.clone(), "newMessage"))
             .on("messageUpdated", data_handler(sender.clone(), "messageUpdated"))
             .on("messageDeleted", data_handler(sender.clone(), "messageDeleted"))

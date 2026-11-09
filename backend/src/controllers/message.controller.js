@@ -3,6 +3,7 @@ import User from "../models/user.model.js";
 import Message, { WEEK } from "../models/message.model.js";
 import { io } from "../lib/socket.js";
 import { historyQuery, historyPage, pinUpdate } from "../lib/history.js";
+import { areFriends, friendIds } from "../lib/friends.js";
 const live = () => ({
   $or: [{ pinned: true }, { expiresAt: { $gt: new Date() } }],
 });
@@ -30,7 +31,7 @@ export const getUnreadCandidates = async (req, res) => {
 export const getUsersForSidebar = async (req, res) => {
   try {
     res.json(
-      await User.find({ _id: { $ne: req.user._id } }).select(
+      await User.find({ _id: { $in: await friendIds(req.user._id) } }).select(
         "fullName username profilePic encryptionKey",
       ),
     );
@@ -50,6 +51,8 @@ export const getMessages = async (req, res) => {
       .json({ message: "Invalid history cursor or options" });
   }
   try {
+    if (!(await areFriends(req.user._id, req.params.id)))
+      return res.status(403).json({ message: "You can only open conversations with friends" });
     const rows = await Message.find({
       $and: [
         live(),
@@ -88,6 +91,8 @@ export const sendMessage = async (req, res) => {
       .status(400)
       .json({ message: "Only encrypted message envelopes are accepted" });
   try {
+    if (!(await areFriends(req.user._id, req.params.id)))
+      return res.status(403).json({ message: "You can only message friends" });
     const recipient = await User.findById(req.params.id);
     if (!req.user.encryptionKey || !recipient?.encryptionKey)
       return res

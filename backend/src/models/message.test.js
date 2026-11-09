@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import Message, { WEEK } from "./message.model.js";
+import Friendship from "./friendship.model.js";
 import {
   sendMessage,
   getMessages,
@@ -51,7 +52,8 @@ test("plaintext send requests are rejected before touching storage", async () =>
   );
   assert.equal(res.code, 400);
 });
-test("history excludes expired records and is scoped to both participants", async () => {
+test("history excludes expired records and is scoped to both participants", async (t) => {
+  t.mock.method(Friendship, "exists", async () => true);
   const original = Message.find;
   let filter;
   Message.find = (value) => {
