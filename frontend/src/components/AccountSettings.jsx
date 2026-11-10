@@ -181,7 +181,7 @@ export default function AccountSettings() {
         <aside className="settings-navigation">
           <span className="eyebrow">YOUR SONAR</span>
           <h2 id="account-settings-title">Make it yours.</h2>
-          <div className="settings-avatar">
+          <div className="settings-avatar animal-tile">
             <AnimalFace animal={animalOf(authUser)} />
           </div>
           <strong className="settings-user-name">{authUser.fullName}</strong>

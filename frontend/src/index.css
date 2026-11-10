@@ -347,11 +347,12 @@ p {
 .person > span:not(.avatar-tile) {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 .person strong {
   font-size: 15px;
+  line-height: 1.2;
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -359,6 +360,7 @@ p {
 }
 .person small {
   font-size: 13px;
+  line-height: 1.2;
   color: #78848e;
 }
 .person-lock {
@@ -2785,14 +2787,16 @@ p {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .status-text strong {
   font-size: 14px;
+  line-height: 1.2;
   color: #d0d7dc;
 }
 .status-text small {
   font-size: 12px;
+  line-height: 1.2;
   color: #7d8892;
 }
 .call-waiting {
@@ -2986,3 +2990,6 @@ p {
 .search-result { padding: 8px 10px; border-radius: 8px; background: #21272e; margin-top: 6px; text-align: left; }
 .search-result p { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .keyword-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* People's animals sit on the app's blue; servers keep their grey letters. */
+.avatar-tile.animal-tile, .person .avatar-tile.animal-tile, .settings-avatar.animal-tile { background: #12405f; color: #d7f3ff; }

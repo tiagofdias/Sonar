@@ -55,6 +55,8 @@ fn avatar_status<'a>(face: Face, index: usize, online: Option<Color>, dot: Color
 }
 #[allow(clippy::too_many_arguments)]
 fn tile<'a>(who: Face, background: Color, color: Color, line: Option<Color>, size: f32, r: f32, font: f32, online: Option<Color>, dot: Color) -> E<'a> {
+    // People's animals sit on the app's blue; servers keep their grey letters.
+    let (background, color) = if matches!(who, Face::Animal(_)) { (rgb(0x12405f), rgb(0xd7f3ff)) } else { (background, color) };
     let inner: E<'a> = match who { Face::Animal(icon) => t::icon(icon, size * 0.74, color).into(), Face::Letters(name) => text(t::initials(&name)).size(font).color(color).font(t::semibold()).into() };
     let face: E<'a> = container(inner)
         .width(size).height(size).center_x(size).center_y(size)
@@ -469,7 +471,7 @@ fn danger_row<'a>(icon: Option<Icon>, label: &'a str, on: Option<Msg>) -> E<'a> 
 fn person_row<'a>(who: Face, name: &str, sub: &str, index: usize, dot: Option<Color>, chosen: bool, trailing: Vec<E<'a>>, on: Option<Msg>) -> E<'a> {
     let mut content = Row::new().spacing(11).align_y(Vertical::Center)
         .push(avatar_status(who, index, dot.map(|_| t::SIDEBAR), dot.unwrap_or(t::OFFLINE), 35.0))
-        .push(column![text(name.to_owned()).size(15).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(sub.to_owned()).size(13).color(rgb(0x78848e))].spacing(4));
+        .push(column![text(name.to_owned()).size(15).line_height(LineHeight::Relative(1.2)).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(sub.to_owned()).size(13).line_height(LineHeight::Relative(1.2)).color(rgb(0x78848e))].spacing(2));
     // Like the web row: an unread dot follows the name; the lock sits at the end.
     let mut trailing = trailing;
     let last = trailing.pop();
@@ -501,7 +503,7 @@ fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>,
     let footer = footer.push(container(row![
         button(row![
             avatar_status(own_face(app), 0, Some(t::FOOTER_BG), t::presence_color(status), 35.0),
-            column![text(name.to_owned()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(status_label).size(12).color(rgb(0x7d8892))].spacing(4).width(FILL),
+            column![text(name.to_owned()).size(14).line_height(LineHeight::Relative(1.2)).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(status_label).size(12).line_height(LineHeight::Relative(1.2)).color(rgb(0x7d8892))].spacing(2).width(FILL),
         ].spacing(10).align_y(Vertical::Center)).width(FILL).padding(0).style(t::plain(t::TEXT, t::TEXT)).on_press(Msg::ToggleStatusMenu),
         icon_btn(Icon::LogOut, 17.0, Some(Msg::SignOut), false),
     ].spacing(10).align_y(Vertical::Center)).padding([15, 18]).style(t::fill(t::FOOTER_BG)));
@@ -1118,7 +1120,7 @@ fn members_panel(app: &App) -> E<'_> {
         } else { t::icon(Icon::LockKeyhole, 11.0, rgb(0xd0d7dc)) };
         list = list.push(container(row![
             avatar_status(person_face(member), index, app.online.contains(&member.id).then_some(rgb(0x171b1f)), app.status_color(&member.id), 30.0),
-            column![text(member.name.clone()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).color(rgb(0x78848e))].spacing(4).width(FILL),
+            column![text(member.name.clone()).size(14).line_height(LineHeight::Relative(1.2)).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).line_height(LineHeight::Relative(1.2)).color(rgb(0x78848e))].spacing(2).width(FILL),
             if member.id == me { E::from(space()) } else { icon_btn(Icon::Ban, 14.0, Some(Msg::AskConfirm(Some(Confirm { action: "block".into(), member: Some(member.clone()), channel: None }))), false) },
             trailing,
         ].spacing(8).align_y(Vertical::Center)).padding([10, 4]));
