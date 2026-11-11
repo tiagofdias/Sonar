@@ -1,6 +1,9 @@
 import { useMicActivity } from "../lib/useMicActivity";
 import { roomStatus } from "../lib/roomStatus";
 import ScreenStage, { ScreenShareButton } from "./ScreenStage";
+import AppsMenu from "./AppsMenu";
+import WatchStage from "./WatchStage";
+import { useAuthStore } from "../store/useAuthStore";
 import {
   Headphones,
   HeadphoneOff,
@@ -10,7 +13,8 @@ import {
   MicOff,
   Volume2,
 } from "lucide-react";
-export default function VoiceRoomBanner({ voiceRoom }) {
+export default function VoiceRoomBanner({ voiceRoom, watch }) {
+  const me = useAuthStore((store) => store.authUser?._id);
   const room = voiceRoom?.room;
   const speaking = useMicActivity(voiceRoom?.micStream, Boolean(room && !voiceRoom.muted && !voiceRoom.deafened));
   if (!room) return null;
@@ -26,6 +30,7 @@ export default function VoiceRoomBanner({ voiceRoom }) {
   return (
     <>
     <ScreenStage screen={voiceRoom.screen} nameOf={nameOf} deafened={voiceRoom.deafened} />
+    {watch?.joined && room.status === "joined" && <WatchStage watch={watch} me={me} />}
     <section
       className="call-banner room-call-banner"
       aria-label="Community voice room"
@@ -71,6 +76,7 @@ export default function VoiceRoomBanner({ voiceRoom }) {
         )}
       </button>
       <ScreenShareButton screen={voiceRoom.screen} />
+      {room.status === "joined" && <AppsMenu watch={watch} />}
       <button
         className="end-call"
         aria-label="Leave voice room"

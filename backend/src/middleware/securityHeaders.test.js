@@ -12,6 +12,7 @@ test("the content policy forbids foreign scripts, framing and plugins", () => {
   assert.doesNotMatch(policy.match(/script-src[^;]*/)[0], /'unsafe-inline'| 'unsafe-eval'|\*|https?:/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.match(policy, /object-src 'none'/);
+  assert.match(policy, /frame-src https:\/\/www\.youtube-nocookie\.com(;|$)/, "only YouTube's player can be framed");
   assert.match(policy, /connect-src 'self' wss:\/\/sonar\.example ws:\/\/sonar\.example/);
   assert.match(contentSecurityPolicy("evil.example; script-src *"), /connect-src 'self'(;|$)/, "a forged Host header cannot add to the policy");
 });

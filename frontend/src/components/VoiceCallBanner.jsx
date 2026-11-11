@@ -1,5 +1,8 @@
 import { useMicActivity } from "../lib/useMicActivity";
 import ScreenStage, { ScreenShareButton } from "./ScreenStage";
+import AppsMenu from "./AppsMenu";
+import WatchStage from "./WatchStage";
+import { useAuthStore } from "../store/useAuthStore";
 import { useEffect, useState } from "react";
 import {
   AudioLines,
@@ -11,7 +14,8 @@ import {
   PhoneIncoming,
   PhoneOff,
 } from "lucide-react";
-export default function VoiceCallBanner({ voice, users = [], voiceRoom }) {
+export default function VoiceCallBanner({ voice, users = [], voiceRoom, watch }) {
+  const me = useAuthStore((store) => store.authUser?._id);
   const speaking = useMicActivity(voice?.micStream, Boolean(voice?.call && voice.call.status !== "incoming" && !voice.muted && !voice.deafened));
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -29,6 +33,7 @@ export default function VoiceCallBanner({ voice, users = [], voiceRoom }) {
   return (
     <>
     <ScreenStage screen={voice.screen} nameOf={() => peerName} deafened={voice.deafened} />
+    {watch?.joined && <WatchStage watch={watch} me={me} />}
     {voice.waiting && (
       <section className="call-banner call-waiting" aria-label="Second incoming call">
         <PhoneIncoming size={23} />
@@ -103,6 +108,7 @@ export default function VoiceCallBanner({ voice, users = [], voiceRoom }) {
             )}
           </button>
           {(call.status === "connected" || call.status === "reconnecting") && <ScreenShareButton screen={voice.screen} />}
+          {(call.status === "connected" || call.status === "reconnecting") && <AppsMenu watch={watch} />}
         </>
       )}
       <button

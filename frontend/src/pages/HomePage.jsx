@@ -33,6 +33,7 @@ import { useCommunityStore } from "../store/useCommunityStore";
 import { useUnreadStore } from "../store/useUnreadStore";
 import { useVoiceCall } from "../lib/useVoiceCall";
 import { useVoiceRoom } from "../lib/useVoiceRoom";
+import { useWatch } from "../lib/useWatch";
 import VoiceRoomBanner from "../components/VoiceRoomBanner";
 import { decrypt, fingerprint, contactKeyStatus, acceptVerifiedContactKey } from "../lib/crypto";
 import VoiceCallBanner from "../components/VoiceCallBanner";
@@ -125,6 +126,8 @@ export default function HomePage() {
   const history = useHistoryScroll(messages, `dm:${peer?._id}:${onlyPins}`);
   const voiceRoom = useVoiceRoom(socket);
   const voice = useVoiceCall(socket, Boolean(voiceRoom.room));
+  // Watch Together runs inside an answered call or a joined voice room.
+  const watch = useWatch(socket, voiceRoom.room?.status === "joined" || ["connected", "reconnecting"].includes(voice.call?.status));
   useEffect(() => {
     const prune = () => {
       const now = Date.now();
@@ -286,6 +289,7 @@ export default function HomePage() {
         onDirectMessages={() => setCommunityMode(false)}
         voice={voice}
         voiceRoom={voiceRoom}
+        watch={watch}
         hasUnreadDirect={hasUnread}
       />
     );
@@ -546,8 +550,8 @@ export default function HomePage() {
             How it works <ArrowUpRight size={12} />
           </button>
         </div>
-        <VoiceCallBanner voice={voice} users={users} voiceRoom={voiceRoom} />
-        <VoiceRoomBanner voiceRoom={voiceRoom} />
+        <VoiceCallBanner voice={voice} users={users} voiceRoom={voiceRoom} watch={watch} />
+        <VoiceRoomBanner voiceRoom={voiceRoom} watch={watch} />
         <div
           className="message-scroll"
           ref={history.scroll}

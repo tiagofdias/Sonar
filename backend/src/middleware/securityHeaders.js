@@ -10,7 +10,9 @@ export function contentSecurityPolicy(host) {
     "script-src 'self' 'wasm-unsafe-eval'",
     // The toast library and React add small inline styles; scripts stay strict.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    // Watch Together: the official YouTube player and its thumbnails, nothing else from YouTube.
+    "frame-src https://www.youtube-nocookie.com",
+    "img-src 'self' data: blob: https://i.ytimg.com",
     "media-src 'self' blob: data:",
     "font-src 'self' data:",
     `connect-src 'self'${socket}`,

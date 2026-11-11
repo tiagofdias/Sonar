@@ -7,7 +7,8 @@ import User from "../models/user.model.js";
 import { validSession, sessionHash } from "./sessions.js";
 import { installCalls } from "./calls.js";
 import { installVoiceRooms } from "./voiceRooms.js";
-import { voiceRoomUsers } from "./voiceActivity.js";
+import { voiceRoomUsers, activity } from "./voiceActivity.js";
+import { installWatch, watchMembersChanged } from "./watch.js";
 import { watchSocketSession } from "./socketSession.js";
 import { areFriends, friendIds } from "./friends.js";
 import { connection } from "./push.js";
@@ -41,6 +42,20 @@ io.use(async (socket, next) => {
         .split(";")
         .map((c) => c.trim().split("=")),
     );
+    // A browser tab opened from the desktop app to watch together: it can only use
+    // watch events for the one call it was opened for (see routes/watch.route.js).
+    if (socket.handshake.auth?.watch === true) {
+      const watch = jwt.verify(cookies.sonar_watch, process.env.JWT_SECRET, { algorithms: ["HS256"] });
+      if (watch.purpose !== "watch" || typeof watch.scope !== "string" || !Number.isFinite(watch.exp)) throw new Error();
+      const owner = await User.findById(watch.userId).select("sessionVersion");
+      if (!owner || (watch.sessionVersion || 0) !== (owner.sessionVersion || 0)) throw new Error();
+      socket.userId = String(watch.userId);
+      socket.watchOnly = true;
+      socket.watchScope = watch.scope;
+      socket.sessionVersion = watch.sessionVersion || 0;
+      socket.tokenExpiresAt = watch.exp;
+      return next();
+    }
     const payload = jwt.verify(cookies.jwt, process.env.JWT_SECRET, { algorithms: ["HS256"] });
     if (!Number.isFinite(payload.exp)) throw new Error();
     const user = await User.findById(payload.userId).select("sessionVersion presence");
@@ -85,7 +100,7 @@ export async function emitToAudience(userId, event, data) {
   } catch { /* A courtesy update; the next refresh carries it. */ }
 }
 async function sendPresence() {
-  const connected = [...new Set([...io.sockets.sockets.values()].map((s) => s.userId))];
+  const connected = [...new Set([...io.sockets.sockets.values()].filter((s) => !s.watchOnly).map((s) => s.userId))];
   const visible = connected.filter((id) => chosenPresence.get(id) !== "offline");
   // A status someone picked always shows. Otherwise being in a voice room reads as available.
   const status = (id) => (["away", "busy"].includes(chosenPresence.get(id)) ? chosenPresence.get(id) : voiceRoomUsers.has(id) ? "room" : null);
@@ -116,8 +131,23 @@ export function setPresence(userId, presence) {
   io.to(String(userId)).emit("ownPresence", { presence });
 }
 const connectCalls = installCalls(io);
-const connectVoiceRooms = installVoiceRooms(io, broadcast);
+const connectVoiceRooms = installVoiceRooms(io, () => { broadcast(); watchMembersChanged(); });
+const connectWatch = installWatch(io);
+activity.changed = () => watchMembersChanged();
 io.on("connection", (socket) => {
+  if (socket.watchOnly) {
+    // No messages, presence or calls reach a watch-only tab, and it can only send watch events.
+    socket.use(async ([event], next) => {
+      if (typeof event !== "string" || !event.startsWith("watch:") || Date.now() >= socket.tokenExpiresAt * 1000) return next(new Error("Not allowed"));
+      try {
+        const owner = await User.findById(socket.userId).select("sessionVersion");
+        if (!owner || (owner.sessionVersion || 0) !== socket.sessionVersion) { socket.disconnect(true); return; }
+      } catch { return next(new Error("Not allowed")); }
+      next();
+    });
+    connectWatch(socket);
+    return;
+  }
   socket.join(socket.userId);
   if (socket.sessionHash) socket.join(`session:${socket.sessionHash}`);
   const verify = async () => {
@@ -142,6 +172,7 @@ io.on("connection", (socket) => {
   broadcast();
   connectCalls(socket);
   connectVoiceRooms(socket);
+  connectWatch(socket);
   // Who is typing is passed along and never stored.
   let lastTyping = 0;
   socket.on("typing", async (data) => {

@@ -155,6 +155,20 @@ fn boot<'a>() -> E<'a> {
     center(column![t::sonar_mark(1.0), text("Opening your private space...").size(16).color(rgb(0xd0d7dc))].spacing(25).align_x(Horizontal::Center)).into()
 }
 
+/// Watch Together opens in the browser; when friends are already watching it says so.
+fn watch_button<'a>(app: &'a App) -> E<'a> {
+    let icon = call_btn(Icon::MonitorPlay, 18.0, Some(Msg::OpenWatch), app.watch_note.is_some());
+    let tip = |label: String| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
+    match &app.watch_note {
+        Some((title, viewers)) => {
+            let label = format!("Join watch together{}", if *viewers > 0 { format!(" · {viewers}") } else { String::new() });
+            let join = button(lead_icon(Icon::MonitorPlay, label, rgb(0xd0d7dc), 15.0, 13.0, 6.0)).padding([7, 10]).style(t::secondary()).on_press(Msg::OpenWatch);
+            tooltip(join, tip(title.clone().map_or("Opens in your browser".into(), |title| format!("{title} · opens in your browser"))), tooltip::Position::Bottom).into()
+        }
+        None => tooltip(icon, tip("Watch together (opens in your browser)".into()), tooltip::Position::Bottom).into(),
+    }
+}
+
 fn screen_button<'a>(app: &'a App) -> E<'a> {
     let sharing = app.screen_sharing.is_some();
     call_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
@@ -849,6 +863,7 @@ fn call_banner(app: &App) -> Option<E<'_>> {
             mic_btn(room.muted, app.mic_active && !room.deafened, Msg::RoomMute),
             call_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
             screen_button(app),
+            if joining { space().width(0).into() } else { watch_button(app) },
             button(t::icon(Icon::LogOut, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::LeaveRoom),
         ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x12405f), rgb(0x3f9dff), 9.0)))
             .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into());
@@ -862,6 +877,7 @@ fn call_banner(app: &App) -> Option<E<'_>> {
             mic_btn(call.muted, app.mic_active && !call.deafened, Msg::Mute),
             call_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
             if call.status == CallStatus::Connected { screen_button(app) } else { space().width(0).into() },
+            if call.status == CallStatus::Connected { watch_button(app) } else { space().width(0).into() },
             end_call(Msg::Hangup),
         ].spacing(14).align_y(Vertical::Center).into()
     } else { return None };

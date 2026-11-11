@@ -164,6 +164,13 @@ impl Session {
     pub async fn create_group(&self, member_ids: Vec<String>, name: String) -> Result<Community, String> {
         self.call(Method::POST, "api/communities/group", Some(json!({ "memberIds": member_ids, "name": name })), "Could not create the group").await
     }
+    /// A one-time link that opens Watch Together for this call or room in a browser.
+    pub async fn watch_link(&self) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        struct Link { path: String }
+        let link: Link = self.call(Method::POST, "api/watch/link", Some(json!({})), "Join a call or voice room to watch together.").await?;
+        Ok(link.path)
+    }
     /// Ends a friendship; either person can send a new request later.
     pub async fn remove_friend(&self, id: &str) -> Result<(), String> {
         let id = check_id(id)?;

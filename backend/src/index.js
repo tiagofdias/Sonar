@@ -19,6 +19,7 @@ import friendsRoutes from "./routes/friends.route.js";
 import preferencesRoutes from "./routes/preferences.route.js";
 import { seedFriendsFromMessages } from "./lib/friends.js";
 import attachmentRoutes from "./routes/attachment.route.js";
+import watchRoutes from "./routes/watch.route.js";
 import Attachment from "./models/attachment.model.js";
 import { createMatrixDeviceRouter } from "./routes/matrixDevice.route.js";
 import { createMatrixMessagingRouter } from "./routes/matrixMessaging.route.js";
@@ -97,6 +98,7 @@ app.use("/api/preferences", preferencesRoutes);
 app.use("/api/communities", communityRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/attachments", attachmentRoutes);
+app.use("/api/watch", watchRoutes);
 // Experimental device registration is off by default and requires a stable,
 // operator-configured identity domain. Existing legacy keys are never changed.
 if (process.env.SONAR_MATRIX_EXPERIMENTAL === "true") {

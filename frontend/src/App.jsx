@@ -8,17 +8,21 @@ import AccountSettings from "./components/AccountSettings";
 import PasskeyWindow from "./pages/PasskeyWindow";
 import UnpairedDevicePage from "./pages/UnpairedDevicePage";
 import RecoveryKeyPage from "./pages/RecoveryKeyPage";
+import WatchPage from "./pages/WatchPage";
 export default function App() {
   const passkeyWindow = window.location.pathname === "/passkey";
+  // Opened by the desktop app for Watch Together; it never signs in.
+  const watchWindow = window.location.pathname === "/watch";
   const { authUser, unpairedUser, unpairedReason, newRecoveryKey, checkAuth, isCheckingAuth, settingsOpen } = useAuthStore();
   useEffect(() => {
-    if (passkeyWindow) return;
+    if (passkeyWindow || watchWindow) return;
     const invite = new URLSearchParams(window.location.search).get("invite");
     if (invite && /^[a-f0-9]{48}$/i.test(invite))
       sessionStorage.setItem("sonar-invite", invite);
     checkAuth();
-  }, [checkAuth, passkeyWindow]);
+  }, [checkAuth, passkeyWindow, watchWindow]);
   if (passkeyWindow) return <PasskeyWindow />;
+  if (watchWindow) return <WatchPage />;
   if (isCheckingAuth)
     return (
       <div className="boot">

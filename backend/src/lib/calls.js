@@ -1,5 +1,5 @@
 // Transient signaling state only. No audio or call history is stored.
-import { directCallUsers, voiceRoomUsers } from "./voiceActivity.js";
+import { directCallUsers, voiceRoomUsers, answeredCalls, activity } from "./voiceActivity.js";
 import { areFriends } from "./friends.js";
 import { pushTo } from "./push.js";
 export function validScreenSignal(signal) {
@@ -23,6 +23,7 @@ export function installCalls(io) {
     calls.delete(call.id);
     release(call.caller, call);
     release(call.callee, call);
+    if (answeredCalls.delete(call.id)) activity.changed();
     io.to(call.callerSocket)
       .to(call.calleeSocket || call.callee)
       .emit("call:ended", { callId: call.id, reason });
@@ -127,6 +128,8 @@ export function installCalls(io) {
         active.set(call.callee, call.id);
         call.calleeSocket = socket.id;
         clearTimeout(call.timer);
+        answeredCalls.set(call.id, [String(call.caller), String(call.callee)]);
+        activity.changed();
         io.to(call.callee)
           .except(socket.id)
           .emit("call:ended", { callId: call.id, reason: "answeredElsewhere" });

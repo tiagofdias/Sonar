@@ -64,6 +64,7 @@ export default function CommunityWorkspace({
   onDirectMessages,
   voice,
   voiceRoom,
+  watch,
   hasUnreadDirect,
 }) {
   const { authUser, socket, onlineUsers, logout } = useAuthStore();
@@ -600,8 +601,8 @@ export default function CommunityWorkspace({
             </select>
           )}
         </div>
-        <VoiceCallBanner voice={voice} voiceRoom={voiceRoom} users={community?.memberDetails || []} />
-        <VoiceRoomBanner voiceRoom={voiceRoom} />
+        <VoiceCallBanner voice={voice} voiceRoom={voiceRoom} users={community?.memberDetails || []} watch={watch} />
+        <VoiceRoomBanner voiceRoom={voiceRoom} watch={watch} />
         <div className="community-content">
           <div className="community-thread">
             <div

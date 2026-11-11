@@ -35,6 +35,7 @@ mod taskbar;
 mod theme;
 #[cfg(windows)]
 mod tray;
+mod watch;
 mod ui;
 mod update;
 mod wheel;
@@ -287,6 +288,8 @@ pub struct App {
     pub status_open: bool,
     /// The person whose "⋯" actions are open in the People or members panel.
     pub person_menu: Option<String>,
+    /// A Watch Together session running in this call or voice room: (video title, people watching).
+    pub watch_note: Option<(Option<String>, u64)>,
     pub screen_controls: Option<screen::Controls>,
     pub screen_sharing: Option<String>,
     pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
@@ -476,6 +479,8 @@ pub enum Msg {
     SetStatus(&'static str),
     StatusSaved(String, Result<(), String>),
     ScreenOpenPicker,
+    OpenWatch,
+    WatchOpened(Result<(), String>),
     ScreenSources(Vec<screen::Shareable>, bool),
     ScreenClosePicker,
     ScreenSelect(usize),
@@ -572,7 +577,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -1564,6 +1569,12 @@ impl App {
                 live::Event::MatrixChanged => {}
                 live::Event::Data(name, value) => match name {
                     "typing" => self.typing_event(&value),
+                    "watch:available" => {
+                        self.watch_note = (value.get("active").and_then(|v| v.as_bool()) == Some(true)).then(|| (
+                            value.get("title").and_then(|v| v.as_str()).map(|title| title.chars().take(120).collect()),
+                            value.get("viewers").and_then(|v| v.as_u64()).unwrap_or(0).min(99),
+                        ));
+                    }
                     "preferencesChanged" => return self.load_preferences(),
                     "profileChanged" => {
                         let (Some(user), Some(animal)) = (value.get("userId").and_then(|v| v.as_str()).map(str::to_owned), value.get("animal").and_then(|v| v.as_str()).map(str::to_owned)) else { return Task::none() };
@@ -2028,6 +2039,18 @@ impl App {
                 if let Some(session) = self.session.as_mut() { session.account.presence = previous; }
                 self.fail(error);
             },
+            Msg::OpenWatch => {
+                let Some(session) = self.session.clone() else { return Task::none() };
+                return Task::perform(async move {
+                    let path = session.watch_link().await?;
+                    let url = watch::watch_url(&session.origin(), &path).ok_or("Sonar sent an unexpected watch link.")?;
+                    tokio::task::spawn_blocking(move || watch::open_in_browser(&url)).await.map_err(|_| "Could not open your browser.".to_string())?
+                }, Msg::WatchOpened);
+            }
+            Msg::WatchOpened(result) => match result {
+                Ok(()) => self.toast(ToastKind::Success, "Watch together opened in your browser"),
+                Err(error) => self.fail(error),
+            },
             Msg::ScreenOpenPicker => return Task::perform(async { tokio::task::spawn_blocking(|| (screen::list_shareable(), screen_media::has_hardware_encoder())).await.unwrap_or_default() }, |(list, hardware)| Msg::ScreenSources(list, hardware)),
             Msg::ScreenSources(sources, hardware) => {
                 if sources.is_empty() { self.toast(ToastKind::Plain, "Nothing to share was found."); return Task::none(); }
@@ -2338,6 +2361,7 @@ impl App {
                     }
                     room::Update::Connections(count) => room.connections = count,
                     room::Update::Ended(error) => {
+                        self.watch_note = None;
                         let left = self.room.take();
                         if let Some(error) = error { self.fail(error); }
                         if let (Some(socket), Some(spec)) = (self.socket.clone(), left.and_then(|r| r.spec)) {
@@ -2357,6 +2381,7 @@ impl App {
                 }
             }
             Msg::LeaveRoom => {
+                self.watch_note = None;
                 let Some(room) = self.room.take() else { return Task::none() };
                 if let Some(c) = &room.controls { c.send(room::Command::Leave); }
                 if let (Some(socket), Some(spec)) = (self.socket.clone(), room.spec) {
@@ -2406,7 +2431,7 @@ impl App {
                     call::Update::Ringing => state.rang = true,
                     call::Update::Connecting => state.status = CallStatus::Connecting,
                     call::Update::Connected => { state.status = CallStatus::Connected; state.started = Some(std::time::Instant::now()); }
-                    call::Update::Ended(error) => { self.call = None; if let Some(error) = error { self.fail(error); } }
+                    call::Update::Ended(error) => { self.call = None; self.watch_note = None; if let Some(error) = error { self.fail(error); } }
                 }
             }
             Msg::Mute => if let Some(state) = self.call.as_mut() {

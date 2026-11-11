@@ -233,6 +233,7 @@ pub fn events(auth: &Auth) -> impl Stream<Item = (u64, Event)> + 'static {
             .on("preferencesChanged", data_handler(sender.clone(), "preferencesChanged"))
             .on("profileChanged", data_handler(sender.clone(), "profileChanged"))
             .on("typing", data_handler(sender.clone(), "typing"))
+            .on("watch:available", data_handler(sender.clone(), "watch:available"))
             .on("friendsChanged", data_handler(sender.clone(), "friendsChanged"))
             .on("friendRequest", data_handler(sender.clone(), "friendRequest"))
             .on("newMessage", data_handler(sender.clone(), "newMessage"))
