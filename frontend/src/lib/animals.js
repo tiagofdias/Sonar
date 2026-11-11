@@ -1,5 +1,5 @@
 // Keep this list and its order the same in backend/src/lib/animals.js and desktop/src/theme.rs.
-export const ANIMALS = ["whale", "shark", "turtle", "dolphin", "octopus", "jellyfish", "seahorse", "crab", "pufferfish", "manta", "orca", "seal", "squid", "starfish", "clownfish", "lobster"];
+export const ANIMALS = ["whale", "shark", "turtle", "dolphin", "anglerfish", "jellyfish", "seahorse", "crab", "pufferfish", "manta", "orca", "seal", "squid", "starfish", "clownfish", "lobster"];
 export const animalName = (animal) => (animal === "manta" ? "Manta ray" : animal[0].toUpperCase() + animal.slice(1));
 // Someone who has not chosen always gets the same animal, on every device.
 export function animalOf(user) {

@@ -257,13 +257,13 @@ icons! {
     Crown => "crown", Shield => "shield", Pencil => "pencil", Speaker => "speaker", Play => "play", Square => "square",
     Eye => "eye", EyeOff => "eye-off", Info => "info", Bell => "bell", BellOff => "bell-off",
     Whale => "../../../frontend/public/animals/whale", Shark => "../../../frontend/public/animals/shark", Turtle => "../../../frontend/public/animals/turtle", Dolphin => "../../../frontend/public/animals/dolphin",
-    Octopus => "../../../frontend/public/animals/octopus", Jellyfish => "../../../frontend/public/animals/jellyfish", Seahorse => "../../../frontend/public/animals/seahorse", Crab => "../../../frontend/public/animals/crab",
+    Anglerfish => "../../../frontend/public/animals/anglerfish", Jellyfish => "../../../frontend/public/animals/jellyfish", Seahorse => "../../../frontend/public/animals/seahorse", Crab => "../../../frontend/public/animals/crab",
     Pufferfish => "../../../frontend/public/animals/pufferfish", Manta => "../../../frontend/public/animals/manta", Orca => "../../../frontend/public/animals/orca", Seal => "../../../frontend/public/animals/seal",
     Squid => "../../../frontend/public/animals/squid", Starfish => "../../../frontend/public/animals/starfish", Clownfish => "../../../frontend/public/animals/clownfish", Lobster => "../../../frontend/public/animals/lobster",
 }
 
 // Keep this list and its order the same in frontend/src/lib/animals.js and backend/src/lib/animals.js.
-pub const ANIMALS: [(&str, Icon); 16] = [("whale", Icon::Whale), ("shark", Icon::Shark), ("turtle", Icon::Turtle), ("dolphin", Icon::Dolphin), ("octopus", Icon::Octopus), ("jellyfish", Icon::Jellyfish), ("seahorse", Icon::Seahorse), ("crab", Icon::Crab), ("pufferfish", Icon::Pufferfish), ("manta", Icon::Manta), ("orca", Icon::Orca), ("seal", Icon::Seal), ("squid", Icon::Squid), ("starfish", Icon::Starfish), ("clownfish", Icon::Clownfish), ("lobster", Icon::Lobster)];
+pub const ANIMALS: [(&str, Icon); 16] = [("whale", Icon::Whale), ("shark", Icon::Shark), ("turtle", Icon::Turtle), ("dolphin", Icon::Dolphin), ("anglerfish", Icon::Anglerfish), ("jellyfish", Icon::Jellyfish), ("seahorse", Icon::Seahorse), ("crab", Icon::Crab), ("pufferfish", Icon::Pufferfish), ("manta", Icon::Manta), ("orca", Icon::Orca), ("seal", Icon::Seal), ("squid", Icon::Squid), ("starfish", Icon::Starfish), ("clownfish", Icon::Clownfish), ("lobster", Icon::Lobster)];
 /// Someone who has not chosen always gets the same animal, on every device.
 pub fn animal_index(id: &str, chosen: Option<&str>) -> usize {
     if let Some(position) = chosen.and_then(|name| ANIMALS.iter().position(|(item, _)| *item == name)) { return position; }
