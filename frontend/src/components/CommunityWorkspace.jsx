@@ -21,6 +21,7 @@ import {
   Send,
   Reply,
   ChevronDown,
+  Crown,
   Settings,
   ShieldCheck,
   Timer,
@@ -44,6 +45,7 @@ import VoiceRoomBanner from "./VoiceRoomBanner";
 import VoiceRoomList from "./VoiceRoomList";
 import { useHistoryScroll } from "../lib/useHistoryScroll";
 import Avatar from "./Avatar";
+import ActionMenu from "./ActionMenu";
 import SearchPanel from "./SearchPanel";
 import { usePreferencesStore } from "../store/usePreferencesStore";
 import { useTyping, typingText } from "../lib/useTyping";
@@ -836,33 +838,23 @@ export default function CommunityWorkspace({
                       {member._id === authUser._id ? " · You" : ""}
                     </small>
                   </span>
-                  {member._id !== authUser._id && <button className="icon-button" title="Block" aria-label={`Block ${member.fullName}`} onClick={() => { if (window.confirm(`Block ${member.fullName}? Their messages will be hidden and they will not be told.`)) preferences.block(member._id); }}><Ban size={14} /></button>}
-                  {!group && ((owner && member._id !== authUser._id) || (moderator && member._id !== authUser._id && member._id !== community.ownerId && !community.moderators?.includes(member._id) && may("remove"))) ? (
-                    <select
-                      className="member-actions"
-                      aria-label={`Manage ${member.fullName}`}
-                      value=""
-                      onChange={(event) => {
-                        if (event.target.value === "permissions") { openPermissions(member); return; }
-                        setConfirmation({
-                          action: event.target.value,
-                          member,
-                          communityId: community._id,
-                        });
-                      }}
-                    >
-                      <option value="" disabled>
-                        Manage
-                      </option>
-                      <option value="remove">Remove member</option>
-                      <option value="ban">Ban member</option>
-                      {owner && <option value={community.moderators?.includes(member._id) ? "demote" : "promote"}>{community.moderators?.includes(member._id) ? "Remove moderator role" : "Make moderator"}</option>}
-                      {owner && community.moderators?.includes(member._id) && <option value="permissions">Moderator permissions</option>}
-                      {owner && <option value="transfer">Make owner</option>}
-                    </select>
-                  ) : (
-                    <LockKeyhole size={11} className="person-lock" />
-                  )}
+                  {(() => {
+                    const others = member._id !== authUser._id;
+                    const manage = !group && others && (owner || (moderator && member._id !== community.ownerId && !community.moderators?.includes(member._id) && may("remove")));
+                    const isModerator = community.moderators?.includes(member._id);
+                    const ask = (action) => setConfirmation({ action, member, communityId: community._id });
+                    return (
+                      <ActionMenu label={`Options for ${member.fullName}`} items={[
+                        manage && { label: "Remove from community", icon: <LogOut size={15} />, onClick: () => ask("remove") },
+                        manage && { label: "Ban from community", icon: <Ban size={15} />, danger: true, onClick: () => ask("ban") },
+                        manage && owner && { label: isModerator ? "Remove moderator role" : "Make moderator", icon: <ShieldCheck size={15} />, onClick: () => ask(isModerator ? "demote" : "promote") },
+                        manage && owner && isModerator && { label: "Moderator permissions", icon: <Settings size={15} />, onClick: () => openPermissions(member) },
+                        manage && owner && { label: "Make owner", icon: <Crown size={15} />, onClick: () => ask("transfer") },
+                        "-",
+                        others && { label: "Block", icon: <Ban size={15} />, danger: true, onClick: () => { if (window.confirm(`Block ${member.fullName}? Their messages will be hidden and they will not be told.`)) preferences.block(member._id); } },
+                      ]} />
+                    );
+                  })()}
                 </div>
               ))}
             </aside>

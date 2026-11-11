@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
+  UserMinus,
   Users,
   X,
 } from "lucide-react";
@@ -39,6 +40,7 @@ import ReactionBar from "../components/ReactionBar";
 import MessageText from "../components/MessageText";
 import CallNotice from "../components/CallNotice";
 import Avatar from "../components/Avatar";
+import ActionMenu from "../components/ActionMenu";
 import SearchPanel from "../components/SearchPanel";
 import { usePreferencesStore, matchesKeyword } from "../store/usePreferencesStore";
 import { useTyping, typingText } from "../lib/useTyping";
@@ -866,7 +868,10 @@ export default function HomePage() {
                         {preferences.folders.map((folder) => <option key={folder.name} value={folder.name}>{folder.name}</option>)}
                         <option value="__new">New folder...</option>
                       </select>
-                      <button className="icon-button" title="Block" aria-label={`Block ${user.fullName}`} onClick={() => { if (window.confirm(`Block ${user.fullName}? They will not be told.`)) preferences.block(user._id); }}><Ban size={15} /></button>
+                      <ActionMenu label={`More for ${user.fullName}`} items={[
+                        { label: "Remove friend", icon: <UserMinus size={15} />, onClick: () => { if (window.confirm(`Remove ${user.fullName} from your friends? You will stop seeing each other here. Either of you can send a new request later.`)) useChatStore.getState().removeFriend(user._id); } },
+                        { label: "Block", icon: <Ban size={15} />, danger: true, onClick: () => { if (window.confirm(`Block ${user.fullName}? They cannot message, call or send you requests. They will not be told.`)) preferences.block(user._id); } },
+                      ]} />
                     </div>
                   ))}
                   {!users.length && !friendRequests.incoming.length && !friendRequests.outgoing.length && (

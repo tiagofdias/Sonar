@@ -59,6 +59,16 @@ router.post("/request", protectRoute, async (req, res) => {
       return res.status(201).json({ status: "pending" });
     }
     if (existing?.status === "accepted") return res.status(409).json({ message: "You're already friends" });
+    if (existing?.status === "removed") {
+      // A former friend asks again: a fresh request the other person has to accept.
+      if ((await Friendship.countDocuments({ requestedBy: req.user._id, status: "pending" })) >= MAX_OUTGOING)
+        return res.status(429).json({ message: "Too many requests are waiting for a reply" });
+      existing.set({ status: "pending", requestedBy: req.user._id, users: [req.user._id, target._id], note: req.body.note || undefined });
+      await existing.save();
+      io.to(String(target._id)).emit("friendRequest", { fullName: req.user.fullName });
+      changed(req.user._id, target._id);
+      return res.status(201).json({ status: "pending" });
+    }
     if (existing && String(existing.requestedBy) === String(req.user._id)) return res.status(409).json({ message: "Request already sent" });
     if (existing) {
       // They had already asked, so asking back is the same as accepting.
@@ -103,6 +113,22 @@ router.put("/:id/disappear", protectRoute, async (req, res) => {
     res.json({ seconds: req.body.seconds });
   } catch {
     res.status(500).json({ message: "Could not change disappearing messages" });
+  }
+});
+
+// Ends a friendship. Either person can send a new request later.
+router.delete("/:id/friendship", protectRoute, async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "Invalid request" });
+  try {
+    const row = await Friendship.findOneAndUpdate(
+      { pair: pairKey(req.user._id, req.params.id), status: "accepted" },
+      { $set: { status: "removed", requestedBy: req.user._id }, $unset: { note: "" } },
+    );
+    if (!row) return res.status(404).json({ message: "You're not friends with this person" });
+    changed(req.user._id, req.params.id);
+    res.json({ status: "removed" });
+  } catch {
+    res.status(500).json({ message: "Could not remove this friend" });
   }
 });
 

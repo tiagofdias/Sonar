@@ -1141,9 +1141,31 @@ fn community_thread<'a>(app: &'a App, me: &'a str) -> E<'a> {
     column![scroll, composer(app, format!("Message #{name}..."), true, format!("Encrypted for {count} {}", if count == 1 { "member" } else { "members" }))].into()
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct Choice { label: &'static str, action: &'static str }
-impl std::fmt::Display for Choice { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.label) } }
+
+/// One labelled action for a person: icon, label, shown in red, and what it does. `None` is a divider.
+type PersonAction = Option<(Icon, &'static str, bool, Msg)>;
+/// The "⋯" button for one person and, while it is open, their labelled actions to show under the row.
+fn person_actions<'a>(app: &App, id: &str, actions: Vec<PersonAction>) -> (E<'a>, Option<E<'a>>) {
+    let mut kept: Vec<PersonAction> = Vec::new();
+    for action in actions { if action.is_some() || kept.last().is_some_and(Option::is_some) { kept.push(action); } }
+    while kept.last().is_some_and(Option::is_none) { kept.pop(); }
+    if kept.is_empty() { return (space().into(), None); }
+    let open = app.person_menu.as_deref() == Some(id);
+    let toggle = icon_btn(Icon::Ellipsis, 16.0, Some(Msg::TogglePersonMenu(id.to_owned())), open);
+    if !open { return (toggle, None); }
+    let mut list = Column::new().spacing(2);
+    for action in kept {
+        list = list.push(match action {
+            None => container(t::rule(rgb(0x272e35), true)).padding([4, 2]).into(),
+            Some((icon, label, danger, on)) => {
+                let color = if danger { rgb(0xc28b98) } else { rgb(0xc8cdd1) };
+                E::from(button(row![t::icon(icon, 15.0, if danger { color } else { rgb(0x8c969d) }), text(label).size(13).color(color)].spacing(10).align_y(Vertical::Center))
+                    .width(FILL).padding([8, 10]).style(t::person_row(false)).on_press(on))
+            }
+        });
+    }
+    (toggle, Some(container(list).padding(6).width(FILL).style(t::panel(rgb(0x161a1e), rgb(0x2c343d), 10.0)).into()))
+}
 
 fn members_panel(app: &App) -> E<'_> {
     let Some(community) = &app.community else { return space().into() };
@@ -1154,23 +1176,22 @@ fn members_panel(app: &App) -> E<'_> {
         let is_mod = community.moderators.contains(&member.id);
         let role = if Some(&member.id) == community.owner_id.as_ref() { "Owner" } else if is_mod { "Moderator" } else { "Member" };
         let manageable = community.kind != "group" && ((owner && member.id != me) || (moderator && member.id != me && Some(&member.id) != community.owner_id.as_ref() && !is_mod && app.may("remove")));
-        let trailing: E = if manageable {
-            let mut choices = vec![Choice { label: "Remove member", action: "remove" }, Choice { label: "Ban member", action: "ban" }];
-            if owner && is_mod { choices.push(Choice { label: "Moderator permissions", action: "permissions" }); }
-            if owner {
-                choices.push(if is_mod { Choice { label: "Remove moderator role", action: "demote" } } else { Choice { label: "Make moderator", action: "promote" } });
-                choices.push(Choice { label: "Make owner", action: "transfer" });
-            }
-            let member = member.clone();
-            pick_list(choices, None::<Choice>, move |choice| if choice.action == "permissions" { Msg::OpenPermissions(member.clone()) } else { Msg::AskConfirm(Some(Confirm { action: choice.action.into(), member: Some(member.clone()), channel: None })) })
-                .placeholder("Manage").text_size(11).padding([5, 4]).width(84).style(t::select()).menu_style(t::menu()).into()
-        } else { t::icon(Icon::LockKeyhole, 11.0, rgb(0xd0d7dc)) };
+        let ask = |action: &str| Msg::AskConfirm(Some(Confirm { action: action.into(), member: Some(member.clone()), channel: None }));
+        let (more, actions) = person_actions(app, &member.id, vec![
+            manageable.then(|| (Icon::LogOut, "Remove from community", false, ask("remove"))),
+            manageable.then(|| (Icon::Ban, "Ban from community", true, ask("ban"))),
+            (manageable && owner).then(|| if is_mod { (Icon::ShieldCheck, "Remove moderator role", false, ask("demote")) } else { (Icon::ShieldCheck, "Make moderator", false, ask("promote")) }),
+            (manageable && owner && is_mod).then(|| (Icon::Settings, "Moderator permissions", false, Msg::OpenPermissions(member.clone()))),
+            (manageable && owner).then(|| (Icon::Crown, "Make owner", false, ask("transfer"))),
+            None,
+            (member.id != me).then(|| (Icon::Ban, "Block", true, ask("block"))),
+        ]);
         list = list.push(container(row![
             avatar_status(person_face(member), index, app.online.contains(&member.id).then_some(rgb(0x171b1f)), app.status_color(&member.id), 30.0),
-            column![text(member.name.clone()).size(14).line_height(LineHeight::Relative(1.2)).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).line_height(LineHeight::Relative(1.2)).color(rgb(0x78848e))].spacing(2).width(FILL),
-            if member.id == me { E::from(space()) } else { icon_btn(Icon::Ban, 14.0, Some(Msg::AskConfirm(Some(Confirm { action: "block".into(), member: Some(member.clone()), channel: None }))), false) },
-            trailing,
+            column![text(member.name.clone()).size(14).line_height(LineHeight::Relative(1.2)).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None), text(format!("{role}{}", if member.id == me { " · You" } else { "" })).size(13).line_height(LineHeight::Relative(1.2)).color(rgb(0x78848e))].spacing(2).width(FILL).clip(true),
+            more,
         ].spacing(8).align_y(Vertical::Center)).padding([10, 4]));
+        if let Some(actions) = actions { list = list.push(actions); }
     }
     container(scroll_area(list)).width(250).height(FILL).padding([12, 10]).style(t::fill(rgb(0x171b1f))).into()
 }
@@ -1241,13 +1262,16 @@ fn panel_view(app: &App, panel: Panel) -> E<'_> {
                 folders.extend(app.preferences.folders.iter().map(|f| f.name.clone()));
                 if !app.folder_name.trim().is_empty() { folders.push(NEW_FOLDER.to_owned()); }
                 let current = app.preferences.folders.iter().find(|f| f.people.contains(&person.id)).map_or(NO_FOLDER.to_owned(), |f| f.name.clone());
-                let (id, pin_id, block) = (person.id.clone(), person.id.clone(), person.clone());
+                let (id, pin_id) = (person.id.clone(), person.id.clone());
+                let ask = |action: &str| Msg::AskConfirm(Some(Confirm { action: action.into(), member: Some(person.clone()), channel: None }));
+                let (more, actions) = person_actions(app, &person.id, vec![Some((Icon::UserMinus, "Remove friend", false, ask("unfriend"))), Some((Icon::Ban, "Block", true, ask("block")))]);
                 people = people.push(row![
                     container(person_row(person_face(person), &person.name, &format!("@{}", person.username), index, app.avatar_dot(&person.id), false, vec![t::icon(Icon::ArrowUpRight, 17.0, rgb(0x98a1a7))], Some(Msg::OpenPeer(Some(person.id.clone()))))).width(FILL),
                     icon_btn(Icon::Pin, 15.0, Some(Msg::TogglePinPerson(pin_id)), app.preferences.pinned_people.contains(&person.id)),
                     pick_list(folders, Some(current), move |name: String| Msg::MoveToFolder(id.clone(), name)).text_size(11).padding([5, 4]).width(92).style(t::select()).menu_style(t::menu()),
-                    icon_btn(Icon::Ban, 15.0, Some(Msg::AskConfirm(Some(Confirm { action: "block".into(), member: Some(block), channel: None }))), false),
+                    more,
                 ].spacing(4).align_y(Vertical::Center));
+                if let Some(actions) = actions { people = people.push(actions); }
             }
             if app.people.is_empty() && app.friend_requests.incoming.is_empty() && app.friend_requests.outgoing.is_empty() { people = people.push(body("No friends yet. Send a request to get started.", 15.0, rgb(0x929ca3), 1.8)); }
             column![modal_header(Icon::Users, 28.0, close.clone()), modal_title("Your people, a little closer."),
@@ -1397,6 +1421,7 @@ fn confirm_view<'a>(app: &'a App, confirm: &'a Confirm) -> E<'a> {
     let channel = confirm.channel.as_ref().map(|c| c.name.clone()).unwrap_or_default();
     let (title, note, label) = match confirm.action.as_str() {
         "call" => (format!("Call {member}?"), "They will hear it ring right away.", "Call"),
+        "unfriend" => (format!("Remove {member} from your friends?"), "You will stop seeing each other here. Either of you can send a new request later.", "Remove friend"),
         "block" => (format!("Block {member}?"), "They cannot message, call or send you requests, and their server messages are hidden completely. They are not told.", "Block"),
         "delete-community" => (format!("Delete {community}?"), "This permanently deletes the community, its channels and stored messages, including pins, for everyone. Active voice rooms close. Copies and backups may remain.", "Delete community permanently"),
         "delete-channel" => (format!("Delete {channel}?"), "This permanently deletes the channel and its stored messages, including pins. Anyone in its voice room will be disconnected. Copies and backups may remain.", "Delete channel"),

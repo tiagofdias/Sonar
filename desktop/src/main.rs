@@ -285,6 +285,8 @@ pub struct App {
     ringtone_level: f32,
     pub presence: HashMap<String, String>,
     pub status_open: bool,
+    /// The person whose "⋯" actions are open in the People or members panel.
+    pub person_menu: Option<String>,
     pub screen_controls: Option<screen::Controls>,
     pub screen_sharing: Option<String>,
     pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
@@ -444,6 +446,8 @@ pub enum Msg {
     CommunityLoaded(u64, Result<Community, String>),
     OpenChannel(String),
     ToggleMembers,
+    TogglePersonMenu(String),
+    FriendRemoved(Result<(), String>),
     OpenDialog(Option<Dialog>),
     DialogValue(String),
     DialogVoice(bool),
@@ -568,7 +572,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -1325,6 +1329,7 @@ impl App {
             Msg::OpenGroup(id) => { let first = self.update(Msg::SetMode(Mode::Community)); return Task::batch([first, Task::done(Msg::OpenCommunity(Some(id)))]); }
             Msg::ActivityLoaded(result) => match result { Ok(rows) => self.activity = Some(rows), Err(error) => self.fail(error) },
             Msg::OpenPermissions(member) => {
+                self.person_menu = None;
                 self.denied = self.community.as_ref().and_then(|c| c.moderator_limits.iter().find(|l| l.user_id == member.id)).map(|l| l.denied.clone()).unwrap_or_default();
                 self.permissions_for = Some(member);
                 self.dialog = Some(Dialog::Permissions);
@@ -1878,7 +1883,12 @@ impl App {
                 self.restore_draft();
                 return self.load_thread(None);
             }
-            Msg::ToggleMembers => self.members_open = !self.members_open,
+            Msg::ToggleMembers => { self.members_open = !self.members_open; self.person_menu = None; }
+            Msg::TogglePersonMenu(id) => self.person_menu = if self.person_menu.as_ref() == Some(&id) { None } else { Some(id) },
+            Msg::FriendRemoved(result) => match result {
+                Ok(()) => { self.toast(ToastKind::Success, "Removed from your friends"); return self.refresh(); }
+                Err(error) => self.fail(error),
+            },
             Msg::OpenDialog(dialog) => {
                 if self.busy { return Task::none(); }
                 self.dialog_value.clear(); self.invite = None; self.bans = None;
@@ -2069,7 +2079,11 @@ impl App {
                 let (Some(session), Some(member)) = (self.session.clone(), self.confirm.take().and_then(|c| c.member)) else { return Task::none() };
                 return Task::perform(async move { session.block(&member.id).await }, Msg::PreferencesLoaded);
             }
-            Msg::AskConfirm(confirm) => { if !self.busy { self.confirm = confirm; if self.confirm.is_some() { self.dialog = None; } } }
+            Msg::ApplyConfirm if self.confirm.as_ref().is_some_and(|c| c.action == "unfriend") => {
+                let (Some(session), Some(member)) = (self.session.clone(), self.confirm.take().and_then(|c| c.member)) else { return Task::none() };
+                return Task::perform(async move { session.remove_friend(&member.id).await }, Msg::FriendRemoved);
+            }
+            Msg::AskConfirm(confirm) => { self.person_menu = None; if !self.busy { self.confirm = confirm; if self.confirm.is_some() { self.dialog = None; } } }
             Msg::ApplyConfirm if !self.busy => {
                 let (Some(confirm), Some(session), Some(community)) = (self.confirm.clone(), self.session.clone(), self.community.as_ref().map(|c| c.id.clone())) else { return Task::none() };
                 self.busy = true;
@@ -2429,6 +2443,7 @@ impl App {
             "panel" => Some(Msg::OpenPanel(match value.as_str() { "people" => Some(Panel::People), "privacy" => Some(Panel::Privacy), _ => None })),
             "dialog" => Some(Msg::OpenDialog(match value.as_str() { "create" => Some(Dialog::Create), "invite" => Some(Dialog::Invite), "start" => Some(Dialog::Start), _ => None })),
             "members" => Some(Msg::ToggleMembers),
+            "personmenu" => self.people.iter().chain(self.community.iter().flat_map(|c| c.member_details.iter())).find(|p| p.name == value).map(|p| Msg::TogglePersonMenu(p.id.clone())),
             "menu" => Some(Msg::ToggleManage),
             "type" => { self.composer = text_editor::Content::with_text(&value); None }
             "send" => Some(Msg::Send),

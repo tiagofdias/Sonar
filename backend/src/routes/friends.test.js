@@ -74,6 +74,20 @@ test("direct contact needs an accepted friend request", async (t) => {
       assert.equal((await call(di, "/friends/request", "POST", { username: "cy" })).body.status, "accepted");
       assert.equal(await areFriends(cy._id, di._id), true);
     });
+    await t.test("removing a friend ends access, survives seeding and needs a new request", async () => {
+      assert.equal((await call(cy, `/friends/${bo._id}/friendship`, "DELETE")).status, 404, "only friends can be removed");
+      assert.equal((await call(ana, `/friends/${bo._id}/friendship`, "DELETE")).status, 200);
+      assert.deepEqual((await call(ana, "/messages/users")).body, []);
+      assert.deepEqual((await call(bo, "/messages/users")).body, []);
+      assert.equal((await call(bo, `/messages/send/${ana._id}`, "POST", envelope)).status, 403);
+      await seedFriendsFromMessages();
+      assert.equal(await areFriends(ana._id, bo._id), false, "their old messages do not reconnect them");
+      assert.equal((await call(bo, "/friends/request", "POST", { username: "ana" })).status, 201);
+      assert.equal(await areFriends(ana._id, bo._id), false, "asking again waits for an answer");
+      assert.deepEqual((await call(ana, "/friends")).body.incoming.map((p) => p.username), ["bo"]);
+      assert.equal((await call(ana, `/friends/${bo._id}/accept`, "POST")).status, 200);
+      assert.equal(await areFriends(ana._id, bo._id), true);
+    });
     await t.test("people already talking are kept, and seeding can repeat", async () => {
       const eli = await make("eli");
       await Message.create({ senderId: eli._id, receiverId: ana._id, ...envelope, expiresAt: new Date(Date.now() + 86400000) });

@@ -132,6 +132,15 @@ export const useChatStore = create((set, get) => ({
     }
     await Promise.all([get().getUsers(), get().getFriendRequests()]);
   },
+  removeFriend: async (id) => {
+    try {
+      await api.delete(`/friends/${id}/friendship`);
+      toast.success("Removed from your friends");
+    } catch (e) {
+      toast.error(e.response?.data?.message || "Could not remove this friend");
+    }
+    await Promise.all([get().getUsers(), get().getFriendRequests()]);
+  },
   setDisappearAfter: async (peerId, seconds) => {
     try {
       await api.put(`/friends/${peerId}/disappear`, { seconds });

@@ -164,6 +164,11 @@ impl Session {
     pub async fn create_group(&self, member_ids: Vec<String>, name: String) -> Result<Community, String> {
         self.call(Method::POST, "api/communities/group", Some(json!({ "memberIds": member_ids, "name": name })), "Could not create the group").await
     }
+    /// Ends a friendship; either person can send a new request later.
+    pub async fn remove_friend(&self, id: &str) -> Result<(), String> {
+        let id = check_id(id)?;
+        self.send(Method::DELETE, &format!("api/friends/{id}/friendship"), None, "Could not remove this friend").await.map(|_| ())
+    }
     pub async fn answer_friend_request(&self, id: &str, accept: bool) -> Result<(), String> {
         let id = check_id(id)?;
         if accept { self.send(Method::POST, &format!("api/friends/{id}/accept"), None, "Could not accept the request").await.map(|_| ()) }
