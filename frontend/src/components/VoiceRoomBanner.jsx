@@ -1,4 +1,5 @@
 import { useMicActivity } from "../lib/useMicActivity";
+import { roomStatus } from "../lib/roomStatus";
 import ScreenStage, { ScreenShareButton } from "./ScreenStage";
 import {
   Headphones,
@@ -13,9 +14,14 @@ export default function VoiceRoomBanner({ voiceRoom }) {
   const room = voiceRoom?.room;
   const speaking = useMicActivity(voiceRoom?.micStream, Boolean(room && !voiceRoom.muted && !voiceRoom.deafened));
   if (!room) return null;
-  const connected = Object.values(voiceRoom.connections).filter(
-    (value) => value === "connected",
-  ).length;
+  const others = (room.participants || []).filter((person) => person.sessionId !== room.sessionId);
+  const states = others.map((person) => voiceRoom.connections[person.userId]);
+  const status = roomStatus({
+    joining: room.status === "joining",
+    others: others.length,
+    connected: states.filter((value) => value === "connected").length,
+    failed: states.filter((value) => value === "failed").length,
+  });
   const nameOf = (id) => room.participants?.find((person) => person.userId === id)?.fullName || "Member";
   return (
     <>
@@ -32,8 +38,7 @@ export default function VoiceRoomBanner({ voiceRoom }) {
             : `Voice room: ${room.name}`}
         </strong>
         <small>
-          {room.communityName} · {room.participants.length}/6 people ·{" "}
-          {connected} peer {connected === 1 ? "connection" : "connections"}
+          {room.communityName} · {room.participants.length}/6 people · {status}
         </small>
       </div>
       <span className="voice-transport">

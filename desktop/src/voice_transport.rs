@@ -9,11 +9,15 @@ use webrtc::{media_stream::{Track, track_local::{TrackLocal, static_sample::Trac
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
-struct Handler { gathered: mpsc::Sender<()>, connected: mpsc::Sender<()>, packets: mpsc::Sender<(u64, Zeroizing<Vec<u8>>)>, state: Arc<AtomicU8>, generation: Arc<AtomicU64> }
+struct Handler { gathered: mpsc::Sender<()>, candidates: mpsc::Sender<RTCIceCandidateInit>, connected: mpsc::Sender<()>, packets: mpsc::Sender<(u64, Zeroizing<Vec<u8>>)>, state: Arc<AtomicU8>, generation: Arc<AtomicU64> }
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for Handler {
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state == RTCIceGatheringState::Complete { let _ = self.gathered.try_send(()); }
+    }
+    /// Each local network route as soon as it is found, so it can be sent without waiting for the rest.
+    async fn on_ice_candidate(&self, event: webrtc::peer_connection::RTCPeerConnectionIceEvent) {
+        if let Ok(candidate) = event.candidate.to_json() { let _ = self.candidates.try_send(candidate); }
     }
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
         let next = match state { RTCPeerConnectionState::Connected => 1, RTCPeerConnectionState::Disconnected => 2, RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => 3, _ => 0 };
@@ -54,6 +58,11 @@ pub fn fingerprint(sdp: &str) -> Result<String, &'static str> {
     found.ok_or("Missing call fingerprint")
 }
 
+/// The media section name of our only (audio) section, from `a=mid:`.
+fn local_mid(sdp: &str) -> String {
+    sdp.lines().find_map(|line| line.trim().strip_prefix("a=mid:")).map(str::to_owned).filter(|mid| !mid.is_empty() && mid.len() <= 32).unwrap_or_else(|| "0".into())
+}
+
 fn receive_current(incoming: &mut mpsc::Receiver<(u64, Zeroizing<Vec<u8>>)>, state: &AtomicU8, generation: &AtomicU64) -> Option<Zeroizing<Vec<u8>>> {
     while let Ok((epoch, packet)) = incoming.try_recv() {
         if state.load(Ordering::Acquire) == 1 && epoch == generation.load(Ordering::Acquire) { return Some(packet); }
@@ -70,6 +79,7 @@ pub struct VoiceTransport {
     track: Arc<TrackLocalStaticSample>,
     sender: Arc<dyn RtpSender>,
     gathered: mpsc::Receiver<()>,
+    candidates: mpsc::Receiver<RTCIceCandidateInit>,
     connected: mpsc::Receiver<()>,
     incoming: mpsc::Receiver<(u64, Zeroizing<Vec<u8>>)>,
     state: Arc<AtomicU8>,
@@ -82,16 +92,16 @@ impl VoiceTransport {
         if relay_only && !servers.iter().any(|server| server.urls.iter().any(|url| url.starts_with("turn:") || url.starts_with("turns:"))) { return Err("Relay-only mode needs a TURN server".into()); }
         let config = RTCConfigurationBuilder::new().with_ice_servers(servers).with_ice_transport_policy(if relay_only { RTCIceTransportPolicy::Relay } else { RTCIceTransportPolicy::All }).build();
         let mut media = MediaEngine::default(); media.register_default_codecs().map_err(|_| "Voice codec unavailable")?;
-        let (gather_tx, gathered) = mpsc::channel(1); let (connected_tx, connected) = mpsc::channel(1); let (packet_tx, incoming) = mpsc::channel(20);
+        let (gather_tx, gathered) = mpsc::channel(1); let (candidate_tx, candidates) = mpsc::channel(64); let (connected_tx, connected) = mpsc::channel(1); let (packet_tx, incoming) = mpsc::channel(20);
         let state = Arc::new(AtomicU8::new(0));
         let generation = Arc::new(AtomicU64::new(0));
-        let handler = Handler { gathered: gather_tx, connected: connected_tx, packets: packet_tx, state: state.clone(), generation: generation.clone() };
+        let handler = Handler { gathered: gather_tx, candidates: candidate_tx, connected: connected_tx, packets: packet_tx, state: state.clone(), generation: generation.clone() };
         let connection: Arc<dyn PeerConnection> = Arc::new(PeerConnectionBuilder::new().with_configuration(config).with_media_engine(media).with_udp_addrs(bind).with_handler(Arc::new(handler)).build().await.map_err(|_| "Could not start the voice connection")?);
         let ssrc = rand_core::OsRng.next_u32();
         let track = Arc::new(TrackLocalStaticSample::new(Instant::now(), MediaStreamTrack::new("sonar-voice".into(), "audio".into(), "audio".into(), RtpCodecKind::Audio,
             vec![RTCRtpEncodingParameters { rtp_coding_parameters: RTCRtpCodingParameters { ssrc: Some(ssrc), ..Default::default() }, codec: RTCRtpCodec { mime_type: MIME_TYPE_OPUS.into(), clock_rate: 48000, channels: 2, sdp_fmtp_line: String::new(), rtcp_feedback: vec![] }, ..Default::default() }])).map_err(|_| "Could not create the audio track")?);
         let sender = connection.add_track(track.clone() as Arc<dyn TrackLocal>).await.map_err(|_| "Could not add audio to the call")?;
-        Ok(Self { connection, track, sender, gathered, connected, incoming, state, generation, pumped_generation: 0, closed: false })
+        Ok(Self { connection, track, sender, gathered, candidates, connected, incoming, state, generation, pumped_generation: 0, closed: false })
     }
     async fn local(&mut self) -> Result<(String, String), String> {
         tokio::time::timeout(Duration::from_secs(15), self.gathered.recv()).await.map_err(|_| "Network setup timed out")?.ok_or("Network setup was interrupted")?;
@@ -103,6 +113,27 @@ impl VoiceTransport {
         let offer = self.connection.create_offer(None).await.map_err(|_| "Could not create the call offer")?;
         self.connection.set_local_description(offer).await.map_err(|_| "Could not prepare the call offer")?;
         self.local().await
+    }
+    /// An offer sent right away; its network routes follow through `next_local_candidate`.
+    pub async fn offer_now(&mut self) -> Result<String, String> {
+        let offer = self.connection.create_offer(None).await.map_err(|_| "Could not create the call offer")?;
+        self.connection.set_local_description(offer).await.map_err(|_| "Could not prepare the call offer")?;
+        Ok(self.connection.local_description().await.ok_or("Could not prepare the call offer")?.sdp)
+    }
+    /// Answer an authenticated offer right away; network routes follow through `next_local_candidate`.
+    pub async fn answer_now(&mut self, remote_sdp: String, verified_fingerprint: &str) -> Result<String, String> {
+        self.set_remote(remote_sdp, verified_fingerprint, true).await?;
+        let answer = self.connection.create_answer(None).await.map_err(|_| "Could not answer the call")?;
+        self.connection.set_local_description(answer).await.map_err(|_| "Could not prepare the call answer")?;
+        Ok(self.connection.local_description().await.ok_or("Could not prepare the call answer")?.sdp)
+    }
+    /// The next local network route found since the last call, labelled with our audio section so browsers accept it.
+    pub async fn next_local_candidate(&mut self) -> Option<RTCIceCandidateInit> {
+        let mut candidate = self.candidates.try_recv().ok()?;
+        let sdp = self.connection.local_description().await.map(|d| d.sdp).unwrap_or_default();
+        candidate.sdp_mid = Some(local_mid(&sdp));
+        candidate.sdp_mline_index = Some(0);
+        Some(candidate)
     }
     pub async fn answer(&mut self, remote_sdp: String, verified_fingerprint: &str) -> Result<(String, String), String> {
         self.answer_with_candidates(remote_sdp, verified_fingerprint, Vec::new()).await
@@ -187,11 +218,12 @@ mod tests {
     #[tokio::test]
     async fn connection_state_tracks_loss_recovery_and_failure() {
         let (gathered, _) = mpsc::channel(1);
+        let (candidates, _) = mpsc::channel(1);
         let (connected, mut connected_rx) = mpsc::channel(1);
         let (packets, _) = mpsc::channel(1);
         let state = Arc::new(AtomicU8::new(0));
         let generation = Arc::new(AtomicU64::new(0));
-        let handler = Handler { gathered, connected, packets, state: state.clone(), generation: generation.clone() };
+        let handler = Handler { gathered, candidates, connected, packets, state: state.clone(), generation: generation.clone() };
         handler.on_connection_state_change(RTCPeerConnectionState::Connected).await;
         assert_eq!(state.load(Ordering::Acquire), 1);
         assert!(connected_rx.try_recv().is_ok());
@@ -249,6 +281,33 @@ mod tests {
         }).await.unwrap();
         assert_eq!(VoiceDecoder::new().unwrap().decode(&received.0).unwrap().len(), FRAME_SAMPLES);
         assert_eq!(VoiceDecoder::new().unwrap().decode(&received.1).unwrap().len(), FRAME_SAMPLES);
+        a.close().await; b.close().await;
+    }
+    #[test]
+    fn local_mid_reads_the_audio_section_name() {
+        assert_eq!(local_mid("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\n"), "0");
+        assert_eq!(local_mid("v=0\r\na=mid:audio\r\n"), "audio");
+        assert_eq!(local_mid("v=0\r\n"), "0");
+    }
+    /// Rooms send the offer before any route is known and trickle routes afterwards, like browsers do.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trickled_routes_connect_two_native_peers_quickly() {
+        let started = Instant::now();
+        let mut a = VoiceTransport::new(vec![], false, vec!["127.0.0.1:0".into()]).await.unwrap();
+        let mut b = VoiceTransport::new(vec![], false, vec!["127.0.0.1:0".into()]).await.unwrap();
+        let offer = a.offer_now().await.unwrap();
+        let answer = b.answer_now(offer.clone(), &fingerprint(&offer).unwrap()).await.unwrap();
+        a.set_remote(answer.clone(), &fingerprint(&answer).unwrap(), false).await.unwrap();
+        let exchanged = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                while let Some(candidate) = a.next_local_candidate().await { assert!(crate::ice_candidate::valid_remote_candidate(&candidate)); b.add_remote_candidate(candidate).await.unwrap(); }
+                while let Some(candidate) = b.next_local_candidate().await { a.add_remote_candidate(candidate).await.unwrap(); }
+                if a.connected() && b.connected() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await;
+        assert!(exchanged.is_ok(), "trickled routes did not connect");
+        assert!(started.elapsed() < Duration::from_secs(5));
         a.close().await; b.close().await;
     }
 }

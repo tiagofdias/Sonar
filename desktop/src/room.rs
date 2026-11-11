@@ -65,14 +65,18 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
     let mut peers: HashMap<String, Peer> = HashMap::new();
     let mut next_source = 1u64;
     let (mut muted, mut deafened) = (false, false);
+    // Signals leave in order on their own task, so the audio loop never waits on the server.
+    // Offers and answers go out at once and network routes follow as they are found, like the web client.
+    let (outbox, mut queue) = mpsc::unbounded_channel::<(String, String, Value)>();
+    let sender = spec.clone();
+    tokio::spawn(async move { while let Some((to, session, data)) = queue.recv().await { let _ = signal(&sender, &to, &session, data).await; } });
     // Newcomers offer to everyone already present (like the web client).
     for (user, session) in spec.participants.iter().filter(|(user, _)| user != &spec.me) {
         let mut transport = VoiceTransport::new(servers.clone(), relay, bind()).await?;
-        let (sdp, _) = transport.offer().await?;
-        if signal(spec, user, session, json!({ "type": "offer", "sdp": { "type": "offer", "sdp": sdp } })).await.is_ok() {
-            peers.insert(user.clone(), Peer { session: session.clone(), transport, source: next_source, remote: false, pending: Vec::new() });
-            next_source += 1;
-        } else { transport.close().await; }
+        let sdp = transport.offer_now().await?;
+        let _ = outbox.send((user.clone(), session.clone(), json!({ "type": "offer", "sdp": { "type": "offer", "sdp": sdp } })));
+        peers.insert(user.clone(), Peer { session: session.clone(), transport, source: next_source, remote: false, pending: Vec::new() });
+        next_source += 1;
     }
     let mut reported = usize::MAX;
     loop {
@@ -94,12 +98,13 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
                             if let Some(old) = peers.remove(&from) { audio.remove_source(old.source); old.transport.close().await; }
                             let Ok(remote) = crate::voice_transport::fingerprint(&sdp) else { continue };
                             let Ok(mut transport) = VoiceTransport::new(servers.clone(), relay, bind()).await else { continue };
-                            match transport.answer_with_candidates(sdp, &remote, Vec::new()).await {
-                                Ok((answer, _)) if signal(spec, &from, &session, json!({ "type": "answer", "sdp": { "type": "answer", "sdp": answer } })).await.is_ok() => {
+                            match transport.answer_now(sdp, &remote).await {
+                                Ok(answer) => {
+                                    let _ = outbox.send((from.clone(), session.clone(), json!({ "type": "answer", "sdp": { "type": "answer", "sdp": answer } })));
                                     peers.insert(from, Peer { session, transport, source: next_source, remote: true, pending: Vec::new() });
                                     next_source += 1;
                                 }
-                                _ => transport.close().await,
+                                Err(_) => transport.close().await,
                             }
                         }
                         ("answer", Some(sdp)) => {
@@ -129,6 +134,9 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
         }
         let mut failed = Vec::new();
         for (user, peer) in peers.iter_mut() {
+            while let Some(candidate) = peer.transport.next_local_candidate().await {
+                let _ = outbox.send((user.clone(), peer.session.clone(), json!({ "type": "ice", "candidate": candidate })));
+            }
             while let Some(packet) = peer.transport.try_receive() { let _ = audio.play_from(peer.source, &packet); }
             if peer.transport.failed() { failed.push(user.clone()); }
         }

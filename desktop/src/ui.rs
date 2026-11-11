@@ -485,6 +485,16 @@ fn person_row<'a>(who: Face, name: &str, sub: &str, index: usize, dot: Option<Co
         stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0x70eeff).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
     } else { inner.into() }
 }
+/// What the voice room banner says about the audio links to everyone else in the room.
+/// Same wording as frontend/src/lib/roomStatus.js; failed links are dropped here, so they read as connecting.
+fn room_status(joining: bool, others: usize, connected: usize) -> String {
+    if joining { return "Connecting…".into(); }
+    if others == 0 { return "Waiting for others to join".into(); }
+    if connected >= others { return if others == 1 { "Connected".into() } else { "Connected to everyone".into() }; }
+    if connected == 0 { return "Connecting…".into(); }
+    format!("Connected to {connected} of {others}")
+}
+
 fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: Option<(Icon, &'a str, &'a str)>, overlay: Option<E<'a>>, app: &'a App) -> E<'a> {
     let name = app.session.as_ref().map(|s| s.account.full_name.as_str()).unwrap_or_default();
     // A community header's title fills the row itself; other headers push their action to the right.
@@ -830,7 +840,10 @@ fn call_banner(app: &App) -> Option<E<'_>> {
             t::icon(Icon::Volume, 23.0, rgb(0x70eeff)),
             column![
                 text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xeafaff)),
-                text(format!("{} · {}/6 people · {} peer {}", room.community_name, room.participants.len(), room.connections, if room.connections == 1 { "connection" } else { "connections" })).size(13).color(rgb(0xa9d8ee)),
+                text(format!("{} · {}/6 people · {}", room.community_name, room.participants.len(), {
+                    let mine = room.spec.as_ref().map(|s| s.session_id.as_str()).unwrap_or_default();
+                    room_status(joining, room.participants.iter().filter(|p| p.session_id != mine).count(), room.connections)
+                })).size(13).color(rgb(0xa9d8ee)),
             ].spacing(4).width(FILL),
             container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xbfeaff), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x0f3147), rgb(0x3f9dff), 5.0)),
             mic_btn(room.muted, app.mic_active && !room.deafened, Msg::RoomMute),
@@ -1688,4 +1701,18 @@ fn settings_view(app: &App) -> E<'_> {
     let card = container(row![navigation, t::rule(rgb(0x2a313a), false), stack![content, close_button]]).width(940).max_height(720).height(FILL)
         .style(t::modal_card(rgb(0x1b2025), rgb(0x333c46), 17.0));
     opaque(mouse_area(center(opaque(card)).padding(20).style(t::fill(rgba(0x090b0db8)))).on_press(if app.busy { Msg::Noop } else { close })).into()
+}
+
+#[cfg(test)]
+mod room_status_tests {
+    use super::room_status;
+    #[test]
+    fn room_status_matches_the_web() {
+        assert_eq!(room_status(true, 1, 0), "Connecting…");
+        assert_eq!(room_status(false, 0, 0), "Waiting for others to join");
+        assert_eq!(room_status(false, 1, 0), "Connecting…");
+        assert_eq!(room_status(false, 1, 1), "Connected");
+        assert_eq!(room_status(false, 3, 3), "Connected to everyone");
+        assert_eq!(room_status(false, 3, 1), "Connected to 1 of 3");
+    }
 }
