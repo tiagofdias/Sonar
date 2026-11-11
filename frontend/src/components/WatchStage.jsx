@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ListVideo, Pause, Play, Plus, SkipForward, Trash2, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ListVideo, Maximize2, Minimize2, Pause, Play, Plus, SkipForward, Trash2, Volume2, X } from "lucide-react";
 import Avatar from "./Avatar";
 import ActionMenu from "./ActionMenu";
 import { createYouTubeFrame, PLAYER_STATE } from "../lib/youtubeFrame";
@@ -28,6 +28,9 @@ export default function WatchStage({ watch, me, standalone = false }) {
   const [adding, setAdding] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [stuck, setStuck] = useState(false);
+  // Normal size keeps the chat visible below; large is for full-on watching. Remembered on this device.
+  const [large, setLarge] = useState(() => { try { return localStorage.getItem("sonar-watch-large") === "1"; } catch { return false; } });
+  const toggleSize = () => setLarge((value) => { try { localStorage.setItem("sonar-watch-large", value ? "0" : "1"); } catch { /* Only a preference. */ } return !value; });
   // A browser that blocks sound until a click still lets a muted video play, so the
   // group is not held up; this person then gets a "Turn on sound" button.
   const [mutedForAutoplay, setMutedForAutoplay] = useState(false);
@@ -144,7 +147,7 @@ export default function WatchStage({ watch, me, standalone = false }) {
   };
 
   return (
-    <section className={`watch-stage ${standalone ? "standalone" : ""}`} aria-label="Watch together">
+    <section className={`watch-stage ${standalone ? "standalone" : large ? "large" : ""} ${item ? "" : "empty"}`} aria-label="Watch together">
       <div className="watch-main">
         <div className="watch-player">
           <div className="watch-frame" ref={host} />
@@ -185,6 +188,7 @@ export default function WatchStage({ watch, me, standalone = false }) {
           <span className="watch-react">
             {REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => watch.react(emoji)}>{emoji}</button>)}
           </span>
+          {!standalone && item && <button className="icon-button" aria-label={large ? "Smaller player" : "Bigger player"} title={large ? "Smaller player (show the chat)" : "Bigger player"} onClick={toggleSize}>{large ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>}
           {!standalone && <button className="icon-button" aria-label="Stop watching" title="Stop watching" onClick={watch.leave}><X size={18} /></button>}
         </div>
         <div className="watch-viewers" aria-label="Who is watching">
