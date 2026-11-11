@@ -1516,7 +1516,7 @@ fn settings_view(app: &App) -> E<'_> {
                 .push(v_space(10.0))
                 .push(checkbox_row("Turn off typing indicators (yours and everyone else's)", app.preferences.typing_hidden, Msg::TypingHidden))
                 .push(v_space(10.0))
-                .push(checkbox_row("Quit Sonar when I close the window, instead of keeping it in the tray", app.settings.quit_on_close, Msg::QuitOnClose))
+                .push(checkbox_row("Keep Sonar running in the tray when I close the window", app.settings.keep_in_tray, Msg::KeepInTray))
                 .push(v_space(10.0))
                 .push(checkbox_row("Start Sonar with Windows", app.settings.start_with_windows, Msg::StartWithWindows))
                 .push(title("Keyword alerts"))

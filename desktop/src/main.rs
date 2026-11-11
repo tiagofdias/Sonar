@@ -382,7 +382,7 @@ pub enum Msg {
     CloseRequested(iced::window::Id),
     #[cfg(windows)]
     Tray(tray::Action),
-    QuitOnClose(bool),
+    KeepInTray(bool),
     StartWithWindows(bool),
     // Authentication.
     Restored(Result<Session, String>),
@@ -1351,7 +1351,7 @@ impl App {
             },
             Msg::CloseRequested(id) => {
                 #[cfg(windows)]
-                if !self.settings.quit_on_close { self.hidden = true; return iced::window::set_mode(id, iced::window::Mode::Hidden); }
+                if self.settings.keep_in_tray { self.hidden = true; return iced::window::set_mode(id, iced::window::Mode::Hidden); }
                 let _ = id;
                 #[cfg(windows)]
                 tray::remove();
@@ -1361,7 +1361,7 @@ impl App {
             Msg::Tray(tray::Action::Open) => { self.hidden = false; return show_window(); }
             #[cfg(windows)]
             Msg::Tray(tray::Action::Quit) => { tray::remove(); return iced::exit(); }
-            Msg::QuitOnClose(value) => { self.settings.quit_on_close = value; store::save_settings(&self.settings); }
+            Msg::KeepInTray(value) => { self.settings.keep_in_tray = value; store::save_settings(&self.settings); }
             Msg::StartWithWindows(value) => {
                 #[cfg(windows)]
                 if tray::set_start_with_windows(value) { self.settings.start_with_windows = value; store::save_settings(&self.settings); }

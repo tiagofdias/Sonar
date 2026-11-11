@@ -24,8 +24,8 @@ pub struct Settings {
     pub confirm_calls: bool,
     /// Matched on this device only. The server never sees them.
     pub keywords: Vec<String>,
-    /// Stored inverted so that closing hides to the tray by default.
-    pub quit_on_close: bool,
+    /// Off by default: closing the window quits Sonar. Replaces the old `quit_on_close`, so everyone starts from quitting.
+    pub keep_in_tray: bool,
     pub start_with_windows: bool,
 }
 pub fn load_settings() -> Settings {
