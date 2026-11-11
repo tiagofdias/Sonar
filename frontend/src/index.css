@@ -3101,13 +3101,11 @@ p {
 /* On a narrow player the reactions move to their own line so the seek bar stays usable. */
 .watch-controls { flex-wrap: wrap; row-gap: 4px; }
 .watch-seek { flex: 1 1 140px; }
-/* Theater view: once a video plays it takes the whole conversation area; "Chat view" brings the chat back. */
-.conversation:has(> .watch-stage.theater:not(.empty)) > .community-content,
-.conversation:has(> .watch-stage.theater:not(.empty)) > .message-scroll,
-.conversation:has(> .watch-stage.theater:not(.empty)) > .composer-area { display: none; }
-.watch-stage.theater:not(.empty) { flex: 1 1 auto; min-height: 0; align-content: start; --watch-height: clamp(180px, calc(100dvh - 430px), 80dvh); }
-.watch-stage.empty .watch-main { width: 100%; }
-.watch-stage.empty .watch-player { aspect-ratio: auto; height: 160px; }
+/* Theater view: the stage takes the whole conversation area and hides the chat; "Chat view" brings it back. */
+.conversation:has(> .watch-stage.theater) > .community-content,
+.conversation:has(> .watch-stage.theater) > .message-scroll,
+.conversation:has(> .watch-stage.theater) > .composer-area { display: none; }
+.watch-stage.theater { flex: 1 1 auto; min-height: 0; align-content: start; --watch-height: clamp(180px, calc(100dvh - 430px), 80dvh); }
 .watch-stage.empty .watch-controls > :not(.watch-view):not([aria-label="Stop watching"]) { display: none; }
 .watch-stage.empty .watch-controls { justify-content: flex-end; }
 /* Chat view: the chat is back at full size and the video keeps playing in a small corner player. */
