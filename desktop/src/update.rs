@@ -117,6 +117,7 @@ pub fn restart(version: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p256::elliptic_curve::Generate;
     use p256::ecdsa::{signature::Signer, SigningKey};
 
     fn manifest(key: &SigningKey, version: &str, sha256: &str) -> Manifest {
@@ -136,16 +137,31 @@ mod tests {
 
     #[test]
     fn signatures_cover_version_and_hash() {
-        let key = SigningKey::random(&mut rand_core::OsRng);
+        let key = SigningKey::generate();
         let public = *key.verifying_key();
         let good = manifest(&key, "1.0.0", "abc");
         assert!(signed(&public, &good));
         assert!(!signed(&public, &Manifest { version: "2.0.0".into(), sha256: good.sha256.clone(), signature: good.signature.clone() }));
         assert!(!signed(&public, &Manifest { version: good.version.clone(), sha256: "def".into(), signature: good.signature.clone() }));
-        let other = SigningKey::random(&mut rand_core::OsRng);
+        let other = SigningKey::generate();
         assert!(!signed(other.verifying_key(), &good));
     }
 
     #[test]
     fn the_built_in_key_is_readable() { assert!(release_key().is_some()); }
+
+    #[test]
+    fn unpacking_takes_only_the_program_from_the_archive() {
+        let folder = std::env::temp_dir().join(format!("sonar-update-test-{}", std::process::id()));
+        let inner = folder.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let target = inner.join("sonar-test.exe");
+        unpack(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/update-fixture.zip")), &target).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"SONAR-TEST-PROGRAM
+".repeat(200));
+        // The archive also holds a "../evil.exe" entry; only the named program is ever read.
+        assert!(!folder.join("evil.exe").exists());
+        assert_eq!(std::fs::read_dir(&inner).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(folder);
+    }
 }

@@ -4,13 +4,16 @@ import { protectRoute } from "../middleware/auth.middleware.js";
 import User from "../models/user.model.js";
 import Friendship from "../models/friendship.model.js";
 import { DISAPPEAR_OPTIONS, pairKey } from "../lib/friends.js";
-import { io } from "../lib/socket.js";
+import { io, presenceAudienceChanged } from "../lib/socket.js";
+import { userRateLimit } from "../middleware/userRateLimit.js";
 
 const router = express.Router();
 const MAX_OUTGOING = 100;
 const PUBLIC = "fullName username animal encryptionKey";
 const validNote = (note) => note && note.version === 1 && typeof note.iv === "string" && /^[A-Za-z0-9+/]{16}$/.test(note.iv) && typeof note.ciphertext === "string" && note.ciphertext.length >= 24 && note.ciphertext.length <= 2000 && /^[A-Za-z0-9+/]+={0,2}$/.test(note.ciphertext);
-const changed = (...ids) => ids.forEach((id) => io.to(String(id)).emit("friendsChanged", {}));
+const changed = (...ids) => { ids.forEach((id) => io.to(String(id)).emit("friendsChanged", {})); presenceAudienceChanged(...ids); };
+// Looking people up by username and sending requests is limited so accounts cannot be listed in bulk.
+const lookupLimit = userRateLimit({ limit: 30, windowMs: 60000 });
 
 router.get("/", protectRoute, async (req, res) => {
   try {
@@ -32,7 +35,7 @@ router.get("/", protectRoute, async (req, res) => {
 });
 
 // Lets a request carry a note that only its recipient can read.
-router.get("/key/:username", protectRoute, async (req, res) => {
+router.get("/key/:username", protectRoute, lookupLimit, async (req, res) => {
   const username = String(req.params.username).trim().replace(/^@/, "").toLowerCase();
   try {
     const target = await User.findOne({ username }).select(PUBLIC).lean();
@@ -43,7 +46,7 @@ router.get("/key/:username", protectRoute, async (req, res) => {
   }
 });
 
-router.post("/request", protectRoute, async (req, res) => {
+router.post("/request", protectRoute, lookupLimit, async (req, res) => {
   const username = typeof req.body.username === "string" ? req.body.username.trim().replace(/^@/, "").toLowerCase() : "";
   if (!username || username.length > 64) return res.status(400).json({ message: "Enter a username" });
   if (req.body.note !== undefined && !validNote(req.body.note)) return res.status(400).json({ message: "That note could not be sent" });

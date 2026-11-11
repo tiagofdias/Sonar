@@ -6,14 +6,14 @@ import Friendship from "../models/friendship.model.js";
 import PushSubscription from "../models/pushSubscription.model.js";
 import { pairKey } from "../lib/friends.js";
 import { allowedEndpoint, pushKeys } from "../lib/push.js";
-import { io } from "../lib/socket.js";
+import { io, presenceAudienceChanged } from "../lib/socket.js";
 
 const router = express.Router();
 const validId = (value) => typeof value === "string" && /^[a-f0-9]{24}$/i.test(value);
 const idList = (value, limit) => Array.isArray(value) && value.length <= limit && value.every(validId);
 const PUBLIC = "fullName username animal";
 const changed = (id) => io.to(String(id)).emit("preferencesChanged", {});
-const friendsChanged = (...ids) => ids.forEach((id) => io.to(String(id)).emit("friendsChanged", {}));
+const friendsChanged = (...ids) => { ids.forEach((id) => io.to(String(id)).emit("friendsChanged", {})); presenceAudienceChanged(...ids); };
 
 router.use(protectRoute);
 

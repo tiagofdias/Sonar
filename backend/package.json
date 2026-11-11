@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "node --test src/routes/features.test.js src/routes/friends.test.js src/models/message.test.js src/routes/community.test.js src/routes/auth.test.js src/routes/keyBackup.test.js src/routes/attachment.test.js src/routes/passkey.test.js src/routes/history.test.js src/routes/voice.test.js src/routes/voiceRooms.test.js src/routes/matrixDevice.test.js src/middleware/authRateLimit.test.js src/middleware/sharedRateLimit.test.js src/lib/socketSession.test.js src/lib/matrixKeys.test.js src/lib/matrixVerification.test.js src/lib/matrixSessionBinding.test.js src/lib/matrixEnrollment.test.js src/lib/matrixRotation.test.js src/lib/retentionIndexes.test.js",
+    "test": "node --test src/routes/features.test.js src/routes/friends.test.js src/models/message.test.js src/routes/community.test.js src/routes/auth.test.js src/routes/keyBackup.test.js src/routes/attachment.test.js src/routes/passkey.test.js src/routes/history.test.js src/routes/voice.test.js src/routes/voiceRooms.test.js src/routes/matrixDevice.test.js src/middleware/authRateLimit.test.js src/middleware/sharedRateLimit.test.js src/middleware/securityHeaders.test.js src/lib/socketSession.test.js src/lib/presence.test.js src/lib/matrixKeys.test.js src/lib/matrixVerification.test.js src/lib/matrixSessionBinding.test.js src/lib/matrixEnrollment.test.js src/lib/matrixRotation.test.js src/lib/retentionIndexes.test.js",
     "dev:local": "node scripts/dev-local.mjs",
     "test:retention-indexes": "node --test src/lib/retentionIndexes.test.js",
     "test:matrix-attachment": "node scripts/test-matrix-attachment.mjs",

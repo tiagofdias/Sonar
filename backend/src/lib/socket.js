@@ -9,7 +9,7 @@ import { installCalls } from "./calls.js";
 import { installVoiceRooms } from "./voiceRooms.js";
 import { voiceRoomUsers } from "./voiceActivity.js";
 import { watchSocketSession } from "./socketSession.js";
-import { areFriends } from "./friends.js";
+import { areFriends, friendIds } from "./friends.js";
 import { connection } from "./push.js";
 import Community from "../models/community.model.js";
 const app = express();
@@ -41,7 +41,7 @@ io.use(async (socket, next) => {
         .split(";")
         .map((c) => c.trim().split("=")),
     );
-    const payload = jwt.verify(cookies.jwt, process.env.JWT_SECRET);
+    const payload = jwt.verify(cookies.jwt, process.env.JWT_SECRET, { algorithms: ["HS256"] });
     if (!Number.isFinite(payload.exp)) throw new Error();
     const user = await User.findById(payload.userId).select("sessionVersion presence");
     if (!user || (payload.sessionVersion || 0) !== (user.sessionVersion || 0) || !(await validSession(payload)))
@@ -61,12 +61,54 @@ connection.isOnline = (id) => (io.sockets.adapter.rooms.get(String(id))?.size ||
 const objectId = (value) => typeof value === "string" && /^[a-f0-9]{24}$/i.test(value);
 // Each account's chosen status. "offline" hides a connected account from everyone.
 const chosenPresence = new Map();
-function broadcast() {
+// Who may learn that someone is online or what animal they chose: only their
+// friends and the people they share a community with, never every account.
+const AUDIENCE_MS = 20000;
+const audiences = new Map();
+export async function audienceOf(userId) {
+  const id = String(userId);
+  const cached = audiences.get(id);
+  if (cached && Date.now() - cached.at < AUDIENCE_MS) return cached.ids;
+  const [friends, communities] = await Promise.all([
+    friendIds(id),
+    Community.find({ members: id }).select("members").lean(),
+  ]);
+  const ids = new Set([id, ...friends.map(String)]);
+  for (const community of communities) for (const member of community.members) ids.add(String(member));
+  if (audiences.size > 20000) audiences.clear();
+  audiences.set(id, { ids, at: Date.now() });
+  return ids;
+}
+export async function emitToAudience(userId, event, data) {
+  try {
+    for (const id of await audienceOf(userId)) io.to(id).emit(event, data);
+  } catch { /* A courtesy update; the next refresh carries it. */ }
+}
+async function sendPresence() {
   const connected = [...new Set([...io.sockets.sockets.values()].map((s) => s.userId))];
   const visible = connected.filter((id) => chosenPresence.get(id) !== "offline");
-  io.emit("getOnlineUsers", visible);
   // A status someone picked always shows. Otherwise being in a voice room reads as available.
-  io.emit("getPresence", Object.fromEntries(visible.flatMap((id) => (["away", "busy"].includes(chosenPresence.get(id)) ? [[id, chosenPresence.get(id)]] : voiceRoomUsers.has(id) ? [[id, "room"]] : []))));
+  const status = (id) => (["away", "busy"].includes(chosenPresence.get(id)) ? chosenPresence.get(id) : voiceRoomUsers.has(id) ? "room" : null);
+  await Promise.all(connected.map(async (viewer) => {
+    try {
+      const audience = await audienceOf(viewer);
+      const seen = visible.filter((id) => audience.has(id));
+      io.to(viewer).emit("getOnlineUsers", seen);
+      io.to(viewer).emit("getPresence", Object.fromEntries(seen.flatMap((id) => (status(id) ? [[id, status(id)]] : []))));
+    } catch { /* The next change sends it again. */ }
+  }));
+}
+// Several changes at once (a reconnect storm) are sent as one update.
+let presenceQueued = false;
+function broadcast() {
+  if (presenceQueued) return;
+  presenceQueued = true;
+  setTimeout(() => { presenceQueued = false; sendPresence(); }, 50);
+}
+// Call when friendships or memberships change so the people involved see each other at once.
+export function presenceAudienceChanged(...ids) {
+  for (const id of ids) audiences.delete(String(id));
+  broadcast();
 }
 export function setPresence(userId, presence) {
   chosenPresence.set(String(userId), presence);

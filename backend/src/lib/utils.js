@@ -5,6 +5,7 @@ export const generateToken = async (userId, res, sessionVersion = 0, method = "p
   const sessionId = await createSession(userId, sessionVersion, method);
   const token = jwt.sign({ userId, sessionVersion, sessionId }, process.env.JWT_SECRET, {
     expiresIn: "7d",
+    algorithm: "HS256",
   });
 
   res.cookie("jwt", token, {

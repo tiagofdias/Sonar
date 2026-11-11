@@ -23,6 +23,7 @@ import Attachment from "./models/attachment.model.js";
 import { createMatrixDeviceRouter } from "./routes/matrixDevice.route.js";
 import { createMatrixMessagingRouter } from "./routes/matrixMessaging.route.js";
 import { app, server, allowedOrigins, io } from "./lib/socket.js";
+import { securityHeaders } from "./middleware/securityHeaders.js";
 
 dotenv.config();
 
@@ -31,6 +32,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Only list proxy addresses controlled by the operator; never trust arbitrary forwarded headers.
+// Hosts that do not publish their proxy addresses (Render, Fly, Heroku) can instead
+// say how many proxies sit in front of the app. Too high a number lets clients forge
+// their address; the right one makes each visitor count separately in the sign-in limits.
+if (process.env.TRUST_PROXY_HOPS) {
+  const hops = Number(process.env.TRUST_PROXY_HOPS);
+  if (!Number.isInteger(hops) || hops < 1 || hops > 5 || process.env.TRUST_PROXY_CIDRS)
+    throw new Error("TRUST_PROXY_HOPS must be a whole number from 1 to 5, and not combined with TRUST_PROXY_CIDRS");
+  app.set("trust proxy", hops);
+}
 if (process.env.TRUST_PROXY_CIDRS) {
   const proxies = process.env.TRUST_PROXY_CIDRS.split(",").map(value => value.trim()).filter(Boolean);
   if (!proxies.length || proxies.some(value => ["true", "false", "*"].includes(value.toLowerCase())))
@@ -48,6 +58,8 @@ const getAllowedOrigins = () => {
   return allowedOrigins;
 };
 
+app.disable("x-powered-by");
+app.use(securityHeaders());
 app.use(express.json({ limit: "800kb" }));
 app.use("/api", (req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 app.use(cookieParser());
@@ -75,11 +87,7 @@ app.use(
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
 app.use("/api/auth", authRoutes);
@@ -141,13 +149,8 @@ if (process.env.NODE_ENV === "production") {
     console.log("Searched paths:", candidates);
 
     app.get("*", (req, res) => {
-      res.status(404).json({
-        error: "Frontend build not found",
-        message: "Please ensure the frontend is built and copied to the correct location",
-        candidates: candidates,
-        cwd: process.cwd(),
-        __dirname: __dirname
-      });
+      // Server paths stay in the log above, not in a public response.
+      res.status(404).json({ error: "Frontend build not found" });
     });
   }
 } else {

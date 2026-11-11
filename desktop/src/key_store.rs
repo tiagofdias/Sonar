@@ -1,7 +1,7 @@
 // Experimental, explicit key storage. Never creates or replaces account identities automatically.
 #![allow(dead_code)]
 use p256::SecretKey;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
+use p256::elliptic_curve::sec1::ToSec1Point;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sha2::{Digest, Sha256};
 use std::{fs::{self, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}, ptr};
@@ -76,13 +76,14 @@ pub fn load(root: &Path, origin: &str, account: &str) -> Result<SecretKey, &'sta
 pub fn load_matching(root: &Path, origin: &str, account: &str, expected_public: &str) -> Result<SecretKey, &'static str> {
     let key = load(root, origin, account)?;
     let registered = STANDARD.decode(expected_public).map_err(|_| "invalid registered public key")?;
-    let actual = key.public_key().to_encoded_point(false);
+    let actual = key.public_key().to_sec1_point(false);
     if registered.as_slice() != actual.as_bytes() { return Err("local key does not match account identity"); }
     Ok(key)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p256::elliptic_curve::Generate;
     use rand_core::{OsRng, RngCore};
     use p256::pkcs8::DecodePrivateKey;
     #[test]
@@ -105,18 +106,18 @@ mod tests {
         let mut random = [0u8; 16]; OsRng.fill_bytes(&mut random);
         let root = std::env::temp_dir().join(format!("sonar-key-test-{:x}", u128::from_le_bytes(random)));
         let account = "0123456789abcdef01234567";
-        let key = SecretKey::random(&mut OsRng);
+        let key = SecretKey::generate();
         save_new(&root, "http://127.0.0.1:5000", account, &key).unwrap();
         let path = key_path(&root, "http://127.0.0.1:5000", account).unwrap();
         assert_ne!(fs::read(&path).unwrap(), key.to_bytes().to_vec());
         assert_eq!(load(&root, "http://127.0.0.1:5000", account).unwrap().to_bytes(), key.to_bytes());
-        let expected = STANDARD.encode(key.public_key().to_encoded_point(false).as_bytes());
+        let expected = STANDARD.encode(key.public_key().to_sec1_point(false).as_bytes());
         assert_eq!(load_matching(&root, "http://127.0.0.1:5000", account, &expected).unwrap().to_bytes(), key.to_bytes());
-        let other = SecretKey::random(&mut OsRng);
-        let other_public = STANDARD.encode(other.public_key().to_encoded_point(false).as_bytes());
+        let other = SecretKey::generate();
+        let other_public = STANDARD.encode(other.public_key().to_sec1_point(false).as_bytes());
         assert!(load_matching(&root, "http://127.0.0.1:5000", account, &other_public).is_err());
         assert!(load_matching(&root, "http://127.0.0.1:5000", account, "invalid").is_err());
-        assert!(save_new(&root, "http://127.0.0.1:5000", account, &SecretKey::random(&mut OsRng)).is_err());
+        assert!(save_new(&root, "http://127.0.0.1:5000", account, &SecretKey::generate()).is_err());
         let alternate = key_path(&root, "http://127.0.0.1:5001", account).unwrap();
         fs::copy(&path, &alternate).unwrap();
         assert!(load(&root, "http://127.0.0.1:5001", account).is_err());

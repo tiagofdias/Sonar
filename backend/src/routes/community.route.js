@@ -6,7 +6,8 @@ import ChannelMessage from "../models/channelMessage.model.js";
 import User from "../models/user.model.js";
 import { WEEK } from "../models/message.model.js";
 import { protectRoute } from "../middleware/auth.middleware.js";
-import { io } from "../lib/socket.js";
+import { io, presenceAudienceChanged } from "../lib/socket.js";
+import { userRateLimit } from "../middleware/userRateLimit.js";
 import { historyQuery, historyPage, pinUpdate } from "../lib/history.js";
 import { reconcileVoiceRooms } from "../lib/voiceRooms.js";
 import { areFriends, DISAPPEAR_OPTIONS, disappearingExpiry } from "../lib/friends.js";
@@ -47,6 +48,7 @@ export function channelName(value) {
 const nameTaken = (community, name, except) => community.channels.some((item) => item.name.toLowerCase() === name.toLowerCase() && String(item._id) !== String(except));
 const notify = (community) => {
   reconcileVoiceRooms(community);
+  presenceAudienceChanged(...community.members);
   for (const member of community.members)
     io.to(String(member)).emit("communityUpdated", {
       communityId: String(community._id),
@@ -87,6 +89,13 @@ export function validEnvelopes(envelopes, members) {
   );
 }
 router.use(protectRoute);
+// Creating and joining are limited so one account cannot fill the database or guess invites.
+const createLimit = userRateLimit({ limit: 20, windowMs: 15 * 60 * 1000 });
+const joinLimit = userRateLimit({ limit: 30, windowMs: 15 * 60 * 1000 });
+router.post(["/", "/group"], createLimit);
+router.post("/join", joinLimit);
+router.post("/invite-preview", userRateLimit({ limit: 120, windowMs: 15 * 60 * 1000 }));
+const channelSendLimit = userRateLimit({ limit: 120, windowMs: 60000 });
 router.get(
   "/",
   safe(async (req, res) => {
@@ -680,6 +689,7 @@ router.get(
 );
 router.post(
   "/:communityId/channels/:channelId/messages",
+  channelSendLimit,
   safe(async (req, res) => {
     const { envelopes, revision } = req.body;
     if (revision !== req.community.revision)

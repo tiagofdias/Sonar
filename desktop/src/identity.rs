@@ -6,8 +6,7 @@
 //!   - no key yet: create one protected by a new recovery key
 use crate::api::{Account, Session};
 use crate::key_backup::{self, RecoveryKey};
-use p256::SecretKey;
-use rand_core::OsRng;
+use p256::{elliptic_curve::Generate, SecretKey};
 use zeroize::Zeroizing;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +45,7 @@ pub async fn ensure(session: Session, password: Option<Zeroizing<String>>, recov
     let origin = session.origin();
     let Some(public_key) = session.account.encryption_key.clone() else {
         // New account: create the key and its recovery key on this computer.
-        let key = SecretKey::random(&mut OsRng);
+        let key = SecretKey::try_generate().map_err(|_| Problem::Failed("Could not create your encryption key.".into()))?;
         let recovery = RecoveryKey::generate().map_err(|e| Problem::Failed(e.into()))?;
         let backup = key_backup::wrap_recovery(&key, &recovery, &account_id).map_err(|e| Problem::Failed(e.into()))?;
         let account = session.publish_key(&backup.public_key, Some(&backup), Some(&recovery.verifier())).await.map_err(Problem::Failed)?;
@@ -83,7 +82,7 @@ pub async fn ensure(session: Session, password: Option<Zeroizing<String>>, recov
 /// (reset on a device that lacks the key, or turning on multi-device access).
 pub async fn rotate(session: Session, password: Zeroizing<String>) -> Result<Paired, String> {
     let account_id = session.me().to_owned();
-    let key = SecretKey::random(&mut OsRng);
+    let key = SecretKey::try_generate().map_err(|_| "Could not create your encryption key.".to_string())?;
     let recovery = RecoveryKey::generate()?;
     let backup = key_backup::wrap_recovery(&key, &recovery, &account_id)?;
     let account = session.rotate_key(&password, session.account.encryption_key.as_deref(), &backup.public_key, &backup, &recovery.verifier()).await?;

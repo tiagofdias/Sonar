@@ -14,6 +14,7 @@ import {
 import { protectRoute } from "../middleware/auth.middleware.js";
 import { passwordRateLimit } from "../middleware/passwordRateLimit.js";
 import { loginRateLimit, signupRateLimit } from "../middleware/authRateLimit.js";
+import { accountLoginLimit, accountRecoverLimit } from "../middleware/accountRateLimit.js";
 import passkeyRoutes from "./passkey.route.js";
 import LoginSession from "../models/loginSession.model.js";
 import { io, setPresence } from "../lib/socket.js";
@@ -22,7 +23,7 @@ const router = express.Router();
 router.use("/passkeys", passkeyRoutes);
 
 router.post("/signup", signupRateLimit, signup);
-router.post("/login", loginRateLimit, login);
+router.post("/login", loginRateLimit, accountLoginLimit, login);
 router.post("/logout", protectRoute, logout);
 
 router.get("/sessions", protectRoute, async (req, res) => {
@@ -163,7 +164,7 @@ router.put("/recovery", protectRoute, passwordRateLimit, async (req, res) => {
 // Forgotten password: the recovery key proves ownership without email. The
 // server checks SHA-256(proof) against the stored verifier, sets the new
 // password, signs out every other session and signs this one in.
-router.post("/recover", loginRateLimit, async (req, res) => {
+router.post("/recover", loginRateLimit, accountRecoverLimit, async (req, res) => {
   const { email, proof, newPassword } = req.body;
   const mismatch = () => res.status(400).json({ message: "That email and recovery key do not match." });
   if (typeof email !== "string" || email.length > 254) return mismatch();

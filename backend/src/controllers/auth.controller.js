@@ -1,10 +1,13 @@
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
-import { io } from "../lib/socket.js";
+import { randomBytes } from "node:crypto";
+import { io, emitToAudience } from "../lib/socket.js";
 import { parseKeyBackup } from "../lib/keyBackup.js";
 import { ANIMALS } from "../lib/animals.js";
 import { availableUsername, normalizeUsername, USERNAME_RULES } from "../lib/usernames.js";
+// A valid bcrypt hash of a random value nobody knows, compared against when an email has no account.
+const UNKNOWN_ACCOUNT_HASH = bcrypt.hashSync(randomBytes(32).toString("hex"), 12);
 const publicUser = (user) => ({
   _id: user._id,
   fullName: user.fullName,
@@ -63,8 +66,7 @@ export const signup = async (req, res) => {
       username = await availableUsername(fullName || email);
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     const newUser = new User({
       fullName: fullName.trim(),
@@ -101,12 +103,10 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     const user = await User.findOne({ email });
 
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    const isPasswordCorrect = await bcrypt.compare(password, user.password);
-    if (!isPasswordCorrect) {
+    // The same password work whether or not the account exists, so response
+    // time does not reveal which emails are registered.
+    const isPasswordCorrect = await bcrypt.compare(password, user?.password || UNKNOWN_ACCOUNT_HASH);
+    if (!user || !isPasswordCorrect) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
@@ -150,7 +150,7 @@ export const updateProfile = async (req, res) => {
       { fullName: fullName.trim(), ...(username ? { username } : {}), ...(animal ? { animal } : {}) },
       { new: true },
     ).select("-password");
-    if (animal) io.emit("profileChanged", { userId: String(user._id), animal });
+    if (animal) emitToAudience(user._id, "profileChanged", { userId: String(user._id), animal });
     res.json(publicUser(user));
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ message: "That username is taken" });

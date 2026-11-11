@@ -5,6 +5,7 @@ import Attachment from "../models/attachment.model.js";
 import Community from "../models/community.model.js";
 import User from "../models/user.model.js";
 import { protectRoute } from "../middleware/auth.middleware.js";
+import { userRateLimit } from "../middleware/userRateLimit.js";
 
 // Files are encrypted by the sender, so this only ever stores unreadable bytes.
 // The limits protect the free 512 MB database, which messages also use.
@@ -20,6 +21,7 @@ const usedBy = async (match) => (await Attachment.aggregate([{ $match: match }, 
 router.use(protectRoute);
 router.post(
   "/",
+  userRateLimit({ limit: 30, windowMs: 60000 }),
   express.raw({ type: "application/octet-stream", limit: MAX_FILE_BYTES + OVERHEAD }),
   async (req, res) => {
     const { to, community, channel } = req.query;
@@ -58,6 +60,7 @@ router.get("/:id", async (req, res) => {
       (file.communityId && await Community.exists({ _id: file.communityId, members: req.user._id, banned: { $ne: req.user._id } }));
     if (!allowed) return gone();
     res.set("Content-Type", "application/octet-stream");
+    res.set("Content-Disposition", "attachment");
     res.send(file.data);
   } catch {
     res.status(503).json({ message: "Could not load the file" });

@@ -14,7 +14,7 @@
 use aes_gcm::{aead::{Aead, Payload}, Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hmac::{Hmac, Mac};
-use p256::{elliptic_curve::sec1::ToEncodedPoint, pkcs8::{DecodePrivateKey, EncodePrivateKey}, SecretKey};
+use p256::{elliptic_curve::sec1::ToSec1Point, pkcs8::{DecodePrivateKey, EncodePrivateKey}, SecretKey};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -40,7 +40,7 @@ pub struct Backup {
 pub const WRONG_PASSWORD: &str = "That password could not unlock your encrypted messages.";
 
 pub fn public_key_text(key: &SecretKey) -> String {
-    STANDARD.encode(key.public_key().to_encoded_point(false).as_bytes())
+    STANDARD.encode(key.public_key().to_sec1_point(false).as_bytes())
 }
 
 /// PBKDF2-HMAC-SHA256 with a single 32-byte output block (RFC 8018).
@@ -228,6 +228,7 @@ mod recovery_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p256::elliptic_curve::Generate;
     fn fixture() -> serde_json::Value { serde_json::from_str(include_str!("../tests/key-backup-fixture.json")).unwrap() }
 
     #[test]
@@ -262,7 +263,7 @@ mod tests {
         assert_eq!(unwrap(&backup, "wrong password", account).unwrap_err(), WRONG_PASSWORD);
         assert_eq!(unwrap(&backup, password, "abcdef0123456789abcdef01").unwrap_err(), WRONG_PASSWORD);
         let mut swapped = backup.clone();
-        swapped.public_key = public_key_text(&SecretKey::random(&mut OsRng));
+        swapped.public_key = public_key_text(&SecretKey::generate());
         assert!(unwrap(&swapped, password, account).is_err());
         let mut weak = backup.clone();
         weak.iterations = Some(1000);
