@@ -3101,37 +3101,18 @@ p {
 /* On a narrow player the reactions move to their own line so the seek bar stays usable. */
 .watch-controls { flex-wrap: wrap; row-gap: 4px; }
 .watch-seek { flex: 1 1 140px; }
-/* Normal size leaves room for the chat under the player; "large" is the theatre size. */
-.watch-stage { --watch-height: clamp(150px, calc(100dvh - 760px), 46dvh); }
-.watch-stage.large { --watch-height: clamp(180px, calc(100dvh - 560px), 62dvh); }
-.watch-stage.standalone { --watch-height: calc(100dvh - 240px); }
-/* Nothing queued yet: a slim bar instead of an empty black screen. */
+/* Theater view: once a video plays it takes the whole conversation area; "Chat view" brings the chat back. */
+.conversation:has(> .watch-stage.theater:not(.empty)) > .community-content,
+.conversation:has(> .watch-stage.theater:not(.empty)) > .message-scroll,
+.conversation:has(> .watch-stage.theater:not(.empty)) > .composer-area { display: none; }
+.watch-stage.theater:not(.empty) { flex: 1 1 auto; min-height: 0; align-content: start; --watch-height: clamp(180px, calc(100dvh - 430px), 80dvh); }
 .watch-stage.empty .watch-main { width: 100%; }
-.watch-stage.empty .watch-player { aspect-ratio: auto; height: 120px; }
-.watch-stage.empty .watch-controls, .watch-stage.empty .watch-queue ol { display: none; }
-.watch-stage.empty .watch-queue { justify-content: center; }
-@media (max-width: 900px) { .watch-stage, .watch-stage.large, .watch-stage.standalone { --watch-height: 56vw; } }
-/* Watching on a wide window: video on the left, the conversation beside it on the right,
-   like a stream. Only while a video plays at normal size; "Bigger player" goes full width. */
-@media (min-width: 1200px) {
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(340px, 30%, 560px);
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-  }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > * { grid-column: 1 / -1; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .chat-top { grid-row: 1; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .retention-banner { grid-row: 2; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .watch-stage {
-    grid-column: 1; grid-row: 3; min-height: 0; margin-right: 0;
-    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
-    --watch-height: clamp(150px, calc(100dvh - 520px), 54dvh); overflow: hidden;
-  }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .watch-stage .watch-queue { max-height: none; min-height: 0; overflow: hidden; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .call-banner { grid-column: 1; grid-row: 4; margin-right: 0; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .community-content,
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .message-scroll { grid-column: 2; grid-row: 3 / span 2; min-height: 0; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .message-scroll { grid-row: 3; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .composer-area { grid-column: 2; grid-row: 4; }
-  .conversation:has(> .watch-stage:not(.large):not(.empty)) > .workspace-footer { grid-row: 5; }
-}
+.watch-stage.empty .watch-player { aspect-ratio: auto; height: 160px; }
+.watch-stage.empty .watch-controls > :not(.watch-view):not([aria-label="Stop watching"]) { display: none; }
+.watch-stage.empty .watch-controls { justify-content: flex-end; }
+/* Chat view: the chat is back at full size and the video keeps playing in a small corner player. */
+.watch-stage.chat { position: fixed; right: 24px; bottom: 176px; z-index: 60; width: min(380px, calc(100vw - 32px)); margin: 0; padding: 8px; grid-template-columns: minmax(0, 1fr); gap: 6px; box-shadow: 0 16px 40px #000a; --watch-height: 214px; }
+.watch-stage.chat .watch-main { width: 100%; gap: 6px; }
+.watch-stage.chat .watch-queue, .watch-stage.chat .watch-viewers, .watch-stage.chat .watch-react, .watch-stage.chat .watch-time { display: none; }
+.watch-stage.chat.empty .watch-player { display: none; }
+.watch-stage.chat.empty .watch-controls::before { content: "Watch together"; flex: 1; font-size: 13px; color: #d0d7dc; padding-left: 6px; }

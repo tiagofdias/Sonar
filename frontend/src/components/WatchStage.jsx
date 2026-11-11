@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ListVideo, Maximize2, Minimize2, Pause, Play, Plus, SkipForward, Trash2, Volume2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Clapperboard, ListVideo, MessageSquare, Pause, Play, Plus, SkipForward, Trash2, Volume2, X } from "lucide-react";
 import Avatar from "./Avatar";
 import ActionMenu from "./ActionMenu";
 import { createYouTubeFrame, PLAYER_STATE } from "../lib/youtubeFrame";
@@ -28,9 +28,11 @@ export default function WatchStage({ watch, me, standalone = false }) {
   const [adding, setAdding] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [stuck, setStuck] = useState(false);
-  // Normal size keeps the chat visible below; large is for full-on watching. Remembered on this device.
-  const [large, setLarge] = useState(() => { try { return localStorage.getItem("sonar-watch-large") === "1"; } catch { return false; } });
-  const toggleSize = () => setLarge((value) => { try { localStorage.setItem("sonar-watch-large", value ? "0" : "1"); } catch { /* Only a preference. */ } return !value; });
+  // Theater fills the conversation with the video; chat view brings the chat back and
+  // keeps the video playing in a small corner player. Only a CSS class changes, so the
+  // player is never reloaded when switching.
+  const [view, setView] = useState("theater");
+  const switchView = () => setView((value) => (value === "theater" ? "chat" : "theater"));
   // A browser that blocks sound until a click still lets a muted video play, so the
   // group is not held up; this person then gets a "Turn on sound" button.
   const [mutedForAutoplay, setMutedForAutoplay] = useState(false);
@@ -147,7 +149,7 @@ export default function WatchStage({ watch, me, standalone = false }) {
   };
 
   return (
-    <section className={`watch-stage ${standalone ? "standalone" : large ? "large" : ""} ${item ? "" : "empty"}`} aria-label="Watch together">
+    <section className={`watch-stage ${standalone ? "standalone" : view} ${item ? "" : "empty"}`} aria-label="Watch together">
       <div className="watch-main">
         <div className="watch-player">
           <div className="watch-frame" ref={host} />
@@ -188,14 +190,18 @@ export default function WatchStage({ watch, me, standalone = false }) {
           <span className="watch-react">
             {REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => watch.react(emoji)}>{emoji}</button>)}
           </span>
-          {!standalone && item && <button className="icon-button" aria-label={large ? "Smaller player" : "Bigger player"} title={large ? "Smaller player (show the chat)" : "Bigger player"} onClick={toggleSize}>{large ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>}
+          {!standalone && (
+            <button className="icon-button watch-view" aria-label={view === "theater" ? "Chat view" : "Theater view"} title={view === "theater" ? "Chat view: show the chat, keep watching in the corner" : "Theater view"} onClick={switchView}>
+              {view === "theater" ? <MessageSquare size={17} /> : <Clapperboard size={17} />}
+            </button>
+          )}
           {!standalone && <button className="icon-button" aria-label="Stop watching" title="Stop watching" onClick={watch.leave}><X size={18} /></button>}
         </div>
         <div className="watch-viewers" aria-label="Who is watching">
           {state.viewers.map((viewer) => (
             <span key={viewer.userId} className={`watch-viewer state-${viewer.state}`} title={`${viewer.name}: ${STATE_LABEL[viewer.state] || viewer.state}`}>
               <Avatar user={{ _id: viewer.userId, animal: viewer.animal }} />
-              <span><strong>{viewer.userId === me ? "You" : viewer.name}</strong><small>{STATE_LABEL[viewer.state] || viewer.state}</small></span>
+              <span><strong>{viewer.userId === me ? "You" : viewer.name}</strong><small>{!item && viewer.state === "joining" ? "Here" : STATE_LABEL[viewer.state] || viewer.state}</small></span>
             </span>
           ))}
         </div>
