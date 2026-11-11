@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ListVideo, Pause, Play, Plus, SkipForward, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ListVideo, Pause, Play, Plus, SkipForward, Trash2, Volume2, X } from "lucide-react";
 import Avatar from "./Avatar";
 import ActionMenu from "./ActionMenu";
 import { createYouTubeFrame, PLAYER_STATE } from "../lib/youtubeFrame";
@@ -28,6 +28,11 @@ export default function WatchStage({ watch, me, standalone = false }) {
   const [adding, setAdding] = useState(false);
   const [dragging, setDragging] = useState(null);
   const [stuck, setStuck] = useState(false);
+  // A browser that blocks sound until a click still lets a muted video play, so the
+  // group is not held up; this person then gets a "Turn on sound" button.
+  const [mutedForAutoplay, setMutedForAutoplay] = useState(false);
+  const stuckSince = useRef(0);
+  const triedMuted = useRef(false);
   // While dragging the bar nothing is sent; letting go jumps everyone once.
   const [scrub, setScrub] = useState(null);
   const commitScrub = () => {
@@ -104,10 +109,20 @@ export default function WatchStage({ watch, me, standalone = false }) {
       if (!current || !p || !current.queue[current.current] || !p.ready) return;
       const want = shouldPlay(current, me);
       const moving = Date.now() - time.current.moved < STALL_MS;
-      if (want && !moving) report("waiting");
-      else report("watching");
-      // A browser that blocked autoplay needs one click here.
-      setStuck(want && !moving && [PLAYER_STATE.unstarted, PLAYER_STATE.cued, PLAYER_STATE.paused].includes(playerState.current));
+      // A hidden tab (for example behind the Sonar window) gets fewer updates from
+      // YouTube; that is not a stall, so it never makes everyone wait.
+      if (want && !moving && !document.hidden) report("waiting");
+      else if (!want || moving) report("watching");
+      // Not started at all (rather than buffering or an ad): the browser blocked autoplay.
+      const blocked = want && !moving && [PLAYER_STATE.unstarted, PLAYER_STATE.cued, PLAYER_STATE.paused].includes(playerState.current);
+      if (!blocked) stuckSince.current = 0;
+      else if (!stuckSince.current) stuckSince.current = Date.now();
+      if (blocked && !triedMuted.current && Date.now() - stuckSince.current > 2500) {
+        triedMuted.current = true;
+        setMutedForAutoplay(true);
+        command(() => { p.mute(); p.play(); });
+      }
+      setStuck(blocked && triedMuted.current && Date.now() - stuckSince.current > 5000);
       if (want && moving && !current.hold) {
         const expected = expectedPosition(current, actions.current.offset.current);
         if (drifted(time.current.value, expected)) command(() => p.seek(expected));
@@ -147,8 +162,12 @@ export default function WatchStage({ watch, me, standalone = false }) {
               {!waitingOnMe && heldFor > CONTINUE_AFTER_MS && <button className="secondary compact" onClick={watch.continueWithout}>Continue without {waitingNames(state)}</button>}
             </div>
           )}
-          {stuck && !state.hold && (
-            <button className="watch-start primary" onClick={() => command(player.current.play)}><Play size={18} /> Start the video</button>
+          {/* Shown to the person whose browser needs a click, even while everyone waits for them. */}
+          {stuck && (
+            <button className="watch-start primary" onClick={() => { command(() => { player.current.unmute(); player.current.play(); }); setMutedForAutoplay(false); setStuck(false); }}><Play size={18} /> Start the video</button>
+          )}
+          {mutedForAutoplay && !stuck && item && (
+            <button className="watch-sound secondary compact" onClick={() => { player.current?.unmute(); setMutedForAutoplay(false); }}><Volume2 size={16} /> Turn on sound</button>
           )}
           <div className="watch-reactions" aria-hidden="true">
             {watch.reactions.map((reaction) => <span key={reaction.id} style={{ left: `${reaction.left}%` }}>{reaction.emoji}</span>)}

@@ -55,6 +55,8 @@ export function createYouTubeFrame(container, { videoId, start = 0, onReady, onS
     pause: () => command("pauseVideo"),
     seek: (seconds) => command("seekTo", [Math.max(0, seconds), true]),
     load: (id, seconds = 0) => command("loadVideoById", [{ videoId: id, startSeconds: Math.max(0, Math.floor(seconds)) }]),
+    mute: () => command("mute"),
+    unmute: () => command("unMute"),
     get ready() { return ready; },
     /** Removes the player completely so its memory is given back. */
     destroy() {

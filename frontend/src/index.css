@@ -3080,3 +3080,12 @@ p {
 .watch-gate strong { font-size: 18px; }
 .watch-gate small { color: #8f989f; margin-bottom: 8px; }
 @media (max-width: 900px) { .watch-stage { grid-template-columns: 1fr; margin: 10px 12px 0; } .watch-queue { max-height: 320px; } .watch-react { display: none; } }
+/* The browser page opened from the desktop app: the player is sized to the window's
+   height so the controls and viewers always stay on screen, at any window size. */
+.watch-page { height: 100vh; overflow: hidden; }
+.watch-stage.standalone { width: 100%; max-width: 1700px; margin: 0 auto; padding: 16px; overflow: hidden; }
+.watch-stage.standalone .watch-main { min-height: 0; }
+.watch-stage.standalone .watch-player { width: min(100%, calc((100vh - 240px) * 16 / 9)); margin: 0 auto; }
+.watch-stage.standalone .watch-queue { max-height: calc(100vh - 100px); }
+.watch-sound { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 900px) { .watch-page { height: auto; overflow: auto; } .watch-stage.standalone .watch-player { width: 100%; } }
