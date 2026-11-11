@@ -76,21 +76,28 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
     let mut muted = false;
     let mut deafened = false;
     let mut pending = Vec::new();
+    // Our network routes leave in order on their own task, after the offer or answer,
+    // so neither the ringing nor the call waits for every route to be found.
+    let (outbox, mut queue) = mpsc::unbounded_channel::<RTCIceCandidateInit>();
+    let (socket, peer, id) = (spec.socket.clone(), spec.peer.clone(), spec.id.clone());
+    tokio::spawn(async move { while let Some(candidate) = queue.recv().await { let _ = socket.candidate(&peer, &id, &candidate).await; } });
     let prepared = match &spec.role {
         Role::Outgoing => {
-            let offer = crate::voice_session::prepare_outgoing(&spec.session, spec.relay_only, bind).await?;
+            let mut offer = crate::voice_session::prepare_outgoing(&spec.session, spec.relay_only, bind).await?;
             if let Err(error) = spec.socket.offer(&spec.peer, &spec.id, &offer.offer_sdp).await { offer.cancel().await; return Err(error); }
             let _ = output.send(Update::Ringing).await;
             // Wait up to a minute for the callee to answer (the server also times out).
             let deadline = Instant::now() + Duration::from_secs(65);
             let answer = loop {
-                match tokio::time::timeout_at(deadline.into(), commands.recv()).await {
+                while let Some(candidate) = offer.next_local_candidate().await { let _ = outbox.send(candidate); }
+                if Instant::now() > deadline { offer.cancel().await; return Err("No answer.".into()); }
+                match tokio::time::timeout(Duration::from_millis(100), commands.recv()).await {
                     Ok(Some(Command::Answer(sdp))) => break sdp,
                     Ok(Some(Command::Candidate(candidate))) => pending.push(candidate),
                     Ok(Some(Command::Mute(value))) => muted = value,
                     Ok(Some(Command::Deafen(value))) => deafened = value,
                     Ok(Some(Command::Hangup)) | Ok(None) => { offer.cancel().await; return Ok(()); }
-                    Err(_) => { offer.cancel().await; return Err("No answer.".into()); }
+                    Err(_) => {}
                 }
             };
             let _ = output.send(Update::Connecting).await;
@@ -115,6 +122,7 @@ async fn drive(spec: &Spec, commands: &mut mpsc::UnboundedReceiver<Command>, out
             Ok(Ok(())) => break,
             Ok(Err(error)) => { prepared.cancel().await; return Err(error); }
             Err(_) => {
+                while let Some(candidate) = prepared.transport.next_local_candidate().await { let _ = outbox.send(candidate); }
                 while let Ok(command) = commands.try_recv() {
                     match command {
                         Command::Candidate(candidate) => { let _ = prepared.transport.add_remote_candidate(candidate).await; }

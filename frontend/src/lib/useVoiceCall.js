@@ -192,13 +192,16 @@ export function useVoiceCall(socket, inRoom = false) {
           iceTransportPolicy: relayOnly || fresh.relayOnly ? "relay" : "all" });
       },
     );
-    const clean = await denoisedStream(media);
-    if (!valid(current.id) || pc.current !== connection) {
-      clean.close();
-      throw new Error("Call ended");
-    }
-    cleaned.current = clean;
-    clean.stream.getTracks().forEach((track) => connection.addTrack(track, clean.stream));
+    // Ring straight away with the microphone as it is; the noise filter can take
+    // seconds to download and start, so its audio replaces the track once ready.
+    const raw = media.getAudioTracks()[0];
+    const sender = connection.addTrack(raw, media);
+    denoisedStream(media).then((clean) => {
+      if (!valid(current.id) || pc.current !== connection) return clean.close();
+      cleaned.current = clean;
+      const track = clean.stream.getAudioTracks()[0];
+      if (track && track !== raw) sender.replaceTrack(track).catch(() => {});
+    }).catch(() => {}); // Keep the plain microphone if the filter cannot start.
     update({ ...state.current, relayOnly });
     connection.onicecandidate = (event) => {
       if (!valid(current.id) || !event.candidate) return;

@@ -240,12 +240,16 @@ export function useVoiceRoom(socket) {
         return;
       }
       media.current = stream;
-      const clean = await denoisedStream(stream);
-      if (current.current?.intent !== intent || media.current !== stream) {
-        clean.close();
-        return;
-      }
-      cleaned.current = clean;
+      // Join straight away with the microphone as it is; the noise filter can take
+      // seconds to download and start, so its audio replaces the track once ready.
+      denoisedStream(stream).then((clean) => {
+        if (current.current?.intent !== intent || media.current !== stream) return clean.close();
+        cleaned.current = clean;
+        const track = clean.stream.getAudioTracks()[0];
+        if (!track || clean.stream === stream) return;
+        for (const peer of peers.current.values())
+          peer.pc.getSenders().find((sender) => sender.track?.kind === "audio")?.replaceTrack(track).catch(() => {});
+      }).catch(() => {}); // Keep the plain microphone if the filter cannot start.
       stream.getAudioTracks().forEach((track) => {
         track.enabled = !mute.current && !deaf.current;
         track.onended = () => {

@@ -101,6 +101,10 @@ impl CallHandle {
         if sdp.is_empty() || sdp.len() > 30000 { return Err("Invalid call offer.".into()); }
         self.send_signal(peer, id, serde_json::json!({ "type": "offer", "callId": id, "sdp": { "type": "offer", "sdp": sdp } })).await
     }
+    /// One of our network routes, sent after the offer or answer like the web client does.
+    pub async fn candidate(&self, peer: &str, id: &str, candidate: &rtc::peer_connection::transport::RTCIceCandidateInit) -> Result<(), String> {
+        self.send_signal(peer, id, serde_json::json!({ "type": "ice", "callId": id, "candidate": candidate })).await
+    }
     pub async fn hangup(&self, peer: &str, id: &str) -> Result<(), String> {
         self.send_signal(peer, id, serde_json::json!({ "type": "hangup", "callId": id })).await
     }

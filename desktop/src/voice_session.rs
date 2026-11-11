@@ -30,12 +30,21 @@ impl OutgoingOffer {
         Ok(PreparedCall { transport: self.transport, answer_sdp: String::new(), local_fingerprint: self.local_fingerprint })
     }
     pub async fn cancel(self) { self.transport.close().await; }
+    /// A local network route found since the last call, to send while the call rings.
+    pub async fn next_local_candidate(&mut self) -> Option<rtc::peer_connection::transport::RTCIceCandidateInit> { self.transport.next_local_candidate().await }
 }
 
+/// The offer is ready at once so the other person starts ringing straight away;
+/// network routes follow through `OutgoingOffer::next_local_candidate`.
 pub async fn prepare_outgoing(session: &Session, relay_only: bool, bind: Vec<String>) -> Result<OutgoingOffer, String> {
     let (servers, relay) = session.voice_configuration().await?.into_servers(relay_only)?;
     let mut transport = VoiceTransport::new(servers, relay, bind).await?;
-    match transport.offer().await {
+    let prepared = async {
+        let offer_sdp = transport.offer_now().await?;
+        let local_fingerprint = crate::voice_transport::fingerprint(&offer_sdp).map_err(str::to_owned)?;
+        Ok::<_, String>((offer_sdp, local_fingerprint))
+    }.await;
+    match prepared {
         Ok((offer_sdp, local_fingerprint)) => Ok(OutgoingOffer { transport, offer_sdp, local_fingerprint }),
         Err(error) => { transport.close().await; Err(error) }
     }
@@ -117,7 +126,15 @@ impl ActiveCall {
 pub async fn prepare_incoming(session: &Session, call: IncomingCall, verified_fingerprint: &str, relay_only: bool, bind: Vec<String>) -> Result<PreparedCall, String> {
     let (servers, relay) = session.voice_configuration().await?.into_servers(relay_only)?;
     let mut transport = VoiceTransport::new(servers, relay, bind).await?;
-    match transport.answer_with_candidates(call.sdp, verified_fingerprint, call.candidates).await {
+    // Answer at once; our network routes follow through `transport.next_local_candidate`.
+    let prepared = async {
+        if call.candidates.len() > 128 || call.candidates.iter().any(|candidate| !crate::ice_candidate::valid_remote_candidate(candidate)) { return Err("Invalid network candidates".to_string()); }
+        let answer_sdp = transport.answer_now(call.sdp, verified_fingerprint).await?;
+        for candidate in call.candidates { transport.add_remote_candidate(candidate).await?; }
+        let local_fingerprint = crate::voice_transport::fingerprint(&answer_sdp).map_err(str::to_owned)?;
+        Ok((answer_sdp, local_fingerprint))
+    }.await;
+    match prepared {
         Ok((answer_sdp, local_fingerprint)) => Ok(PreparedCall { transport, answer_sdp, local_fingerprint }),
         Err(error) => { transport.close().await; Err(error) }
     }
