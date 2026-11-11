@@ -3089,3 +3089,15 @@ p {
 .watch-stage.standalone .watch-queue { max-height: calc(100vh - 100px); }
 .watch-sound { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 900px) { .watch-page { height: auto; overflow: auto; } .watch-stage.standalone .watch-player { width: 100%; } }
+/* The player is sized by the height available, not the column width, so the stage
+   never pushes the chat and call bar off the screen on wide or short windows. */
+.watch-stage { --watch-height: clamp(180px, calc(100dvh - 560px), 62dvh); }
+.watch-stage:not(.standalone) { flex-shrink: 0; }
+.watch-stage.standalone { --watch-height: calc(100dvh - 240px); }
+.watch-stage .watch-main { width: min(100%, calc(var(--watch-height) * 16 / 9)); justify-self: center; }
+.watch-stage .watch-player, .watch-stage.standalone .watch-player { width: 100%; margin: 0; }
+.watch-stage .watch-queue, .watch-stage.standalone .watch-queue { max-height: calc(var(--watch-height) + 110px); }
+@media (max-width: 900px) { .watch-stage, .watch-stage.standalone { --watch-height: 56vw; } }
+/* On a narrow player the reactions move to their own line so the seek bar stays usable. */
+.watch-controls { flex-wrap: wrap; row-gap: 4px; }
+.watch-seek { flex: 1 1 140px; }
