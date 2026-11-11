@@ -448,10 +448,12 @@ fn rail(app: &App) -> E<'_> {
         .into()
 }
 
-fn section<'a>(label: &str, extra: Option<E<'a>>) -> E<'a> {
+fn section<'a>(label: &str, extra: Option<E<'a>>) -> E<'a> { section_at(label, extra, 34.0) }
+/// A sidebar heading; `top` is the space above it (the first heading sits closer to the header).
+fn section_at<'a>(label: &str, extra: Option<E<'a>>, top: f32) -> E<'a> {
     let mut line = Row::new().align_y(Vertical::Center).height(20).push(text(t::tracked(label)).size(12).font(t::bold()).color(rgb(0x75818b))).push(grow());
     if let Some(extra) = extra { line = line.push(extra); }
-    container(line).padding(Padding { top: 34.0, bottom: 9.0, left: 10.0, right: 10.0 }).into()
+    container(line).padding(Padding { top, bottom: 9.0, left: 10.0, right: 10.0 }).into()
 }
 fn nav_row<'a>(icon: Option<Icon>, label: impl text::IntoFragment<'a>, trailing: Option<E<'a>>, selected: bool, on: Option<Msg>) -> E<'a> {
     let color = if selected { rgb(0xd0d7dc) } else { rgb(0x98a1a7) };
@@ -483,11 +485,13 @@ fn person_row<'a>(who: Face, name: &str, sub: &str, index: usize, dot: Option<Co
         stack![inner, container(space()).width(2).height(57).style(|_| container::Style { background: Some(rgb(0x70eeff).into()), border: t::border(Color::TRANSPARENT, 0.0, 1.0), ..Default::default() })].into()
     } else { inner.into() }
 }
-fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: Option<(Icon, &'a str, &'a str)>, app: &'a App) -> E<'a> {
+fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>, mini: Option<(Icon, &'a str, &'a str)>, overlay: Option<E<'a>>, app: &'a App) -> E<'a> {
     let name = app.session.as_ref().map(|s| s.account.full_name.as_str()).unwrap_or_default();
-    let mut header = Row::new().align_y(Vertical::Center).push(title).push(grow());
+    // A community header's title fills the row itself; other headers push their action to the right.
+    let mut header = Row::new().spacing(6).align_y(Vertical::Center).push(title);
+    if app.mode != Mode::Community { header = header.push(grow()); }
     if let Some(action) = header_action { header = header.push(action); }
-    let header = column![container(header).height(82).padding([0, 25]).center_y(82), t::rule(t::LINE, true)];
+    let header = column![container(header).height(82).padding(if app.mode == Mode::Community { [0, 12] } else { [0, 25] }).center_y(82), t::rule(t::LINE, true)];
     let mini: E<'a> = match mini { Some(mini) => container(container(row![t::icon(mini.0, 19.0, rgb(0xd0d7dc)), column![text(mini.1).size(14).color(rgb(0xb4babf)), text(mini.2).size(12).color(rgb(0x7d8892))].spacing(5)].spacing(10).align_y(Vertical::Center))
         .padding([13, 12]).width(FILL).style(t::gradient_panel(120.0, rgb(0x1d2329), rgb(0x1a1f25), rgb(0x293039), 8.0))).padding(Padding { top: 10.0, bottom: 21.0, left: 18.0, right: 18.0 }).into(), None => space().height(0).into() };
     let status = app.session.as_ref().map_or("online", |s| if s.account.presence.is_empty() { "online" } else { s.account.presence.as_str() });
@@ -508,7 +512,10 @@ fn sidebar_frame<'a>(title: E<'a>, header_action: Option<E<'a>>, content: E<'a>,
         icon_btn(Icon::LogOut, 17.0, Some(Msg::SignOut), false),
     ].spacing(10).align_y(Vertical::Center)).padding([15, 18]).style(t::fill(t::FOOTER_BG)));
     row![
-        container(column![header, scroll_area(container(content).padding([27, 15])).height(FILL), mini, footer]).width(299).height(FILL).style(t::fill(t::SIDEBAR)),
+        container(column![header, match overlay {
+            Some(overlay) => E::from(stack![scroll_area(container(content).padding([27, 15])).height(FILL), overlay].height(FILL)),
+            None => scroll_area(container(content).padding([27, 15])).height(FILL).into(),
+        }, mini, footer]).width(299).height(FILL).style(t::fill(t::SIDEBAR)),
         t::rule(t::LINE_SIDEBAR, false),
     ].into()
 }
@@ -563,24 +570,33 @@ fn sidebar(app: &App) -> E<'_> {
                 section("GROUPS", Some(icon_btn(Icon::Plus, 15.0, Some(Msg::OpenPanel(Some(Panel::Group))), false))),
                 groups,
             ];
-            sidebar_frame(title.into(), Some(icon_btn(Icon::ChevronDown, 18.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)), content.into(), Some((Icon::ShieldCheck, "A little more private.", "Messages disappear after 7 days.")), app)
+            sidebar_frame(title.into(), Some(icon_btn(Icon::ChevronDown, 18.0, Some(Msg::OpenPanel(Some(Panel::Privacy))), false)), content.into(), Some((Icon::ShieldCheck, "A little more private.", "Messages disappear after 7 days.")), None, app)
         }
         Mode::Community => {
-            let title_text = app.community.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| "Communities".into());
-            let title = container(text(title_text).size(if app.community.is_some() { 17 } else { 28 }).font(t::heavy()).color(t::TEXT).wrapping(text::Wrapping::None)).max_width(185);
-            let mut content = Column::new().push(nav_row(Some(Icon::ArrowLeft), "Back to messages", None, false, Some(Msg::SetMode(Mode::Direct))));
-            let header_action = app.community.as_ref().map(|_| icon_btn(Icon::Users, 18.0, Some(Msg::ToggleMembers), false));
+            // The name opens one menu with every community action; the list below is only channels and rooms.
+            let back = icon_btn(Icon::ArrowLeft, 18.0, Some(Msg::SetMode(Mode::Direct)), false);
+            let mut content = Column::new();
+            let mut overlay = None;
+            let (title, header_action): (E, Option<E>) = match &app.community {
+                Some(community) => {
+                    let count = community.members.len();
+                    let online = community.members.iter().filter(|id| app.online.contains(*id)).count();
+                    let name = column![
+                        text(community.name.clone()).size(17).font(t::heavy()).color(t::TEXT).wrapping(text::Wrapping::None),
+                        text(format!("{count} {} · {online} online", if count == 1 { "member" } else { "members" })).size(12).color(rgb(0x89939a)),
+                    ].spacing(2).width(FILL).clip(true);
+                    let opener = button(row![name, t::icon(Icon::ChevronDown, 16.0, rgb(0x8c969d))].spacing(6).align_y(Vertical::Center))
+                        .width(FILL).padding([6, 8]).style(t::person_row(false)).on_press(Msg::ToggleManage);
+                    (row![back, opener].spacing(6).align_y(Vertical::Center).width(FILL).into(), Some(icon_btn(Icon::Users, 18.0, Some(Msg::ToggleMembers), app.members_open)))
+                }
+                None => (row![back, text("Communities").size(28).font(t::heavy()).color(t::TEXT)].spacing(10).align_y(Vertical::Center).into(), None),
+            };
             match &app.community {
                 Some(community) => {
                     let owner = app.owner();
-                    let count = community.members.len();
-                    content = content.push(container(text(format!("{count} {}", if count == 1 { "member" } else { "members" })).size(13).color(rgb(0x89939a))).padding(Padding { top: 2.0, bottom: 14.0, left: 12.0, right: 12.0 }));
+                    let moderator = app.moderator();
                     let group = community.kind == "group";
-                    if owner && !group {
-                        content = content.push(button(row![t::icon(Icon::Users, 15.0, rgb(0xd0d7dc)), text("Invite your people").size(14).color(rgb(0xd0d7dc)), grow(), t::icon(Icon::Plus, 14.0, rgb(0xd0d7dc))].spacing(8).align_y(Vertical::Center))
-                            .width(FILL).padding(11).style(t::community_invite()).on_press(Msg::OpenDialog(Some(Dialog::Invite))));
-                    }
-                    content = content.push(section("TEXT CHANNELS", (owner && !group).then(|| icon_btn(Icon::Plus, 16.0, Some(Msg::NewChannel(false)), false))));
+                    content = content.push(section_at("CHANNELS", (owner && !group).then(|| icon_btn(Icon::Plus, 16.0, Some(Msg::NewChannel(false)), false)), 6.0));
                     for channel in community.channels.iter().filter(|c| c.kind != "voice") {
                         let selected = app.channel.as_deref() == Some(&channel.id);
                         let mut trailing = Row::new().spacing(8).align_y(Vertical::Center);
@@ -589,33 +605,51 @@ fn sidebar(app: &App) -> E<'_> {
                         content = content.push(nav_row(Some(Icon::Hash), channel.name.clone(), Some(trailing.into()), selected, Some(Msg::OpenChannel(channel.id.clone()))));
                     }
                     content = content.push(voice_rooms(app, community));
-                    let moderator = app.moderator();
-                    let muted = app.muted(&community.id);
-                    let kind = if group { "group" } else { "server" };
-                    content = content.push(nav_row(Some(if muted { Icon::Bell } else { Icon::BellOff }), format!("{} {kind}", if muted { "Unmute" } else { "Mute" }), None, false, Some(Msg::ToggleMute(community.id.clone()))));
-                    if (owner || moderator) && !group {
-                        content = content.push(nav_row(Some(Icon::Settings), "Manage community", Some(t::icon(Icon::ChevronDown, 15.0, rgb(0x89939a))), false, Some(Msg::ToggleManage)));
-                        if app.manage_open { content = content.push(nav_row(None, "Who joined or left", None, false, Some(Msg::OpenDialog(Some(Dialog::Activity))))); }
-                        if app.manage_open && app.may("lock") {
-                            for room in community.channels.iter().filter(|c| c.kind == "voice") {
-                                let (icon, verb) = if room.voice_locked { (Icon::LockOpen, "Unlock") } else { (Icon::Lock, "Lock") };
-                                content = content.push(nav_row(Some(icon), format!("{verb} {}", room.name), None, false, Some(Msg::RoomLock(room.id.clone(), !room.voice_locked))));
+                    if app.manage_open {
+                        let item = |icon: Icon, label: String, danger: bool, on: Msg| -> E {
+                            let color = if danger { rgb(0xc28b98) } else { rgb(0xc8cdd1) };
+                            button(row![t::icon(icon, 16.0, if danger { color } else { rgb(0x8c969d) }), text(label).size(14).color(color)].spacing(10).align_y(Vertical::Center))
+                                .width(FILL).padding([9, 10]).style(t::person_row(false)).on_press(on).into()
+                        };
+                        let line = || -> E { container(t::rule(rgb(0x272e35), true)).padding([4, 2]).into() };
+                        let muted = app.muted(&community.id);
+                        let kind = if group { "group" } else { "server" };
+                        let mut menu = Column::new().spacing(2);
+                        if owner && !group { menu = menu.push(item(Icon::UserPlus, "Invite your people".into(), false, Msg::OpenDialog(Some(Dialog::Invite)))); }
+                        menu = menu.push(item(if muted { Icon::Bell } else { Icon::BellOff }, format!("{} {kind}", if muted { "Unmute" } else { "Mute" }), false, Msg::ToggleMute(community.id.clone())));
+                        if (owner || moderator) && !group {
+                            menu = menu.push(line()).push(container(text(t::tracked("MANAGE")).size(11).font(t::bold()).color(rgb(0x74808b))).padding(Padding { top: 6.0, bottom: 2.0, left: 10.0, right: 10.0 }));
+                            menu = menu.push(item(Icon::Users, "Who joined or left".into(), false, Msg::OpenDialog(Some(Dialog::Activity))));
+                            if app.may("lock") {
+                                for room in community.channels.iter().filter(|c| c.kind == "voice") {
+                                    let (icon, verb) = if room.voice_locked { (Icon::LockOpen, "Unlock") } else { (Icon::Lock, "Lock") };
+                                    menu = menu.push(item(icon, format!("{verb} {}", room.name), false, Msg::RoomLock(room.id.clone(), !room.voice_locked)));
+                                }
+                            }
+                            if owner {
+                                menu = menu.push(item(Icon::Pencil, "Rename community".into(), false, Msg::OpenDialog(Some(Dialog::RenameCommunity))))
+                                    .push(item(Icon::Pencil, "Rename a channel or room".into(), false, Msg::OpenDialog(Some(Dialog::RenameChannel))));
                             }
                         }
-                        if app.manage_open && owner {
-                            content = content
-                            .push(nav_row(None, "Rename community", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameCommunity)))))
-                            .push(nav_row(None, "Rename a channel or room", None, false, Some(Msg::OpenDialog(Some(Dialog::RenameChannel)))))
-                            .push(danger_row(None, "Delete a channel or room", Some(Msg::OpenDialog(Some(Dialog::DeleteChannel)))))
-                            .push(danger_row(None, "Delete community", Some(Msg::AskConfirm(Some(Confirm { action: "delete-community".into(), member: None, channel: None })))));
+                        menu = menu.push(line());
+                        if owner && !group {
+                            menu = menu.push(item(Icon::Trash, "Delete a channel or room".into(), true, Msg::OpenDialog(Some(Dialog::DeleteChannel))))
+                                .push(item(Icon::Trash, "Delete community".into(), true, Msg::AskConfirm(Some(Confirm { action: "delete-community".into(), member: None, channel: None }))));
                         }
-                    }
-                    if !owner {
-                        content = content.push(danger_row(Some(Icon::LogOut), if group { "Leave group" } else { "Leave community" }, Some(Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None })))));
+                        if !owner {
+                            menu = menu.push(item(Icon::LogOut, if group { "Leave group" } else { "Leave community" }.into(), true, Msg::AskConfirm(Some(Confirm { action: "leave".into(), member: None, channel: None }))));
+                        }
+                        // Clicking anywhere else in the sidebar closes the menu.
+                        let away = mouse_area(container(space()).width(FILL).height(FILL)).on_press(Msg::ToggleManage);
+                        let card = container(container(menu).padding(6).width(FILL).style(|_| container::Style {
+                            background: Some(rgb(0x161a1e).into()), border: t::border(rgb(0x2c343d), 1.0, 10.0),
+                            shadow: iced::Shadow { color: Color { a: 0.55, ..Color::BLACK }, offset: iced::Vector::new(0.0, 12.0), blur_radius: 32.0 }, ..Default::default()
+                        })).padding(Padding { top: 6.0, left: 12.0, right: 12.0, bottom: 0.0 });
+                        overlay = Some(stack![away, card].width(FILL).height(FILL).into());
                     }
                 }
                 None => {
-                    content = content.push(section("YOUR COMMUNITIES", None));
+                    content = content.push(section_at("YOUR COMMUNITIES", None, 6.0));
                     for (index, item) in app.communities.iter().filter(|c| c.kind != "group").enumerate() {
                         content = content.push(person_row(Face::Letters(item.name.clone()), &item.name, &format!("{} members", item.members.len()), index, None, false, vec![t::icon(Icon::ArrowUpRight, 15.0, rgb(0x98a1a7))], Some(Msg::OpenCommunity(Some(item.id.clone())))));
                     }
@@ -623,7 +657,7 @@ fn sidebar(app: &App) -> E<'_> {
                         .push(nav_row(Some(Icon::Users), "Join with an invite", None, false, Some(Msg::OpenDialog(Some(Dialog::Join)))));
                 }
             }
-            sidebar_frame(title.into(), header_action, content.into(), None, app)
+            sidebar_frame(title, header_action, content.into(), None, overlay, app)
         }
     }
 }

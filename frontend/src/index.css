@@ -2993,3 +2993,20 @@ p {
 
 /* People's animals sit on the app's blue; servers keep their grey letters. */
 .avatar-tile.animal-tile, .person .avatar-tile.animal-tile, .settings-avatar.animal-tile { background: #12405f; color: #d7f3ff; }
+
+/* Community sidebar: the name opens one menu with every community action. */
+.community-header { position: relative; justify-content: flex-start; gap: 6px; padding: 0 12px 0 14px; }
+.community-title { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; align-items: center; text-align: left; padding: 6px 8px; border-radius: 8px; color: #d0d7dc; }
+.community-title:hover, .community-title[aria-expanded="true"] { background: #20252c; }
+.community-title .community-name { font-family: "Poppins", system-ui, sans-serif; font-weight: 800; font-size: 17px !important; max-width: none; }
+.community-title small { grid-row: 2; font-size: 12px; color: #89939a; margin-top: 2px; }
+.community-title > svg { grid-row: 1 / span 2; grid-column: 2; color: #8c969d; transition: transform 0.15s; }
+.community-title[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.community-menu { position: absolute; top: calc(100% - 6px); left: 12px; right: 12px; z-index: 30; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: #161a1e; border: 1px solid #2c343d; border-radius: 10px; box-shadow: 0 12px 32px #0008; }
+.community-menu button { display: flex; align-items: center; gap: 10px; padding: 9px 10px; font-size: 14px; color: #c8cdd1; text-align: left; border-radius: 6px; }
+.community-menu button:hover, .community-menu button:focus-visible { background: #222930; outline: none; }
+.community-menu button svg { color: #8c969d; flex-shrink: 0; }
+.community-menu button.danger, .community-menu button.danger svg { color: #c28b98; }
+.community-menu hr { border: 0; border-top: 1px solid #272e35; margin: 4px 2px; }
+.community-menu-label { font-size: 11px; letter-spacing: 1.5px; font-weight: 700; color: #74808b; padding: 6px 10px 2px; }
+.community-header + .sidebar-body > .sidebar-section:first-child { margin-top: 6px; }

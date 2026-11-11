@@ -1139,6 +1139,8 @@ impl App {
     }
 
     fn update(&mut self, message: Msg) -> Task<Msg> {
+        // The community menu closes once anything in it, or anywhere you go next, is chosen.
+        if matches!(message, Msg::OpenDialog(_) | Msg::AskConfirm(_) | Msg::ToggleMute(_) | Msg::RoomLock(..) | Msg::OpenChannel(_) | Msg::SetMode(_) | Msg::OpenCommunity(_) | Msg::OpenGroup(_) | Msg::ToggleMembers) { self.manage_open = false; }
         match message {
             Msg::Tick => {
                 self.now = chat::now();
@@ -2427,6 +2429,7 @@ impl App {
             "panel" => Some(Msg::OpenPanel(match value.as_str() { "people" => Some(Panel::People), "privacy" => Some(Panel::Privacy), _ => None })),
             "dialog" => Some(Msg::OpenDialog(match value.as_str() { "create" => Some(Dialog::Create), "invite" => Some(Dialog::Invite), "start" => Some(Dialog::Start), _ => None })),
             "members" => Some(Msg::ToggleMembers),
+            "menu" => Some(Msg::ToggleManage),
             "type" => { self.composer = text_editor::Content::with_text(&value); None }
             "send" => Some(Msg::Send),
             "react" => self.thread.messages.iter().rev().find(|m| m.reaction.is_none()).map(|m| Msg::React(m.id.clone(), value.clone(), false)),

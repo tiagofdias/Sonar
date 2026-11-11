@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Timer,
   Trash2,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -66,7 +67,16 @@ export default function CommunityWorkspace({
   const { authUser, socket, onlineUsers, logout } = useAuthStore();
   const store = useCommunityStore();
   const messageBox = useRef(null);
-  const [manageOpen, setManageOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const away = (event) => { if (!menuRef.current?.contains(event.target)) setMenuOpen(false); };
+    const escape = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", escape); };
+  }, [menuOpen]);
   const { communities, community, channel, messages, loading } = store;
   const unreadChannels = useUnreadStore(state => state.channels);
   const [dialog, setDialog] = useState(null),
@@ -353,36 +363,94 @@ export default function CommunityWorkspace({
         </div>
       </nav>
       <aside className="sidebar">
-        <header className="space-title">
-          <span className="community-name">
-            {community?.name || "Communities"}
-          </span>
+        <header className="space-title community-header" ref={menuRef}>
+          <button className="icon-button" title="Back to messages" aria-label="Back to messages" onClick={onDirectMessages}>
+            <ArrowLeft size={18} />
+          </button>
+          {community ? (
+            <button className="community-title" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+              <span className="community-name">{community.name}</span>
+              <small>
+                {community.members.length} {community.members.length === 1 ? "member" : "members"} · {community.members.filter((id) => onlineUsers.includes(String(id?._id || id))).length} online
+              </small>
+              <ChevronDown size={16} />
+            </button>
+          ) : (
+            <span className="community-name">Communities</span>
+          )}
           {community && (
             <button
-              className="icon-button"
+              className={`icon-button ${membersOpen ? "accent" : ""}`}
               title="Show members"
               onClick={() => setMembersOpen(!membersOpen)}
             >
               <Users size={18} />
             </button>
           )}
-        </header>
-        <div className="sidebar-body">
-          <button className="nav-row" onClick={onDirectMessages}>
-            <ArrowLeft size={16} /> Back to messages
-          </button>
-          {community ? (
-            <>
-              <small className="community-count">
-                {community.members.length} {community.members.length === 1 ? "member" : "members"}
-              </small>
+          {community && menuOpen && (
+            <div className="community-menu" role="menu" aria-label={`${community.name} options`}>
               {owner && !group && (
-                <button className="community-invite" onClick={generateInvite}>
-                  <Users size={15} /> Invite your people <Plus size={14} />
+                <button role="menuitem" onClick={() => { setMenuOpen(false); generateInvite(); }}>
+                  <UserPlus size={16} /> Invite your people
                 </button>
               )}
+              <button role="menuitem" onClick={() => { setMenuOpen(false); preferences.toggleMute(community._id); }}>
+                {preferences.isMuted(community._id) ? <Bell size={16} /> : <BellOff size={16} />}
+                {preferences.isMuted(community._id) ? `Unmute ${group ? "group" : "server"}` : `Mute ${group ? "group" : "server"}`}
+              </button>
+              {(owner || moderator) && !group && (
+                <>
+                  <hr />
+                  <small className="community-menu-label">MANAGE</small>
+                  <button role="menuitem" onClick={() => { setMenuOpen(false); openActivity(); }}>
+                    <Users size={16} /> Who joined or left
+                  </button>
+                  {may("lock") && community.channels.filter((item) => item.type === "voice").map((item) => (
+                    <button role="menuitem" key={item._id} onClick={async () => {
+                      setMenuOpen(false);
+                      if (await store.setVoiceLock(item._id, !item.locked))
+                        toast(item.locked ? "Voice room unlocked." : "Voice room locked to new participants.");
+                    }}>
+                      {item.locked ? <LockOpen size={16} /> : <Lock size={16} />}
+                      {item.locked ? "Unlock" : "Lock"} {item.name}
+                    </button>
+                  ))}
+                  {owner && (
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); open("rename-community"); setValue(community.name); }}>
+                      <Pencil size={16} /> Rename community
+                    </button>
+                  )}
+                  {owner && (
+                    <button role="menuitem" onClick={() => { setMenuOpen(false); open("rename-channel"); const first = community.channels[0]; setRenameChannel(first?._id || ""); setValue(first?.name || ""); }}>
+                      <Pencil size={16} /> Rename a channel or room
+                    </button>
+                  )}
+                </>
+              )}
+              <hr />
+              {owner && !group && (
+                <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); open("delete-channel"); setRenameChannel(community.channels[0]?._id || ""); }}>
+                  <Trash2 size={16} /> Delete a channel or room
+                </button>
+              )}
+              {owner && !group && (
+                <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); setConfirmation({ action: "delete-community", communityId: community._id }); }}>
+                  <Trash2 size={16} /> Delete community
+                </button>
+              )}
+              {!owner && (
+                <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); setConfirmation({ action: "leave", communityId: community._id }); }}>
+                  <LogOut size={16} /> {group ? "Leave group" : "Leave community"}
+                </button>
+              )}
+            </div>
+          )}
+        </header>
+        <div className="sidebar-body">
+          {community ? (
+            <>
               <div className="sidebar-section">
-                <span>TEXT CHANNELS</span>
+                <span>CHANNELS</span>
                 {owner && !group && (
                   <button
                     className="icon-button"
@@ -419,46 +487,6 @@ export default function CommunityWorkspace({
                   open("channel");
                 }}
               />
-              <button className="nav-row" onClick={() => preferences.toggleMute(community._id)}>
-                {preferences.isMuted(community._id) ? <Bell size={16} /> : <BellOff size={16} />}
-                {preferences.isMuted(community._id) ? `Unmute ${group ? "group" : "server"}` : `Mute ${group ? "group" : "server"}`}
-              </button>
-              {(owner || moderator) && !group && (
-                <>
-                  <button className="nav-row manage-toggle" aria-expanded={manageOpen} onClick={() => setManageOpen(!manageOpen)}>
-                    <Settings size={16} />
-                    Manage community
-                    <ChevronDown size={15} />
-                  </button>
-                  {manageOpen && (
-                    <>
-                      <button className="nav-row" onClick={openActivity}>Who joined or left</button>
-                      {may("lock") && community.channels.filter((item) => item.type === "voice").map((item) => (
-                        <button className="nav-row" key={item._id} onClick={async () => {
-                          if (await store.setVoiceLock(item._id, !item.locked))
-                            toast(item.locked ? "Voice room unlocked." : "Voice room locked to new participants.");
-                        }}>
-                          {item.locked ? <LockOpen size={16} /> : <Lock size={16} />}
-                          {item.locked ? "Unlock" : "Lock"} {item.name}
-                        </button>
-                      ))}
-                      {owner && <button className="nav-row" onClick={() => { open("rename-community"); setValue(community.name); }}>Rename community</button>}
-                      {owner && <button className="nav-row" onClick={() => { open("rename-channel"); const first = community.channels[0]; setRenameChannel(first?._id || ""); setValue(first?.name || ""); }}>Rename a channel or room</button>}
-                      {owner && <button className="nav-row leave-community" onClick={() => { open("delete-channel"); setRenameChannel(community.channels[0]?._id || ""); }}>Delete a channel or room</button>}
-                      {owner && <button className="nav-row leave-community" onClick={() => setConfirmation({ action: "delete-community", communityId: community._id })}>Delete community</button>}
-                    </>
-                  )}
-                </>
-              )}
-              {!owner && (
-                <button
-                  className="nav-row leave-community"
-                  onClick={() => setConfirmation({ action: "leave", communityId: community._id })}
-                >
-                  <LogOut size={16} />
-                  {group ? "Leave group" : "Leave community"}
-                </button>
-              )}
             </>
           ) : (
             <>
