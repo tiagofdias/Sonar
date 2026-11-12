@@ -24,7 +24,6 @@ import PasskeySettings from "./PasskeySettings";
 import VoiceSettings from "./VoiceSettings";
 import SessionSettings from "./SessionSettings";
 import ExperimentalDeviceSettings from "./ExperimentalDeviceSettings";
-import { useUnreadStore } from "../store/useUnreadStore";
 
 export default function AccountSettings() {
   const { authUser, updateProfile, logout, isUpdatingProfile } = useAuthStore();
@@ -42,7 +41,6 @@ export default function AccountSettings() {
     [backedUp, setBackedUp] = useState(null),
     [syncPassword, setSyncPassword] = useState(""),
     [syncing, setSyncing] = useState(false);
-  const notificationsEnabled = useUnreadStore(state => state.notificationsEnabled);
   const dialog = useRef(null);
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -369,7 +367,7 @@ export default function AccountSettings() {
               <p>
                 Messages are encrypted with a key that only your devices hold.
                 It is locked with your recovery key before it is stored, so the
-                web app and the desktop app can both open your conversations.
+                web app and the desktop app can both open your conversations and Sonar never can.
               </p>
               <div className="settings-device">
                 <ShieldCheck size={21} />
@@ -422,19 +420,6 @@ export default function AccountSettings() {
                 you. It is a code, not a fingerprint scan.
               </p>
               {import.meta.env.VITE_SONAR_MATRIX_EXPERIMENTAL === "true" && <ExperimentalDeviceSettings accountId={authUser._id} onBusyChange={setDeviceBusy} />}
-              <div className="settings-retention">
-                <h4>Private notifications</h4>
-                <p>While Sonar is open in the background, show a generic alert for new direct messages. Alerts never include the sender or message text. This setting resets when you sign out or reload.</p>
-                <button className="secondary" onClick={async () => {
-                  if (notificationsEnabled) { useUnreadStore.getState().setNotificationsEnabled(false); return; }
-                  if (!("Notification" in window)) { toast.error("This browser does not support notifications."); return; }
-                  try {
-                    const permission = await Notification.requestPermission();
-                    if (permission === "granted") useUnreadStore.getState().setNotificationsEnabled(true);
-                    else toast.error("Allow notifications in your browser to enable alerts.");
-                  } catch { toast.error("Could not enable notifications in this browser."); }
-                }}>{notificationsEnabled ? "Turn off notifications" : "Enable notifications"}</button>
-              </div>
               <div className="settings-retention">
                 <h4>A short memory, by design.</h4>
                 <p>

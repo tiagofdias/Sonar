@@ -1741,27 +1741,35 @@ fn settings_view(app: &App) -> E<'_> {
             for person in &app.preferences.blocked {
                 blocked = blocked.push(row![avatar(person_face(person), 0, None, 35.0), column![text(person.name.clone()).size(15).font(t::semibold()).color(t::TEXT), text(format!("@{}", person.username)).size(13).color(rgb(0x78848e))].spacing(3).width(FILL), secondary("Unblock", None, Some(Msg::Unblock(person.id.clone())))].spacing(11).align_y(Vertical::Center));
             }
-            let title = |value: &'static str| -> E<'_> { container(card_title(value)).padding(Padding { top: 24.0, bottom: 8.0, ..Padding::ZERO }).into() };
+            let checks = |items: Vec<E<'static>>| -> E<'static> { Column::with_children(items).spacing(12).into() };
+            let slider_row = column![
+                row![text("Alert volume").size(13).color(rgb(0xd0d7dc)).width(FILL), text(format!("{}%", (volume * 100.0).round() as u32)).size(13).color(rgb(0xd0d7dc))],
+                slider(0.0..=1.0, volume, Msg::AlertVolume).step(0.05_f32).width(FILL).style(t::volume_slider()),
+            ].spacing(13);
+            let keyword_form = column![
+                row![
+                    text_input("Add a word", &app.keyword_input).on_input(Msg::KeywordInput).on_submit(Msg::AddKeyword).size(14).padding([10, 12]).style(t::card_input()),
+                    button(text("Add").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([9, 14]).style(t::primary()).on_press_maybe((!app.keyword_input.trim().is_empty()).then_some(Msg::AddKeyword)),
+                ].spacing(10).align_y(Vertical::Center),
+                words.wrap(),
+            ].spacing(10);
             heading("ONLY WHAT MATTERS", "Alerts & privacy", "Choose what gets your attention, and who can reach you.")
-                .push(title("Alert volume"))
-                .push(row![slider(0.0..=1.0, volume, Msg::AlertVolume).step(0.05_f32), text(format!("{}%", (volume * 100.0).round() as u32)).size(13).color(rgb(0xd0d7dc))].spacing(12).align_y(Vertical::Center))
-                .push(small_note("Message sounds and the ringtone. Separate from call volume."))
-                .push(v_space(18.0))
-                .push(checkbox_row("Ask before starting a call", app.settings.confirm_calls, Msg::ConfirmCalls))
-                .push(v_space(10.0))
-                .push(checkbox_row("Turn off typing indicators (yours and everyone else's)", app.preferences.typing_hidden, Msg::TypingHidden))
-                .push(v_space(10.0))
-                .push(checkbox_row("Keep Sonar running in the tray when I close the window", app.settings.keep_in_tray, Msg::KeepInTray))
-                .push(v_space(10.0))
-                .push(checkbox_row("Start Sonar with Windows", app.settings.start_with_windows, Msg::StartWithWindows))
-                .push(title("Keyword alerts"))
-                .push(small_note("Alert me when these words appear, even in muted servers. Matched on this device, so the server never sees them."))
-                .push(container(row![text_input("Add a word", &app.keyword_input).on_input(Msg::KeywordInput).on_submit(Msg::AddKeyword).size(14).padding([9, 12]).style(t::card_input()), button(text("Add").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([8, 12]).style(t::primary()).on_press_maybe((!app.keyword_input.trim().is_empty()).then_some(Msg::AddKeyword))].spacing(10).align_y(Vertical::Center)).padding([8, 0]))
-                .push(words.wrap())
-                .push(title("Blocked people"))
-                .push(small_note("They cannot message, call or send you requests, and their server messages are hidden completely. They are not told."))
-                .push(v_space(8.0))
-                .push(blocked)
+                .push(v_space(24.0))
+                .push(security_card(Icon::Bell, card_title("Sounds"), "Message sounds and the ringtone. Separate from call volume.", slider_row.into()))
+                .push(v_space(24.0))
+                .push(security_card(Icon::MessageCircle, card_title("Calls & typing"), "Small things that change how conversations feel.", checks(vec![
+                    checkbox_row("Ask before starting a call", app.settings.confirm_calls, Msg::ConfirmCalls),
+                    checkbox_row("Turn off typing indicators (yours and everyone else's)", app.preferences.typing_hidden, Msg::TypingHidden),
+                ])))
+                .push(v_space(24.0))
+                .push(security_card(Icon::Monitor, card_title("Sonar on this computer"), "How the desktop app runs on Windows.", checks(vec![
+                    checkbox_row("Keep Sonar running in the tray when I close the window", app.settings.keep_in_tray, Msg::KeepInTray),
+                    checkbox_row("Start Sonar with Windows", app.settings.start_with_windows, Msg::StartWithWindows),
+                ])))
+                .push(v_space(24.0))
+                .push(security_card(Icon::Search, card_title("Keyword alerts"), "Alert me when these words appear, even in muted servers. Matched on this device, so the server never sees them.", keyword_form.into()))
+                .push(v_space(24.0))
+                .push(security_card(Icon::Ban, card_title("Blocked people"), "They cannot message, call or send you requests, and their server messages are hidden completely. They are not told.", blocked.into()))
         }
         Tab::Profile => heading("A FAMILIAR FACE", "Your profile", "The name your people see in conversations and communities.")
             .push({
@@ -1771,7 +1779,7 @@ fn settings_view(app: &App) -> E<'_> {
                     let mut cells = Row::new().spacing(8);
                     for (name, icon) in line {
                         let chosen = t::ANIMALS[current].0 == *name;
-                        cells = cells.push(button(container(t::icon(*icon, 30.0, if chosen { rgb(0xd7f3ff) } else { rgb(0xcfd4d7) })).center_x(44).center_y(44)).padding(0).width(44).height(44).style(if chosen { t::person_row(true) } else { t::secondary() }).on_press_maybe((!chosen && !app.busy).then_some(Msg::SetAnimal(name))));
+                        cells = cells.push(button(container(t::icon(*icon, 40.0, if chosen { rgb(0xd7f3ff) } else { rgb(0xcfd4d7) })).center_x(66).center_y(66)).padding(0).width(66).height(66).style(if chosen { t::person_row(true) } else { t::secondary() }).on_press_maybe((!chosen && !app.busy).then_some(Msg::SetAnimal(name))));
                     }
                     grid = grid.push(cells);
                 }
@@ -1790,7 +1798,7 @@ fn settings_view(app: &App) -> E<'_> {
             let mut passkeys = Column::new();
             match &app.passkeys {
                 None => passkeys = passkeys.push(notice("Loading passkeys...")),
-                Some(list) if list.is_empty() => passkeys = passkeys.push(container(row![t::icon(Icon::KeyRound, 18.0, rgb(0xd0d7dc)), column![text("No passkeys yet").size(14).font(t::semibold()).color(rgb(0xd0d7dc)), body("Add one to sign in with your face, fingerprint, or device PIN.", 13.0, rgb(0x77838e), 1.7)].spacing(5)].spacing(13))
+                Some(list) if list.is_empty() => passkeys = passkeys.push(container(row![t::icon(Icon::KeyRound, 18.0, rgb(0xd0d7dc)), column![text("No passkeys added yet").size(14).font(t::semibold()).color(rgb(0xd0d7dc)), body("Add one to sign in without typing your password.", 13.0, rgb(0x77838e), 1.7)].spacing(5)].spacing(13))
                     .padding(16).width(FILL).style(t::panel(rgb(0x191d22), rgb(0x38424e), 8.0))).push(v_space(17.0)),
                 Some(list) => for passkey in list {
                     let removing = app.passkey_removing.as_deref() == Some(&passkey.id);
@@ -1909,26 +1917,36 @@ fn settings_view(app: &App) -> E<'_> {
             if let Some(d) = devices { inputs.extend(d.inputs.iter().cloned()); outputs.extend(d.outputs.iter().cloned()); }
             let input = Some(app.settings.input.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
             let output = Some(app.settings.output.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
-            let level = app.mic_level.unwrap_or(0).min(100) as f32 / 100.0;
-            let meter = container(container(space()).width(Length::FillPortion((level * 100.0) as u16 + 1)).height(FILL).style(t::gradient_panel(90.0, rgb(0x929ca3), rgb(0xd0d7dc), Color::TRANSPARENT, 8.0)))
-                .width(FILL).height(10).style(t::panel(rgb(0x15181c), rgb(0x323b46), 8.0));
-            let meter = row![meter, space().width(Length::FillPortion(((1.0 - level) * 100.0) as u16 + 1))];
-            heading("SOUND LIKE YOURSELF", "Voice & audio", "Choose your microphone and speakers. Settings stay on this computer.")
+            let level = app.mic_level.unwrap_or(0).min(100) as u16;
+            // A full-width track, filled as far as the level reaches.
+            let fill: E = if level == 0 { space().width(0).into() } else { container(space()).width(Length::FillPortion(level)).height(FILL).style(t::gradient_panel(90.0, rgb(0x929ca3), rgb(0xd0d7dc), Color::TRANSPARENT, 8.0)).into() };
+            let meter = container(row![fill, space().width(Length::FillPortion(100 - level.min(99)))]).width(FILL).height(8).style(t::panel(rgb(0x15181c), rgb(0x323b46), 8.0));
+            let status = app.mic_level.map(|l| format!("Peak level {l}%. Nothing is recorded.")).unwrap_or_else(|| if app.testing { "Listening for three seconds…".into() } else { "Microphone test is off.".into() });
+            let test_mic = button(row![t::icon(Icon::Mic, 14.0, rgb(0xd0d7dc)), text(if app.testing { "Listening..." } else { "Test microphone" }).size(14).color(rgb(0xd0d7dc))].spacing(9).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestMic));
+            let test_speakers = button(row![t::icon(Icon::Volume, 14.0, rgb(0xd0d7dc)), text(if app.testing { "Playing..." } else { "Test speakers" }).size(14).color(rgb(0xd0d7dc))].spacing(9).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestSpeakers));
+            heading("FIND YOUR VOICE", "Voice & audio", "Check your microphone and speakers. Settings stay on this computer.")
                 .push(v_space(24.0))
-                .push(security_card(Icon::Mic, card_title("Your microphone"), "Test your input before your next call.", column![
-                    field("Microphone", pick_list(inputs, input, Msg::SelectInput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
-                    container(meter).padding(Padding { top: 20.0, bottom: 14.0, ..Padding::ZERO }),
-                    row![button(text(if app.testing { "Listening..." } else { "Test microphone" }).size(13).color(rgb(0xd0d7dc))).padding([9, 12]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestMic)),
-                        body(app.mic_level.map(|l| format!("Peak level {l}%. Nothing is recorded.")).unwrap_or_else(|| "A three-second local test. Nothing is recorded or sent.".into()), 12.0, rgb(0xd0d7dc), 1.7)].spacing(10).align_y(Vertical::Center),
-                ].into()))
-                .push(v_space(24.0))
-                .push(security_card(Icon::Speaker, card_title("Your speakers"), "Choose where calls play.", column![
+                .push(security_card(Icon::Mic, card_title("Your microphone"), "Test your input locally. Nothing is recorded or uploaded.", column![
+                    field("Input device", pick_list(inputs, input, Msg::SelectInput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
+                    meter,
+                    row![text(status).size(13).color(rgb(0xd0d7dc)).width(FILL), test_mic].spacing(10).align_y(Vertical::Center),
+                    t::rule(rgb(0x2a323b), true),
                     checkbox_row("Noise suppression", !app.settings.noise_suppression_off, Msg::NoiseSuppression),
-                    field("Speakers", pick_list(outputs, output, Msg::SelectOutput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
-                    container(button(row![t::icon(Icon::Play, 14.0, rgb(0xd0d7dc)), text(if app.testing { "Playing..." } else { "Play test sound" }).size(13).color(rgb(0xd0d7dc))].spacing(10).align_y(Vertical::Center)).padding([10, 13]).style(t::secondary()).on_press_maybe((!app.testing).then_some(Msg::TestSpeakers))).padding(Padding { top: 18.0, ..Padding::ZERO }),
-                ].into()))
+                ].spacing(16).into()))
                 .push(v_space(24.0))
-                .push(security_card(Icon::Shield, card_title("Call connectivity"), "Relay-only hides your network address from the other person, but needs a TURN server.", checkbox_row("Use relay-only connections", app.settings.relay_only, Msg::RelayOnly)))
+                .push(security_card(Icon::Speaker, card_title("Your speakers"), "Choose where you hear calls and play a short test sound.", column![
+                    field("Output device", pick_list(outputs, output, Msg::SelectOutput).padding(11).text_size(14).width(FILL).style(t::select()).menu_style(t::menu()).into(), 9.0, 13.0, rgb(0xd0d7dc)),
+                    test_speakers,
+                    t::rule(rgb(0x2a323b), true),
+                    small_note("The test sound is generated on your device. It does not use your microphone."),
+                ].spacing(16).into()))
+                .push(v_space(24.0))
+                .push(security_card(Icon::Shield, card_title("Call connectivity"), "Direct connections first. Internet calls may need a relay.", column![
+                    checkbox_row("Use relay-only connections", app.settings.relay_only, Msg::RelayOnly),
+                    small_note("Relay-only mode keeps your network address from the other participant. It requires an operator-configured TURN server. Audio stays encrypted in transit."),
+                ].spacing(12).into()))
+                .push(v_space(24.0))
+                .push(honest_note(Icon::Headphones, "Direct calls are available from the phone button in a conversation. Community voice rooms appear in the community sidebar and support up to six people. Sonar has no call recording or audio storage."))
         }
     };
     let content = container(scroll_area(container(content).padding(Padding { top: 44.0, bottom: 32.0, left: 36.0, right: 36.0 })).height(FILL)).width(FILL).height(FILL);

@@ -245,8 +245,8 @@ export default function PasskeySettings({ onBusyChange }) {
         </p>
       )}
       <p className="passkey-device-note">
-        Your passkey signs you in. Your messages unlock with your password the
-        first time you use a new device.
+        Your passkey signs you in. Your messages unlock with your recovery key
+        the first time you use a new device.
       </p>
     </section>
   );

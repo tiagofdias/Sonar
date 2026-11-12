@@ -2648,7 +2648,7 @@ impl App {
             "community" => self.communities.iter().find(|c| c.name == value).map(|c| Msg::OpenCommunity(Some(c.id.clone()))),
             "mode" => Some(Msg::SetMode(if value == "community" { Mode::Community } else { Mode::Direct })),
             "settings" => Some(Msg::OpenSettings(value != "close")),
-            "tab" => Some(Msg::SetTab(match value.as_str() { "security" => Tab::Security, "privacy" => Tab::Privacy, "voice" => Tab::Voice, _ => Tab::Profile })),
+            "tab" => Some(Msg::SetTab(match value.as_str() { "security" => Tab::Security, "privacy" => Tab::Privacy, "voice" => Tab::Voice, "alerts" => Tab::Alerts, _ => Tab::Profile })),
             "panel" => Some(Msg::OpenPanel(match value.as_str() { "people" => Some(Panel::People), "privacy" => Some(Panel::Privacy), _ => None })),
             "dialog" => Some(Msg::OpenDialog(match value.as_str() { "create" => Some(Dialog::Create), "invite" => Some(Dialog::Invite), "start" => Some(Dialog::Start), _ => None })),
             "members" => Some(Msg::ToggleMembers),
