@@ -385,6 +385,8 @@ export function useVoiceRoom(socket) {
           toast("This voice room was deleted.");
         else if (data.reason === "kicked")
           toast("A moderator disconnected you from the voice room.");
+        else if (data.reason === "movedElsewhere")
+          toast("You joined this voice room on another device.");
       }
     };
     const removed = ({ communityId }) => {

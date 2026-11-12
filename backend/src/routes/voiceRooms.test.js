@@ -101,8 +101,17 @@ test("voice-room membership, capacity, session routing, and revocation", async (
         assert.equal(joinedA.participants.length, 1);
         joinedB = await send(b, "voice:room-join", payload);
         assert.equal(joinedB.participants.length, 2);
+        // Joining from another window moves the account there; the old one is told why.
         const otherTab = await connect(bob);
-        assert.ok((await send(otherTab, "voice:room-join", payload)).error);
+        const moved = next(b, "voice:room-left");
+        const joinedOther = await send(otherTab, "voice:room-join", payload);
+        assert.equal(joinedOther.participants.length, 2);
+        assert.equal((await moved).reason, "movedElsewhere");
+        const back = next(otherTab, "voice:room-left");
+        joinedB = await send(b, "voice:room-join", payload);
+        assert.equal((await back).reason, "movedElsewhere");
+        assert.equal(joinedB.participants.length, 2);
+        otherTab.disconnect();
         assert.ok((await send(c, "voice:rooms", { communityId })).error);
         assert.equal(
           (await send(a, "voice:rooms", { communityId })).rooms[0].participants

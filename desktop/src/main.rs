@@ -1663,6 +1663,7 @@ impl App {
                                 "removed" => self.toast(ToastKind::Plain, "You no longer have access to that voice room."),
                                 "channelDeleted" => self.toast(ToastKind::Plain, "This voice room was deleted."),
                                 "kicked" => self.toast(ToastKind::Plain, "A moderator disconnected you from the voice room."),
+                                "movedElsewhere" => self.toast(ToastKind::Plain, "You joined this voice room on another device."),
                                 _ => {}
                             }
                         }

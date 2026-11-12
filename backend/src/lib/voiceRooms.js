@@ -114,15 +114,20 @@ export function installVoiceRooms(io, onChange = () => {}) {
         });
       const current = voiceRoomUsers.get(socket.userId),
         key = keyFor(communityId, channelId);
+      let moving = false;
       if (current) {
         if (current.key === key && current.socketId === socket.id)
           return reply({
             ...snapshot(rooms.get(key)),
             sessionId: current.sessionId,
           });
-        return reply({ error: "Leave your current voice room first" });
+        if (current.socketId === socket.id)
+          return reply({ error: "Leave your current voice room first" });
+        // Joining from another device or window moves you here, so a hidden or crashed one can't lock you out.
+        moving = current.key === key;
+        leave(socket.userId, "movedElsewhere");
       }
-      if (community.channels.id(channelId)?.locked)
+      if (community.channels.id(channelId)?.locked && !moving)
         return reply({ error: "This voice room is locked to new participants." });
       let room = rooms.get(key);
       if (room?.participants.size >= 6)
