@@ -27,6 +27,8 @@ pub struct Settings {
     /// Off by default: closing the window quits Sonar. Replaces the old `quit_on_close`, so everyone starts from quitting.
     pub keep_in_tray: bool,
     pub start_with_windows: bool,
+    /// Where the shared-screen / TV player floats: left, top and width, in window pixels.
+    pub player: Option<[f32; 3]>,
 }
 pub fn load_settings() -> Settings {
     std::fs::read(root().join("settings.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()

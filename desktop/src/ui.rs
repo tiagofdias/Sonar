@@ -257,13 +257,20 @@ fn screen_stage(app: &App) -> Option<E<'_>> {
         let header = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
         return Some(opaque(container(column![container(header).padding([6, 10]), image(handle.clone()).width(FILL).height(FILL)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000)))));
     }
+    // A floating player: drag it by its caption, resize it from the corner grip. It stays where it is put.
+    let [x, y, width] = app.player_box();
+    let moving = app.player_drag.as_ref().is_some_and(|d| !d.resize);
     let mut tiles = Column::new().spacing(10);
-    for (id, (handle, width, height)) in &app.screen_views {
-        let aspect = *height as f32 / (*width).max(1) as f32;
-        let caption = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).wrapping(text::Wrapping::None).width(FILL), tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
-        tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
+    for (id, (handle, w, h)) in &app.screen_views {
+        let aspect = *h as f32 / (*w).max(1) as f32;
+        let grab = mouse_area(container(row![t::icon(Icon::Grip, 14.0, rgb(0x6f7a84)), text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).wrapping(text::Wrapping::None)].spacing(8).align_y(Vertical::Center)).width(FILL).height(30).align_y(Vertical::Center).clip(true))
+            .on_press(Msg::PlayerGrab(false)).interaction(if moving { iced::mouse::Interaction::Grabbing } else { iced::mouse::Interaction::Grab });
+        let caption = row![grab, tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false), space().width(14)].spacing(8).align_y(Vertical::Center);
+        tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(width * aspect), container(caption).height(crate::PLAYER_CAPTION).padding([0, 10]).align_y(Vertical::Center)]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
     }
-    Some(container(container(opaque(tiles)).width(520)).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom).padding(18).into())
+    let grip = mouse_area(container(t::icon(Icon::ResizeCorner, 13.0, rgb(0x8c969d))).padding(5)).on_press(Msg::PlayerGrab(true)).interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
+    let player = stack![tiles, container(grip).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom)];
+    Some(container(opaque(container(player).width(width))).width(FILL).height(FILL).padding(Padding { top: y, left: x, ..Padding::ZERO }).into())
 }
 
 fn screen_picker<'a>(picker: &'a crate::ScreenPicker) -> E<'a> {
