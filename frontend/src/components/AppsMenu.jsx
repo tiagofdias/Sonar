@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { LayoutGrid, MonitorPlay } from "lucide-react";
+import { LayoutGrid, MonitorPlay, Tv } from "lucide-react";
 
 // Apps that run inside a call or voice room. Watch Together is the first.
 const APPS = [
   { id: "watch", name: "Watch together", note: "YouTube in sync, with sponsor segments skipped", icon: MonitorPlay },
+  // Sharing a TV channel starts from the desktop app (browsers can't open IPTV streams); web members watch it here.
+  { id: "tv", name: "Sonar TV", note: "Share your IPTV channel from the Sonar desktop app. Click to download it.", icon: Tv },
 ];
 
 export default function AppsMenu({ watch }) {
@@ -21,6 +23,7 @@ export default function AppsMenu({ watch }) {
   const start = (id) => {
     setOpen(false);
     if (id === "watch" && !watch.joined) watch.join();
+    if (id === "tv") window.open("/downloads/Sonar-Desktop-windows-x64.zip", "_blank", "noopener");
   };
   return (
     <span className="apps-menu" ref={box}>
