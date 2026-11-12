@@ -393,6 +393,67 @@ impl Drop for Encoder {
     fn drop(&mut self) { unsafe { let _ = self.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0); let _ = self.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0); let _ = self.transform.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0); } }
 }
 
+/// Sonar TV's converted copy, for viewers who cannot take a channel's original
+/// stream (H.265, or B-frames in a browser): decoded pictures go back into H.264
+/// at the channel's own size and frame rate, with no B-frames, on the graphics
+/// card when it has an encoder.
+pub struct FrameEncoder { graphics: Graphics, hardware: Option<Encoder>, software: Option<SoftwareEncoder>, upload: ID3D11Texture2D, frame: ID3D11Texture2D, width: u32, height: u32, pub codec: Codec }
+
+impl FrameEncoder {
+    /// A generous bitrate (about 0.12 bits per pixel per frame, 4 to 20 Mb/s) so the copy stays close to the original.
+    pub fn bitrate_for(width: u32, height: u32, fps: u32) -> u32 { ((width as f64 * height as f64 * fps as f64 * 0.12) as u32).clamp(4_000_000, 20_000_000) }
+    pub fn new(width: u32, height: u32, fps: u32) -> Result<Self, String> {
+        startup()?;
+        let (width, height) = (width & !1, height & !1);
+        let quality = Quality { width, height, fps: fps.clamp(10, 60), bitrate: Self::bitrate_for(width, height, fps) };
+        let graphics = create_graphics()?;
+        let hardware = if FORCE_SOFTWARE.load(std::sync::atomic::Ordering::Relaxed) { None } else { Encoder::new(&graphics, quality).ok() };
+        let software = if hardware.is_none() { Some(SoftwareEncoder::new(&graphics, quality)?) } else { None };
+        let frame = texture(&graphics.device, width, height, DXGI_FORMAT_NV12, D3D11_BIND_RENDER_TARGET)?;
+        let description = D3D11_TEXTURE2D_DESC { Width: width, Height: height, MipLevels: 1, ArraySize: 1, Format: DXGI_FORMAT_NV12, SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 }, Usage: D3D11_USAGE_STAGING, CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32, ..Default::default() };
+        let mut upload = None;
+        unsafe { ctx("Upload texture", graphics.device.CreateTexture2D(&description, None, Some(&mut upload)))?; }
+        let codec = hardware.as_ref().map_or(Codec::H264, |e| e.codec);
+        Ok(Self { graphics, hardware, software, upload: upload.ok_or("No upload texture")?, frame, width, height, codec })
+    }
+    pub fn request_key(&self) {
+        if let Some(e) = &self.hardware { e.request_key(); }
+        if let Some(e) = &self.software { e.request_key(); }
+    }
+    /// One decoded NV12 picture (planes with the given stride) at `time` (100 ns units).
+    pub fn encode(&mut self, y: &[u8], uv: &[u8], stride: usize, time: i64, on_packet: &mut dyn FnMut(&[u8], bool)) -> Result<(), String> {
+        let (width, height) = (self.width as usize, self.height as usize);
+        if stride < width || y.len() < stride * height || uv.len() < stride * (height / 2) { return Err("A picture was the wrong size".into()); }
+        unsafe {
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            ctx("Picture upload", self.graphics.context.Map(&self.upload, 0, D3D11_MAP_WRITE, 0, Some(&mut mapped)))?;
+            let (target, pitch) = (mapped.pData as *mut u8, mapped.RowPitch as usize);
+            for row in 0..height { std::ptr::copy_nonoverlapping(y.as_ptr().add(row * stride), target.add(row * pitch), width); }
+            let chroma = target.add(pitch * height);
+            for row in 0..height / 2 { std::ptr::copy_nonoverlapping(uv.as_ptr().add(row * stride), chroma.add(row * pitch), width); }
+            self.graphics.context.Unmap(&self.upload, 0);
+            self.graphics.context.CopyResource(&self.frame, &self.upload);
+        }
+        if let Some(encoder) = &self.hardware {
+            // The hardware encoder takes input when it asks for it; wait briefly rather than drop the picture.
+            let deadline = Instant::now() + Duration::from_millis(200);
+            while !encoder.pump(Some((&self.frame, time)), on_packet)? {
+                if Instant::now() > deadline { return Ok(()); }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            encoder.pump(None, on_packet)?;
+        } else if let Some(encoder) = &self.software {
+            encoder.encode(&self.graphics, &self.frame, time, on_packet)?;
+        }
+        Ok(())
+    }
+    /// Collects packets the hardware encoder finished after the last picture.
+    pub fn flush(&mut self, on_packet: &mut dyn FnMut(&[u8], bool)) -> Result<(), String> {
+        if let Some(encoder) = &self.hardware { let until = Instant::now() + Duration::from_millis(100); while Instant::now() < until { encoder.pump(None, on_packet)?; std::thread::sleep(Duration::from_millis(5)); } }
+        Ok(())
+    }
+}
+
 /// Whether this PC can encode video on its graphics card.
 pub fn has_hardware_encoder() -> bool { !FORCE_SOFTWARE.load(std::sync::atomic::Ordering::Relaxed) && startup().is_ok() && find_encoder().is_ok() }
 

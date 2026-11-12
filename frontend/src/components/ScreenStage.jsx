@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Maximize, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
+import { Clapperboard, Maximize, MessageSquare, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
 import { applyScreenOutput, SCREEN_QUALITIES } from "../lib/useScreenShare";
 
 export function ScreenShareButton({ screen }) {
@@ -29,7 +29,7 @@ export function ScreenShareButton({ screen }) {
   );
 }
 
-function RemoteScreen({ stream, name, deafened }) {
+function RemoteScreen({ stream, name, deafened, label, theater, onView }) {
   const video = useRef(null);
   const [volume, setVolume] = useState(1);
   useEffect(() => { video.current.volume = volume; }, [volume]);
@@ -43,9 +43,9 @@ function RemoteScreen({ stream, name, deafened }) {
   useEffect(() => { video.current.muted = Boolean(deafened); }, [deafened]);
   return (
     <figure className="screen-tile">
-      <video ref={video} autoPlay playsInline aria-label={`${name}'s screen`} />
+      <video ref={video} autoPlay playsInline aria-label={label ? `${name}'s TV: ${label}` : `${name}'s screen`} />
       <figcaption>
-        <span>{name}&apos;s screen</span>
+        <span>{label ? `${name} is sharing TV: ${label}` : `${name}'s screen`}</span>
         <label className="screen-volume" title="Volume of this stream">
           <Volume2 size={15} />
           <input
@@ -58,6 +58,11 @@ function RemoteScreen({ stream, name, deafened }) {
             onChange={(event) => setVolume(Number(event.target.value))}
           />
         </label>
+        {onView && (
+          <button className="icon-button" aria-label={theater ? "Chat view" : "Theater view"} title={theater ? "Chat view: show the chat" : "Theater view"} onClick={onView}>
+            {theater ? <MessageSquare size={16} /> : <Clapperboard size={16} />}
+          </button>
+        )}
         <button className="icon-button" aria-label="Full screen" title="Full screen" onClick={() => video.current.requestFullscreen?.()}>
           <Maximize size={16} />
         </button>
@@ -68,12 +73,16 @@ function RemoteScreen({ stream, name, deafened }) {
 
 // Screens other people are sharing with us, in a call or a voice room.
 export default function ScreenStage({ screen, nameOf, deafened }) {
+  // TV opens in theater view (the chat hidden); the button switches to the chat and back.
+  const [theater, setTheater] = useState(true);
   const entries = Object.entries(screen?.remotes || {});
   if (!entries.length) return null;
+  const labels = screen?.labels || {};
+  const tv = entries.some(([id]) => labels[id]);
   return (
-    <aside className="screen-stage" aria-label="Shared screens">
+    <aside className={`screen-stage ${tv && theater ? "theater" : ""}`} aria-label="Shared screens">
       {entries.map(([id, stream]) => (
-        <RemoteScreen key={id} stream={stream} name={nameOf(id)} deafened={deafened} />
+        <RemoteScreen key={id} stream={stream} name={nameOf(id)} deafened={deafened} label={labels[id]} theater={theater} onView={labels[id] ? () => setTheater((value) => !value) : null} />
       ))}
     </aside>
   );

@@ -32,6 +32,8 @@ use webrtc::peer_connection::{MediaEngine, PeerConnection, PeerConnectionBuilder
 use webrtc::rtp_transceiver::RtpSender;
 
 const H264_FMTP: [&str; 2] = ["level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f"];
+/// TV channels are H.264 High profile; offered first on TV links so browsers accept the original.
+const H264_HIGH: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032";
 
 #[derive(Clone, Debug)]
 pub enum Scope { Call { peer: String, id: String }, Room { community: String, channel: String, session: String } }
@@ -46,11 +48,16 @@ impl Hash for Spec { fn hash<H: Hasher>(&self, state: &mut H) { self.key.hash(st
 #[derive(Clone, Debug)]
 pub struct Choice { pub source: Source, pub sound: Sound, pub height: u32 }
 
+/// A TV channel to play (and share, when `share` is set). The address may hold the
+/// person's login: it stays in this process and is never sent anywhere but the provider.
+pub struct TvChoice { pub address: zeroize::Zeroizing<String>, pub label: String, pub share: bool }
+impl std::fmt::Debug for TvChoice { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("TvChoice").field("label", &self.label).field("share", &self.share).finish_non_exhaustive() } }
+
 #[derive(Debug)]
-pub enum Command { Start(Choice), Stop, Signal { from: String, signal: Value }, Targets(Vec<Target>), Deafen(bool), Volume { from: String, volume: f32 } }
+pub enum Command { Start(Choice), StartTv(TvChoice), Stop, Signal { from: String, signal: Value }, Targets(Vec<Target>), Deafen(bool), Volume { from: String, volume: f32 } }
 
 #[derive(Clone, Debug)]
-pub enum Update { Ready(Controls), Sharing(Option<String>), Notice(String), Pictures, ViewerGone(String), SoundFailed }
+pub enum Update { Ready(Controls), Sharing(Option<String>), Notice(String), Pictures, ViewerGone(String), SoundFailed, Label(String, Option<String>) }
 
 pub struct Picture { pub width: u32, pub height: u32, pub rgba: Vec<u8> }
 /// Only the newest picture per sharer is kept, so a slow screen never grows memory.
@@ -89,9 +96,10 @@ impl PeerConnectionEventHandler for Handler {
     }
 }
 
-fn engine() -> Result<MediaEngine, String> {
+fn engine(tv: bool) -> Result<MediaEngine, String> {
     let mut media = MediaEngine::default();
     let feedback = || vec![RTCPFeedback { typ: "nack".into(), parameter: String::new() }, RTCPFeedback { typ: "nack".into(), parameter: "pli".into() }];
+    if tv { media.register_codec(RTCRtpCodecParameters { rtp_codec: RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: H264_HIGH.into(), rtcp_feedback: feedback() }, payload_type: 100 }, RtpCodecKind::Video).map_err(|_| "Video codec unavailable")?; }
     for (index, fmtp) in H264_FMTP.iter().enumerate() {
         media.register_codec(RTCRtpCodecParameters { rtp_codec: RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: (*fmtp).into(), rtcp_feedback: feedback() }, payload_type: 102 + index as u8 * 2 }, RtpCodecKind::Video).map_err(|_| "Video codec unavailable")?;
     }
@@ -101,12 +109,12 @@ fn engine() -> Result<MediaEngine, String> {
 
 struct Link { connection: Arc<dyn PeerConnection>, gathered: mpsc::Receiver<()>, connected: Arc<AtomicBool>, failed: Arc<AtomicBool>, remote_set: bool, pending: Vec<RTCIceCandidateInit> }
 
-async fn link(servers: Vec<RTCIceServer>, relay: bool, rtp: Option<mpsc::Sender<Rtp>>) -> Result<Link, String> {
+async fn link(servers: Vec<RTCIceServer>, relay: bool, rtp: Option<mpsc::Sender<Rtp>>, tv: bool) -> Result<Link, String> {
     let config = RTCConfigurationBuilder::new().with_ice_servers(servers).with_ice_transport_policy(if relay { RTCIceTransportPolicy::Relay } else { RTCIceTransportPolicy::All }).build();
     let (tx, gathered) = mpsc::channel(1);
     let (connected, failed) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let handler = Handler { gathered: tx, connected: connected.clone(), failed: failed.clone(), rtp };
-    let connection: Arc<dyn PeerConnection> = Arc::new(PeerConnectionBuilder::new().with_configuration(config).with_media_engine(engine()?).with_udp_addrs(vec!["0.0.0.0:0".to_string()]).with_handler(Arc::new(handler)).build().await.map_err(|_| "Could not start the screen connection")?);
+    let connection: Arc<dyn PeerConnection> = Arc::new(PeerConnectionBuilder::new().with_configuration(config).with_media_engine(engine(tv)?).with_udp_addrs(vec!["0.0.0.0:0".to_string()]).with_handler(Arc::new(handler)).build().await.map_err(|_| "Could not start the screen connection")?);
     Ok(Link { connection, gathered, connected, failed, remote_set: false, pending: Vec::new() })
 }
 
@@ -150,7 +158,8 @@ impl OutTrack {
     }
 }
 
-struct Outgoing { link: Link, video: OutTrack, audio: OutTrack, joined: bool, offered_to: Target }
+/// `desktop`: the viewer is the Sonar app, which plays a TV channel's original stream even with B-frames.
+struct Outgoing { link: Link, video: OutTrack, audio: OutTrack, joined: bool, offered_to: Target, desktop: bool, tv: bool }
 struct Incoming { link: Link, stop: Arc<AtomicBool> }
 
 enum Media { Video(Vec<u8>), Audio(Vec<u8>) }
@@ -235,17 +244,21 @@ async fn send(spec: &Spec, target: &Target, mut signal: Value) -> Result<(), Str
     }
 }
 
-async fn offer(spec: &Spec, target: &Target) -> Result<Outgoing, String> {
+/// `tv`: the channel's name, for a TV share (High-profile video, labelled for viewers).
+async fn offer(spec: &Spec, target: &Target, tv: Option<&str>) -> Result<Outgoing, String> {
     let (servers, relay) = spec.session.voice_configuration().await?.into_servers(spec.relay_only)?;
-    let mut link = link(servers, relay, None).await?;
-    let video = OutTrack::create(&link.connection, "screen-video", RtpCodecKind::Video, RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: H264_FMTP[0].into(), rtcp_feedback: vec![] }, MIME_TYPE_H264).await?;
+    let mut link = link(servers, relay, None, tv.is_some()).await?;
+    let fmtp = if tv.is_some() { H264_HIGH } else { H264_FMTP[0] };
+    let video = OutTrack::create(&link.connection, "screen-video", RtpCodecKind::Video, RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: fmtp.into(), rtcp_feedback: vec![] }, MIME_TYPE_H264).await?;
     let audio = OutTrack::create(&link.connection, "screen-audio", RtpCodecKind::Audio, RTCRtpCodec { mime_type: MIME_TYPE_OPUS.into(), clock_rate: 48000, channels: 2, sdp_fmtp_line: String::new(), rtcp_feedback: vec![] }, MIME_TYPE_OPUS).await?;
     let description = link.connection.create_offer(None).await.map_err(|_| "Could not create the screen offer")?;
     link.connection.set_local_description(description).await.map_err(|_| "Could not prepare the screen offer")?;
     let sdp = link.local_sdp().await?;
     if sdp.len() > 30000 { return Err("Screen description too large".into()); }
-    send(spec, target, json!({ "type": "screen-offer", "sdp": { "type": "offer", "sdp": sdp } })).await?;
-    Ok(Outgoing { link, video, audio, joined: false, offered_to: target.clone() })
+    let mut signal = json!({ "type": "screen-offer", "sdp": { "type": "offer", "sdp": sdp } });
+    if let Some(label) = tv { signal["tv"] = json!(true); signal["label"] = json!(label.chars().take(80).collect::<String>()); }
+    send(spec, target, signal).await?;
+    Ok(Outgoing { link, video, audio, joined: false, offered_to: target.clone(), desktop: false, tv: tv.is_some() })
 }
 
 pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
@@ -263,6 +276,10 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
         let mut playback: Option<Arc<ScreenPlayback>> = None;
         let mut deafened = false;
         let mut volumes: HashMap<String, f32> = HashMap::new();
+        // A TV share: its player, the channel name, whether it is shared, and its output.
+        let mut tv: Option<(Arc<crate::tv::player::Shared>, String, bool)> = None;
+        let mut tv_out: Option<mpsc::Receiver<crate::tv::player::Out>> = None;
+        let stop_tv = |tv: &mut Option<(Arc<crate::tv::player::Shared>, String, bool)>| { if let Some((shared, ..)) = tv.take() { shared.stop.store(true, Ordering::Release); } };
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         let frame = Duration::from_millis(33);
         loop {
@@ -270,13 +287,32 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                 command = commands.recv() => {
                     let Some(command) = command else { break };
                     match command {
+                        Command::StartTv(choice_tv) => {
+                            if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
+                            choice = None;
+                            stop_tv(&mut tv);
+                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            if playback.is_none() { if let Ok(p) = ScreenPlayback::open(spec.output.clone()) { p.set_deafened(deafened); playback = Some(Arc::new(p)); } }
+                            let shared = Arc::new(crate::tv::player::Shared::default());
+                            let (tx, rx) = mpsc::channel(64);
+                            let notify = update_tx.clone();
+                            crate::tv::player::start(choice_tv.address, shared.clone(), tx, crate::tv::player::Local { pictures: pictures.clone(), key: spec.session.me().to_owned(), playback: playback.clone(), source: stable_source("sonar-tv"), notify: Box::new(move || { let _ = notify.send(Update::Pictures); }) });
+                            tv_out = Some(rx);
+                            tv = Some((shared, choice_tv.label.clone(), choice_tv.share));
+                            let _ = output.send(Update::Sharing(Some(format!("TV · {}", choice_tv.label)))).await;
+                            if choice_tv.share { for target in targets.clone() { if let Ok(out) = offer(&spec, &target, Some(&choice_tv.label)).await { outgoing.insert(target.user.clone(), out); } } }
+                        }
                         Command::Start(next) => {
+                            stop_tv(&mut tv);
+                            tv_out = None;
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
                             choice = Some(next.clone());
                             sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone()));
-                            for target in targets.clone() { if let Ok(out) = offer(&spec, &target).await { if let Some(old) = outgoing.insert(target.user.clone(), out) { old.link.close(); } } }
+                            for target in targets.clone() { if let Ok(out) = offer(&spec, &target, None).await { if let Some(old) = outgoing.insert(target.user.clone(), out) { old.link.close(); } } }
                         }
                         Command::Stop => {
+                            stop_tv(&mut tv);
+                            tv_out = None;
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
                             choice = None;
                             for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
@@ -287,7 +323,8 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             for id in gone { if let Some(out) = outgoing.remove(&id) { out.link.close(); } }
                             let left: Vec<String> = incoming.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
                             for id in left { if let Some(view) = incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
-                            if sharing.is_some() { for target in &next { if !outgoing.contains_key(&target.user) { if let Ok(out) = offer(&spec, target).await { outgoing.insert(target.user.clone(), out); } } } }
+                            let label = tv.as_ref().filter(|(_, _, share)| *share).map(|(_, label, _)| label.clone());
+                            if sharing.is_some() || label.is_some() { for target in &next { if !outgoing.contains_key(&target.user) { if let Ok(out) = offer(&spec, target, label.as_deref()).await { outgoing.insert(target.user.clone(), out); } } } }
                             targets = next;
                         }
                         Command::Volume { from, volume } => {
@@ -301,7 +338,10 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                                 "screen-stop" => { if let Some(view) = incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); } if let Ok(mut slot) = pictures.lock() { slot.remove(&from); } let _ = output.send(Update::ViewerGone(from)).await; }
                                 "screen-answer" => {
                                     let sdp = signal.get("sdp").and_then(|v| v.get("sdp")).and_then(Value::as_str).unwrap_or_default().to_owned();
-                                    if let Some(out) = outgoing.get_mut(&from) { if fingerprint(&sdp).is_ok() { if let Ok(answer) = RTCSessionDescription::answer(sdp) { let _ = out.link.set_remote(answer).await; } } }
+                                    if let Some(out) = outgoing.get_mut(&from) {
+                                        out.desktop = signal.get("client").and_then(Value::as_str) == Some("desktop");
+                                        if fingerprint(&sdp).is_ok() { if let Ok(answer) = RTCSessionDescription::answer(sdp) { let _ = out.link.set_remote(answer).await; } }
+                                    }
                                 }
                                 "screen-ice" => {
                                     let candidate = signal.get("candidate").cloned().unwrap_or_default();
@@ -313,19 +353,22 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                                     let sdp = signal.get("sdp").and_then(|v| v.get("sdp")).and_then(Value::as_str).unwrap_or_default().to_owned();
                                     if sdp.len() > 32000 || fingerprint(&sdp).is_err() { continue; }
                                     if let Some(old) = incoming.remove(&from) { old.stop.store(true, Ordering::Release); old.link.close(); }
+                                    let label = (signal.get("tv").and_then(Value::as_bool) == Some(true)).then(|| signal.get("label").and_then(Value::as_str).unwrap_or("TV").chars().filter(|c| !c.is_control()).take(80).collect::<String>());
+                                    let _ = output.send(Update::Label(from.clone(), label)).await;
                                     if playback.is_none() { if let Ok(p) = ScreenPlayback::open(spec.output.clone()) { p.set_deafened(deafened); playback = Some(Arc::new(p)); } }
                                     let Some(player) = playback.clone() else { continue };
                                     if let Some(volume) = volumes.get(&from) { player.set_volume(stable_source(&from), *volume); }
                                     let Ok(configuration) = spec.session.voice_configuration().await else { continue };
                                     let Ok((servers, relay)) = configuration.into_servers(spec.relay_only) else { continue };
                                     let (rtp_tx, rtp_rx) = mpsc::channel(512);
-                                    let Ok(mut view) = link(servers, relay, Some(rtp_tx)).await else { continue };
+                                    let Ok(mut view) = link(servers, relay, Some(rtp_tx), signal.get("tv").and_then(Value::as_bool) == Some(true)).await else { continue };
                                     let Ok(description) = RTCSessionDescription::offer(sdp) else { continue };
                                     if view.set_remote(description).await.is_err() { view.close(); continue; }
                                     let Ok(answer) = view.connection.create_answer(None).await else { view.close(); continue };
                                     if view.connection.set_local_description(answer).await.is_err() { view.close(); continue; }
                                     let Ok(local) = view.local_sdp().await else { view.close(); continue };
-                                    if send(&spec, &target, json!({ "type": "screen-answer", "sdp": { "type": "answer", "sdp": local } })).await.is_err() { view.close(); continue; }
+                                    // "desktop": this app plays a TV channel's original stream, B-frames included.
+                                    if send(&spec, &target, json!({ "type": "screen-answer", "client": "desktop", "sdp": { "type": "answer", "sdp": local } })).await.is_err() { view.close(); continue; }
                                     let stop = Arc::new(AtomicBool::new(false));
                                     start_viewer(from.clone(), rtp_rx, pictures.clone(), player, stable_source(&from), update_tx.clone(), stop.clone());
                                     incoming.insert(from, Incoming { link: view, stop });
@@ -345,6 +388,31 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                         }
                     }
                 }
+                item = async { match tv_out.as_mut() { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
+                    use crate::tv::player::Out;
+                    let Some(item) = item else { tv_out = None; continue };
+                    let Some((shared, label, _)) = tv.clone() else { continue };
+                    let (native, web_native) = (shared.native.load(Ordering::Acquire), shared.web_native.load(Ordering::Acquire));
+                    let takes_original = |out: &Outgoing| native && (out.desktop || web_native);
+                    match item {
+                        Out::Native(data, duration) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) && takes_original(out) { let _ = out.video.write(&data, duration).await; } },
+                        Out::Converted(data, duration) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) && !takes_original(out) { let _ = out.video.write(&data, duration).await; } },
+                        Out::Audio(packet) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) { let _ = out.audio.write(&packet, Duration::from_millis(20)).await; } },
+                        Out::Info(text) => { let _ = output.send(Update::Sharing(Some(format!("TV · {label} · {text}")))).await; }
+                        Out::Failed(message) => {
+                            stop_tv(&mut tv); tv_out = None;
+                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            let _ = output.send(Update::Notice(message)).await;
+                            let _ = output.send(Update::Sharing(None)).await;
+                        }
+                        Out::Ended => {
+                            stop_tv(&mut tv); tv_out = None;
+                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            let _ = output.send(Update::Notice("The channel ended.".into())).await;
+                            let _ = output.send(Update::Sharing(None)).await;
+                        }
+                    }
+                }
                 update = updates.recv() => { if let Some(update) = update { if matches!(update, Update::Pictures) { let _ = output.try_send(update); } else { let _ = output.send(update).await; } } }
                 lower = restarts.recv() => {
                     if let (Some(height), Some(mut next)) = (lower, choice.clone()) {
@@ -356,18 +424,26 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                     }
                 }
                 _ = tick.tick() => {
+                    let tv_flags = tv.as_ref().map(|(shared, ..)| (shared.clone(), shared.native.load(Ordering::Acquire), shared.web_native.load(Ordering::Acquire)));
+                    let mut need_converted = false;
                     for out in outgoing.values_mut() {
+                        let original = tv_flags.as_ref().is_some_and(|(_, native, web)| *native && (out.desktop || *web));
+                        if out.tv && out.link.connected.load(Ordering::Acquire) && !original { need_converted = true; }
                         if !out.joined && out.link.connected.load(Ordering::Acquire) {
                             out.joined = true;
                             if let Some(active) = &sharing { active.force_key.store(true, Ordering::Release); }
+                            if let Some((shared, ..)) = &tv_flags { if !original { shared.force_key.store(true, Ordering::Release); } }
                         }
                     }
+                    // The converted copy costs the graphics card some work, so it runs only while someone needs it.
+                    if let Some((shared, ..)) = &tv_flags { shared.want_converted.store(need_converted, Ordering::Release); }
                     let failed: Vec<String> = incoming.iter().filter(|(_, v)| v.link.failed.load(Ordering::Acquire)).map(|(id, _)| id.clone()).collect();
                     for id in failed { if let Some(view) = incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
                 }
             }
         }
         if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
+        stop_tv(&mut tv);
         for (_, view) in incoming.drain() { view.stop.store(true, Ordering::Release); view.link.close(); }
         for (_, out) in outgoing.drain() { out.link.close(); }
         std::future::pending::<()>().await;
@@ -444,4 +520,157 @@ pub fn own_window() -> Option<isize> {
     let mut found = 0isize;
     unsafe { EnumWindows(Some(visit), &mut found as *mut _ as LPARAM); }
     (found != 0).then_some(found)
+}
+
+#[cfg(test)]
+mod tv_tests {
+    use super::*;
+    use crate::tv::player::{self, Out, Shared};
+    use std::io::{BufRead, Read, Write};
+
+    /// A desktop viewer gets the channel's original stream, B-frames and all: two of this
+    /// module's TV links (sharer and viewer) carry the untouched access units, and the
+    /// viewer's normal receive path (depacketizer and decoder) shows every frame in order.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn tv_share_reaches_a_desktop_viewer_unchanged() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/box_bframes.ts")).unwrap();
+        let mut demuxer = crate::tv::demux::Demuxer::new();
+        let mut units = Vec::new();
+        demuxer.push(&bytes, &mut units);
+        demuxer.finish(&mut units);
+        let frames: Vec<Vec<u8>> = units.into_iter().filter_map(|u| if let crate::tv::demux::Unit::Video { data, .. } = u { Some(data) } else { None }).collect();
+        let mut sharer = link(vec![], false, None, true).await.unwrap();
+        let mut video = OutTrack::create(&sharer.connection, "screen-video", RtpCodecKind::Video, RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: H264_HIGH.into(), rtcp_feedback: vec![] }, MIME_TYPE_H264).await.unwrap();
+        let description = sharer.connection.create_offer(None).await.unwrap();
+        sharer.connection.set_local_description(description).await.unwrap();
+        let offer = sharer.local_sdp().await.unwrap();
+        let (rtp_tx, mut rtp_rx) = mpsc::channel(4096);
+        let mut viewer = link(vec![], false, Some(rtp_tx), true).await.unwrap();
+        viewer.set_remote(RTCSessionDescription::offer(offer).unwrap()).await.unwrap();
+        let answer = viewer.connection.create_answer(None).await.unwrap();
+        viewer.connection.set_local_description(answer).await.unwrap();
+        let answer = viewer.local_sdp().await.unwrap();
+        sharer.set_remote(RTCSessionDescription::answer(answer).unwrap()).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !(sharer.connected.load(Ordering::Acquire) && viewer.connected.load(Ordering::Acquire)) { assert!(Instant::now() < deadline, "connected"); tokio::time::sleep(Duration::from_millis(20)).await; }
+        for frame in &frames { video.write(frame, Duration::from_millis(40)).await.unwrap(); tokio::time::sleep(Duration::from_millis(4)).await; }
+        let mut depacketizer = crate::screen_decode::Depacketizer::default();
+        let mut received = Vec::new();
+        while let Ok(Some(item)) = tokio::time::timeout(Duration::from_secs(2), rtp_rx.recv()).await {
+            if let Rtp::Video(payload, marker) = item { if let Some(unit) = depacketizer.push(&payload, marker) { received.push(unit); } }
+        }
+        let mut decoder = Decoder::new().unwrap();
+        let mut xs = Vec::new();
+        let mut read = |y: &[u8], _: &[u8], stride: usize, width: usize, _: usize| xs.push(y[80 * stride + 8..80 * stride + width].iter().position(|&v| v > 128).map_or(-1, |x| x as i64 + 8));
+        for unit in &received { decoder.decode(unit, &mut read).unwrap(); }
+        decoder.drain(&mut read).unwrap();
+        let xs: Vec<i64> = xs.into_iter().filter(|&x| x >= 0).collect();
+        sharer.close(); viewer.close();
+        assert_eq!(received.len(), frames.len(), "every original frame arrived");
+        assert_eq!(xs.len(), 50, "every frame was shown");
+        assert_eq!(xs.windows(2).filter(|w| w[1] < w[0] && w[0] - w[1] < 200).count(), 0, "in display order: {xs:?}");
+    }
+
+    /// End to end with a real browser: a 1080p50 channel goes through the TV player,
+    /// this module's own High-profile link and tracks, and the same rule the share loop
+    /// uses to pick the original or the converted copy, to Edge (as the web app plays
+    /// it). Without B-frames the browser must get the original; with them, the
+    /// converted copy; either way every frame in order, full size, with sound.
+    /// Needs ffmpeg, Node with Playwright (backend/node_modules) and Edge:
+    /// cargo test tv_share_reaches_a_browser -- --ignored --nocapture
+    /// This process's memory in MB (working set), to see what a TV share costs.
+    fn memory_mb() -> u64 {
+        use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb); }
+        (counters.WorkingSetSize / (1024 * 1024)) as u64
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
+    async fn tv_share_reaches_a_browser() {
+        let folder = std::env::temp_dir().join(format!("sonar-tv-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let only = std::env::var("SONAR_TV_E2E").ok();
+        for (name, b_frames, expect_original) in [("plain", 0, true), ("bframes", 3, false)] {
+            if only.as_deref().is_some_and(|o| o != name) { continue; }
+            let file = folder.join(format!("{name}.ts"));
+            let made = std::process::Command::new("ffmpeg").args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                "color=black:s=1920x1080:r=50:d=4[bg];color=white:s=60x60:d=4[b];[bg][b]overlay=x='mod(n*8\\,1800)':y=510",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=4", "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-pix_fmt", "yuv420p",
+                "-g", "50", "-bf", &b_frames.to_string(), "-b:v", "6M", "-c:a", "aac", "-ac", "2", "-b:a", "128k", "-f", "mpegts"]).arg(&file).status().expect("ffmpeg");
+            assert!(made.success());
+            let bytes = std::fs::read(&file).unwrap();
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = format!("http://{}/live/sonar-test-user/sonar-secret-9f3/1.ts", listener.local_addr().unwrap());
+            std::thread::spawn(move || for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len()).as_bytes());
+                let _ = stream.write_all(&bytes);
+            });
+
+            // The viewer: Edge, through the same High-profile link a share uses.
+            let mut link = link(vec![], false, None, true).await.unwrap();
+            let mut video = OutTrack::create(&link.connection, "screen-video", RtpCodecKind::Video, RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: H264_HIGH.into(), rtcp_feedback: vec![] }, MIME_TYPE_H264).await.unwrap();
+            let mut audio = OutTrack::create(&link.connection, "screen-audio", RtpCodecKind::Audio, RTCRtpCodec { mime_type: MIME_TYPE_OPUS.into(), clock_rate: 48000, channels: 2, sdp_fmtp_line: String::new(), rtcp_feedback: vec![] }, MIME_TYPE_OPUS).await.unwrap();
+            let description = link.connection.create_offer(None).await.unwrap();
+            link.connection.set_local_description(description).await.unwrap();
+            let sdp = link.local_sdp().await.unwrap();
+            eprintln!("{name}: offer ready");
+            let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../backend/scripts/test-tv-browser.mjs");
+            let mut node = std::process::Command::new("node").arg(script).current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../backend"))
+                .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().expect("node");
+            let mut to_node = node.stdin.take().unwrap();
+            let mut from_node = std::io::BufReader::new(node.stdout.take().unwrap()).lines();
+            writeln!(to_node, "{}", json!({ "type": "offer", "sdp": sdp })).unwrap();
+            let answer: Value = serde_json::from_str(&from_node.next().unwrap().unwrap()).unwrap();
+            link.set_remote(RTCSessionDescription::answer(answer["sdp"].as_str().unwrap().to_owned()).unwrap()).await.unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !link.connected.load(Ordering::Acquire) { assert!(Instant::now() < deadline, "connected"); tokio::time::sleep(Duration::from_millis(20)).await; }
+            eprintln!("{name}: connected");
+
+            // Privacy: nothing that goes to the viewer or the server carries the address or login.
+            assert!(!sdp.contains("sonar-secret-9f3") && !sdp.contains("sonar-test-user") && !sdp.contains("/live/"), "{name}: the offer holds no address or login");
+            let before = memory_mb();
+            let mut peak = before;
+            // The share loop's rule for a browser viewer (not "desktop").
+            let shared = Arc::new(Shared::default());
+            let (tx, mut rx) = mpsc::channel(64);
+            player::start(zeroize::Zeroizing::new(address), shared.clone(), tx, player::Local { pictures: Arc::new(Mutex::new(HashMap::new())), key: "me".into(), playback: None, source: 1, notify: Box::new(|| {}) });
+            let (mut originals, mut converted) = (0, 0);
+            while let Some(item) = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.expect("player output") {
+                peak = peak.max(memory_mb());
+                if let Out::Info(text) | Out::Failed(text) = &item { assert!(!text.contains("sonar-secret-9f3") && !text.contains("127.0.0.1"), "{name}: status text holds no address: {text}"); }
+                let original = shared.native.load(Ordering::Acquire) && shared.web_native.load(Ordering::Acquire);
+                shared.want_converted.store(!original, Ordering::Release);
+                match item {
+                    Out::Native(data, duration) if original => { video.write(&data, duration).await.unwrap(); originals += 1; }
+                    Out::Converted(data, duration) if !original => { video.write(&data, duration).await.unwrap(); converted += 1; if converted % 50 == 0 { eprintln!("{name}: {converted} converted"); } }
+                    Out::Audio(packet) => { audio.write(&packet, Duration::from_millis(20)).await.unwrap(); }
+                    Out::Failed(message) => panic!("{message}"),
+                    Out::Ended => { eprintln!("{name}: ended"); break }
+                    _ => {}
+                }
+            }
+            writeln!(to_node, "measure").unwrap();
+            let seen: Value = serde_json::from_str(&from_node.next().unwrap().unwrap()).unwrap();
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let after = memory_mb();
+            println!("{name}: sent {originals} original and {converted} converted frames; Edge saw {seen}");
+            println!("{name}: memory {before} MB before, {peak} MB at most while sharing 1080p50 (+{} MB), {after} MB after stopping", peak.saturating_sub(before));
+            drop(to_node);
+            let _ = node.wait();
+            link.close();
+            assert_eq!(seen["size"], "1920x1080", "{name}: full size");
+            assert!(seen["framesDecoded"].as_u64().unwrap() >= 150, "{name}: most of the 200 frames decoded: {seen}");
+            assert_eq!(seen["boxBackwards"], 0, "{name}: every frame in display order: {seen}");
+            assert!(seen["soundPeak"].as_f64().unwrap() > 0.05, "{name}: the tone is heard: {seen}");
+            if expect_original { assert!(originals >= 140 && converted < 60, "{name}: the browser got the original stream"); }
+            else { assert!(originals == 0 && converted >= 150, "{name}: B-frames, so the browser got the converted copy"); }
+        }
+        let _ = std::fs::remove_dir_all(folder);
+    }
 }

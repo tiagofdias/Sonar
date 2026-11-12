@@ -1,7 +1,7 @@
 //! Turns received H.264 RTP packets into pictures with the decoder built into Windows.
 #![allow(dead_code)]
 use std::mem::ManuallyDrop;
-use windows::core::Interface;
+use windows::core::GUID;
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
@@ -61,20 +61,52 @@ fn ctx<T>(context: &str, result: windows::core::Result<T>) -> Result<T, String> 
 pub struct Decoder { transform: IMFTransform, buffer_size: u32, stride: usize, coded_height: usize, width: usize, height: usize, time: i64 }
 
 impl Decoder {
-    pub fn new() -> Result<Self, String> {
+    /// For screen shares: pictures come out at once, in the order they arrive.
+    pub fn new() -> Result<Self, String> { Self::create(true) }
+    /// For TV, whose channels use B-frames (sent out of display order): Windows puts
+    /// the pictures back in display order, at the cost of a few frames of delay.
+    pub fn reordering() -> Result<Self, String> { Self::create(false) }
+    /// H.265 channels: Windows has a decoder only with the free "HEVC Video
+    /// Extensions" (or one from the graphics driver), so it is looked up.
+    pub fn hevc() -> Result<Self, String> {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            ctx("Media Foundation", MFStartup(MF_VERSION, MFSTARTUP_LITE))?;
+            let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: MFVideoFormat_HEVC };
+            let (mut list, mut count) = (std::ptr::null_mut(), 0u32);
+            let missing = || "This channel uses H.265. Install the free \"HEVC Video Extensions\" from the Microsoft Store to share it.".to_string();
+            if MFTEnumEx(MFT_CATEGORY_VIDEO_DECODER, MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER, Some(&input), None, &mut list, &mut count).is_err() || count == 0 { return Err(missing()); }
+            let activates = std::slice::from_raw_parts(list, count as usize);
+            let found = activates.iter().flatten().find_map(|a| a.ActivateObject::<IMFTransform>().ok());
+            for index in 0..count as usize { std::ptr::drop_in_place(list.add(index)); }
+            windows::Win32::System::Com::CoTaskMemFree(Some(list as _));
+            Self::with(found.ok_or_else(missing)?, MFVideoFormat_HEVC, false, Some((1920, 1080)))
+        }
+    }
+    fn create(low_latency: bool) -> Result<Self, String> {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             ctx("Media Foundation", MFStartup(MF_VERSION, MFSTARTUP_LITE))?;
             let transform: IMFTransform = ctx("The Windows video decoder is unavailable", CoCreateInstance(&CLSID_MSH264DecoderMFT, None, CLSCTX_INPROC_SERVER))?;
-            if let Ok(attributes) = transform.GetAttributes() { let _ = attributes.SetUINT32(&MF_LOW_LATENCY, 1); }
+            Self::with(transform, MFVideoFormat_H264, low_latency, None)
+        }
+    }
+    /// `size` is a first guess for decoders that need one before seeing the stream; a
+    /// different real size arrives as a format change.
+    fn with(transform: IMFTransform, format: GUID, low_latency: bool, size: Option<(u32, u32)>) -> Result<Self, String> {
+        unsafe {
+            if let Ok(attributes) = transform.GetAttributes() { let _ = attributes.SetUINT32(&MF_LOW_LATENCY, low_latency as u32); }
             let input = ctx("Decoder", MFCreateMediaType())?;
             ctx("Decoder", input.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video))?;
-            ctx("Decoder", input.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264))?;
+            ctx("Decoder", input.SetGUID(&MF_MT_SUBTYPE, &format))?;
+            if let Some((width, height)) = size { let _ = input.SetUINT64(&MF_MT_FRAME_SIZE, ((width as u64) << 32) | height as u64); }
             ctx("Decoder", transform.SetInputType(0, &input, 0))?;
             let mut decoder = Self { transform, buffer_size: 0, stride: 0, coded_height: 0, width: 0, height: 0, time: 0 };
-            decoder.choose_output()?;
-            ctx("Decoder", decoder.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0))?;
-            ctx("Decoder", decoder.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0))?;
+            // Some decoders (H.265) only know their output once they have seen the stream.
+            let _ = decoder.choose_output();
+            // Optional notices; a decoder still waiting to learn its output may refuse them.
+            let _ = decoder.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+            let _ = decoder.transform.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
             Ok(decoder)
         }
     }
@@ -83,7 +115,8 @@ impl Decoder {
         unsafe {
             for index in 0.. {
                 let kind = ctx("Decoder output", self.transform.GetOutputAvailableType(0, index))?;
-                if ctx("Decoder output", kind.GetGUID(&MF_MT_SUBTYPE))? != MFVideoFormat_NV12 { continue; }
+                // Some decoders list formats with details missing until they have seen data.
+                if kind.GetGUID(&MF_MT_SUBTYPE).ok() != Some(MFVideoFormat_NV12) { continue; }
                 ctx("Decoder output", self.transform.SetOutputType(0, &kind, 0))?;
                 if let Ok(size) = kind.GetUINT64(&MF_MT_FRAME_SIZE) {
                     let (width, height) = split(size);
@@ -120,6 +153,18 @@ impl Decoder {
             let _ = sample.SetSampleTime(self.time);
             self.time += 333_333;
             ctx("Decoder input", self.transform.ProcessInput(0, &sample, 0))?;
+            self.collect(on_picture)
+        }
+    }
+
+    /// Hands out the pictures still held for reordering, at the end of a stream.
+    pub fn drain(&mut self, on_picture: &mut dyn FnMut(&[u8], &[u8], usize, usize, usize)) -> Result<(), String> {
+        unsafe { ctx("Decoder drain", self.transform.ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))?; }
+        self.collect(on_picture)
+    }
+
+    fn collect(&mut self, on_picture: &mut dyn FnMut(&[u8], &[u8], usize, usize, usize)) -> Result<(), String> {
+        unsafe {
             loop {
                 let target = ctx("Decoder output", MFCreateMemoryBuffer(self.buffer_size.max(1)))?;
                 let picture = ctx("Decoder output", MFCreateSample())?;
@@ -141,7 +186,7 @@ impl Decoder {
                         let _ = target.Unlock();
                     }
                     Err(error) if error.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(()),
-                    Err(error) if error.code() == MF_E_TRANSFORM_STREAM_CHANGE => self.choose_output()?,
+                    Err(error) if error.code() == MF_E_TRANSFORM_STREAM_CHANGE || error.code() == MF_E_TRANSFORM_TYPE_NOT_SET => self.choose_output()?,
                     Err(error) => return Err(format!("Decoder: {error}")),
                 }
             }
@@ -162,6 +207,74 @@ mod tests {
         assert_eq!(d.push(&[0x7c, 0x85, 7, 8], false), None);
         let unit = d.push(&[0x7c, 0x45, 9], true).unwrap();
         assert_eq!(unit, [0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 1, 0x68, 9, 0, 0, 0, 1, 0x06, 0, 0, 0, 1, 0x65, 7, 8, 9]);
+    }
+    /// A white box moves 4 pixels right every frame in a clip with B-frames: decoded
+    /// for TV, it must only ever move right (display order), never jump back.
+    #[test]
+    fn tv_decoding_shows_b_frames_in_display_order() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/box_bframes.ts")).unwrap();
+        let mut demuxer = crate::tv::demux::Demuxer::new();
+        let mut units = Vec::new();
+        demuxer.push(&bytes, &mut units);
+        demuxer.finish(&mut units);
+        let positions = |mut decoder: Decoder| {
+            let mut xs = Vec::new();
+            for unit in &units {
+                let crate::tv::demux::Unit::Video { data, .. } = unit else { continue };
+                decoder.decode(data, &mut |y, _, stride, width, _| { xs.push(y[80 * stride + 8..80 * stride + width].iter().position(|&v| v > 128).map_or(-1, |x| x as i64 + 8)); }).unwrap();
+            }
+            decoder.drain(&mut |y, _, stride, width, _| { xs.push(y[80 * stride + 8..80 * stride + width].iter().position(|&v| v > 128).map_or(-1, |x| x as i64 + 8)); }).unwrap();
+            xs.into_iter().filter(|&x| x >= 0).collect::<Vec<_>>()
+        };
+        let ordered = positions(Decoder::reordering().unwrap());
+        assert!(ordered.len() >= 40, "most of the 50 frames come out: {} {ordered:?}", ordered.len());
+        let back = ordered.windows(2).filter(|w| w[1] < w[0] && w[0] - w[1] < 200).count();
+        assert_eq!(back, 0, "display order: {ordered:?}");
+        assert_eq!(ordered.len(), 50, "draining hands out the frames held for reordering");
+    }
+    /// The converted copy for browsers: B-frame video decoded in display order,
+    /// re-encoded without B-frames, still shows every frame in order.
+    #[test]
+    fn tv_converted_copy_keeps_every_frame_in_order() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/box_bframes.ts")).unwrap();
+        let mut demuxer = crate::tv::demux::Demuxer::new();
+        let mut units = Vec::new();
+        demuxer.push(&bytes, &mut units);
+        demuxer.finish(&mut units);
+        let mut decoder = Decoder::reordering().unwrap();
+        let mut encoder: Option<crate::screen_media::FrameEncoder> = None;
+        let (mut packets, mut count) = (Vec::<Vec<u8>>::new(), 0i64);
+        let mut encode = |y: &[u8], uv: &[u8], stride: usize, width: usize, height: usize| {
+            let e = encoder.get_or_insert_with(|| crate::screen_media::FrameEncoder::new(width as u32, height as u32, 25).unwrap());
+            e.encode(y, uv, stride, count * 400_000, &mut |p, _| packets.push(p.to_vec())).unwrap();
+            count += 1;
+        };
+        for unit in &units { if let crate::tv::demux::Unit::Video { data, .. } = unit { decoder.decode(data, &mut encode).unwrap(); } }
+        decoder.drain(&mut encode).unwrap();
+        if let Some(e) = encoder.as_mut() { e.flush(&mut |p, _| packets.push(p.to_vec())).unwrap(); }
+        assert_eq!(count, 50, "every picture was encoded");
+        let mut check = Decoder::new().unwrap();
+        let mut xs = Vec::new();
+        for packet in &packets { check.decode(packet, &mut |y, _, stride, width, _| xs.push(y[80 * stride + 8..80 * stride + width].iter().position(|&v| v > 128).map_or(-1, |x| x as i64 + 8))).unwrap(); }
+        let xs: Vec<i64> = xs.into_iter().filter(|&x| x >= 0).collect();
+        assert!(xs.len() >= 45, "the copy plays nearly every frame at once (no reordering delay): {}", xs.len());
+        assert_eq!(xs.windows(2).filter(|w| w[1] < w[0] && w[0] - w[1] < 200).count(), 0, "in order: {xs:?}");
+    }
+    #[test]
+    fn hevc_channels_decode_when_windows_has_the_codec() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/h265.ts")).unwrap();
+        let mut demuxer = crate::tv::demux::Demuxer::new();
+        let mut units = Vec::new();
+        demuxer.push(&bytes, &mut units);
+        demuxer.finish(&mut units);
+        let mut decoder = match Decoder::hevc() {
+            Ok(decoder) => decoder,
+            Err(message) => { assert!(message.contains("HEVC Video Extensions"), "{message}"); eprintln!("skipped: {message}"); return; }
+        };
+        let mut pictures = 0;
+        for unit in &units { if let crate::tv::demux::Unit::Video { data, .. } = unit { decoder.decode(data, &mut |_, _, _, w, h| { assert_eq!((w, h), (320, 180)); pictures += 1; }).unwrap(); } }
+        decoder.drain(&mut |_, _, _, _, _| pictures += 1).unwrap();
+        assert_eq!(pictures, 25);
     }
     #[test]
     fn converts_video_black_and_white() {

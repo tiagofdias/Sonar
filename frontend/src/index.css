@@ -3126,3 +3126,13 @@ p {
 .watch-stage.chat:not(.empty) .watch-bar { height: 0; }
 .watch-stage.chat:not(.empty) .watch-actions { position: absolute; right: 0; bottom: 0; height: 32px; }
 .watch-stage.chat:not(.empty) .watch-controls { padding-right: 72px; }
+
+/* A TV share in theater view fills the conversation and hides the chat. */
+.conversation:has(> .screen-stage.theater) > .chat-top,
+.conversation:has(> .screen-stage.theater) > .retention-banner,
+.conversation:has(> .screen-stage.theater) > .community-content,
+.conversation:has(> .screen-stage.theater) > .message-scroll,
+.conversation:has(> .screen-stage.theater) > .composer-area { display: none; }
+.screen-stage.theater { position: static; width: auto; max-height: none; margin: 14px 33px 0; overflow: hidden; flex: 1 1 auto; min-height: 0; display: flex; }
+.screen-stage.theater .screen-tile { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.screen-stage.theater .screen-tile video { flex: 1; min-height: 0; max-height: none; width: 100%; aspect-ratio: auto; object-fit: contain; }

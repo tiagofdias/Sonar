@@ -169,6 +169,18 @@ fn watch_button<'a>(app: &'a App) -> E<'a> {
     }
 }
 
+/// Sonar TV: opens your channels, or stops the channel that is playing.
+fn tv_button<'a>(app: &'a App) -> E<'a> {
+    let playing = app.screen_sharing.as_deref().is_some_and(|s| s.starts_with("TV"));
+    let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
+    let button = call_btn(Icon::Tv, 18.0, app.screen_controls.is_some().then_some(if playing { Msg::ScreenStop } else { Msg::OpenTv }), playing);
+    tooltip(button, tip(if playing { "Stop TV" } else { "TV: your channels, shared at their original quality" }), tooltip::Position::Bottom).into()
+}
+/// "Sport TV 1 · 1080p50 · H.264" while TV plays, for the call bar.
+fn tv_status(app: &App) -> String {
+    app.screen_sharing.as_deref().filter(|s| s.starts_with("TV")).map_or_else(String::new, |s| format!(" · 📺 {}", s.trim_start_matches("TV · ")))
+}
+
 fn screen_button<'a>(app: &'a App) -> E<'a> {
     let sharing = app.screen_sharing.is_some();
     call_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
@@ -181,17 +193,26 @@ fn screen_volume<'a>(app: &'a App, id: &'a str) -> E<'a> {
 }
 
 /// Screens other people are sharing. Mirrors ScreenStage.jsx.
+/// "Tiago is sharing TV: Sport TV 1", "Your TV: …", or "Tiago's screen".
+fn screen_caption(app: &App, id: &str) -> String {
+    match app.screen_labels.get(id) {
+        Some(label) if id == app.me() => format!("Your TV: {label}"),
+        Some(label) => format!("{} is sharing TV: {label}", app.screen_name(id)),
+        None => format!("{}'s screen", app.screen_name(id)),
+    }
+}
+
 fn screen_stage(app: &App) -> Option<E<'_>> {
     use iced::widget::image;
     if app.screen_views.is_empty() { return None; }
     if let Some((id, (handle, _, _))) = app.screen_expanded.as_ref().and_then(|id| app.screen_views.get_key_value(id)) {
-        let header = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
+        let header = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
         return Some(opaque(container(column![container(header).padding([6, 10]), image(handle.clone()).width(FILL).height(FILL)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000)))));
     }
     let mut tiles = Column::new().spacing(10);
     for (id, (handle, width, height)) in &app.screen_views {
         let aspect = *height as f32 / (*width).max(1) as f32;
-        let caption = row![text(format!("{}'s screen", app.screen_name(id))).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
+        let caption = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
         tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
     }
     Some(container(container(opaque(tiles)).width(520)).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom).padding(18).into())
@@ -856,7 +877,7 @@ fn call_banner(app: &App) -> Option<E<'_>> {
                 text(if joining { "Joining voice room...".to_string() } else { format!("Voice room: {}", room.name) }).size(15).font(t::semibold()).color(rgb(0xeafaff)),
                 text(format!("{} · {}/6 people · {}", room.community_name, room.participants.len(), {
                     let mine = room.spec.as_ref().map(|s| s.session_id.as_str()).unwrap_or_default();
-                    room_status(joining, room.participants.iter().filter(|p| p.session_id != mine).count(), room.connections)
+                    format!("{}{}", room_status(joining, room.participants.iter().filter(|p| p.session_id != mine).count(), room.connections), tv_status(app))
                 })).size(13).color(rgb(0xa9d8ee)),
             ].spacing(4).width(FILL),
             container(lead_icon(Icon::LockKeyhole, if app.settings.relay_only { "Relay only" } else { "Encrypted audio" }, rgb(0xbfeaff), 11.0, 11.0, 5.0)).padding([6, 7]).style(t::panel(rgb(0x0f3147), rgb(0x3f9dff), 5.0)),
@@ -864,6 +885,7 @@ fn call_banner(app: &App) -> Option<E<'_>> {
             call_btn(if room.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::RoomDeafen), room.deafened),
             screen_button(app),
             if joining { space().width(0).into() } else { watch_button(app) },
+            if joining { space().width(0).into() } else { tv_button(app) },
             button(t::icon(Icon::LogOut, 18.0, Color::WHITE)).padding(10).style(t::end_call()).on_press(Msg::LeaveRoom),
         ].spacing(14).align_y(Vertical::Center)).padding(14).width(FILL).style(t::panel(rgb(0x12405f), rgb(0x3f9dff), 9.0)))
             .padding(Padding { top: 16.0, left: 33.0, right: 33.0, bottom: 0.0 }).into());
@@ -872,12 +894,13 @@ fn call_banner(app: &App) -> Option<E<'_>> {
         let duration = call.started.map(|s| { let secs = s.elapsed().as_secs(); format!(" · {}:{:02}", secs / 60, secs % 60) }).unwrap_or_default();
         row![
             t::icon(Icon::AudioLines, 23.0, rgb(0x70eeff)),
-            column![text(title).size(15).font(t::semibold()).color(rgb(0xeafaff)), text(format!("{}{duration} · No recordings", name(&call.spec.peer))).size(13).color(rgb(0xa9d8ee))].spacing(4).width(FILL),
+            column![text(title).size(15).font(t::semibold()).color(rgb(0xeafaff)), text(format!("{}{duration} · No recordings{}", name(&call.spec.peer), tv_status(app))).size(13).color(rgb(0xa9d8ee))].spacing(4).width(FILL),
             pill(call.spec.relay_only),
             mic_btn(call.muted, app.mic_active && !call.deafened, Msg::Mute),
             call_btn(if call.deafened { Icon::HeadphoneOff } else { Icon::Headphones }, 18.0, Some(Msg::Deafen), call.deafened),
             if call.status == CallStatus::Connected { screen_button(app) } else { space().width(0).into() },
             if call.status == CallStatus::Connected { watch_button(app) } else { space().width(0).into() },
+            if call.status == CallStatus::Connected { tv_button(app) } else { space().width(0).into() },
             end_call(Msg::Hangup),
         ].spacing(14).align_y(Vertical::Center).into()
     } else { return None };
@@ -1223,9 +1246,72 @@ fn privacy_item<'a>(icon: Icon, title: &'a str, note: &'a str) -> E<'a> {
     container(row![t::icon(icon, 19.0, rgb(0xd0d7dc)), column![text(title).size(15).font(t::semibold()).color(rgb(0xd0d7dc)), body(note, 14.0, rgb(0x8f99a0), 1.8)].spacing(7)].spacing(14)).padding([12, 0]).into()
 }
 
+/// Sonar TV: your sources on the left, the open source's channels on the right.
+fn tv_panel(app: &App) -> E<'_> {
+    let close = Msg::OpenPanel(None);
+    let section = |label: &'static str| -> E<'_> { container(t::eyebrow(label, 10.0, t::EYEBROW)).padding(Padding { top: 14.0, bottom: 6.0, ..Padding::ZERO }).into() };
+    let small = |label: &'static str, primary: bool, on: Option<Msg>| -> E<'_> { button(text(label).size(13).font(t::semibold()).color(if primary { rgb(0x1e2329) } else { rgb(0xd0d7dc) })).padding([6, 11]).style(if primary { t::primary() } else { t::secondary() }).on_press_maybe(on).into() };
+    let mut sources = Column::new().spacing(4);
+    for source in &app.tv_sources {
+        let chosen = app.tv_source.as_ref() == Some(&source.id);
+        let kind = match source.kind { crate::tv::sources::SourceKind::M3u { .. } => "Playlist", crate::tv::sources::SourceKind::Xtream { .. } => "Xtream login" };
+        sources = sources.push(row![
+            button(column![text(source.name.clone()).size(14).font(t::semibold()).color(t::TEXT), text(kind).size(12).color(rgb(0x7f8a94))].spacing(2)).width(FILL).padding([8, 10]).style(t::person_row(chosen)).on_press(Msg::TvSelect(source.id.clone())),
+            icon_btn(Icon::Trash, 15.0, Some(Msg::TvRemove(source.id.clone())), false),
+        ].spacing(4).align_y(Vertical::Center));
+    }
+    if app.tv_sources.is_empty() { sources = sources.push(body("No sources yet. Add your provider's playlist or Xtream login below.", 13.0, rgb(0x8f989f), 1.6)); }
+    let kinds = row![small("Playlist link", !app.tv_xtream, Some(Msg::TvKind(false))), small("Xtream login", app.tv_xtream, Some(Msg::TvKind(true)))].spacing(6);
+    let form: E = if app.tv_xtream {
+        column![card_input("Name (optional)", &app.tv_name, Msg::TvName, false), card_input("Server, like http://provider.tv:8080", &app.tv_server, Msg::TvServer, false), card_input("Username", &app.tv_user, Msg::TvUser, false), card_input("Password", &app.tv_pass, Msg::TvPass, true)].spacing(6).into()
+    } else {
+        column![card_input("Name (optional)", &app.tv_name, Msg::TvName, false), card_input("Playlist address (M3U)", &app.tv_url, Msg::TvUrl, false)].spacing(6).into()
+    };
+    let can_add = if app.tv_xtream { !app.tv_server.trim().is_empty() && !app.tv_user.trim().is_empty() && !app.tv_pass.is_empty() } else { !app.tv_url.trim().is_empty() };
+    let left = column![
+        section("YOUR SOURCES"), sources,
+        section("ADD A SOURCE"), kinds, form,
+        container(primary("Add", Some(Icon::Plus), can_add.then_some(Msg::TvAdd))).padding(Padding { top: 6.0, ..Padding::ZERO }),
+        container(body("Logins and links stay on this PC, encrypted. Sonar's server and the people watching never see them.", 12.0, rgb(0x7f8a94), 1.6)).padding(Padding { top: 10.0, ..Padding::ZERO }),
+    ].spacing(4).width(260);
+    let query = app.tv_query.trim().to_lowercase();
+    let mut channels = Column::new().spacing(3);
+    let mut shown = 0;
+    for (index, channel) in app.tv_channels.iter().enumerate() {
+        if !query.is_empty() && !channel.name.to_lowercase().contains(&query) && !channel.group.to_lowercase().contains(&query) { continue; }
+        shown += 1;
+        if shown > 200 { break; }
+        channels = channels.push(container(row![
+            column![text(channel.name.clone()).size(14).color(t::TEXT).wrapping(text::Wrapping::None), text(channel.group.clone()).size(12).color(rgb(0x7f8a94)).wrapping(text::Wrapping::None)].spacing(2).width(FILL).clip(true),
+            small("Watch", false, Some(Msg::TvPlay(index, false))),
+            small("Share", true, Some(Msg::TvPlay(index, true))),
+        ].spacing(6).align_y(Vertical::Center)).padding([6, 8]).style(t::panel(rgb(0x21272e), rgb(0x21272e), 8.0)));
+    }
+    let status: E = if app.tv_loading { body("Loading channels from your provider…", 14.0, rgb(0x8f989f), 1.6).into() }
+        else if let Some(error) = &app.tv_error { body(error.clone(), 14.0, rgb(0xe3b8a8), 1.6).into() }
+        else if app.tv_source.is_none() { body("Choose or add a source to see its channels.", 14.0, rgb(0x8f989f), 1.6).into() }
+        else if shown == 0 { body("No channels match.", 14.0, rgb(0x8f989f), 1.6).into() }
+        else if shown > 200 { body("Showing the first 200 — search to find others.", 12.0, rgb(0x7f8a94), 1.6).into() }
+        else { space().height(0).into() };
+    let right = column![
+        card_input("Search channels or groups", &app.tv_query, Msg::TvQuery, false),
+        status,
+        scroll_area(channels).height(430),
+    ].spacing(8).width(FILL);
+    let content = column![
+        modal_header(Icon::Tv, 26.0, close.clone()),
+        modal_title("TV, together"),
+        body("Watch a channel on your own, or share it with the call. Friends get the channel's original picture, not a recording of your screen.", 14.0, rgb(0x9099a0), 1.7),
+        container(row![left, right].spacing(22)).padding(Padding { top: 12.0, ..Padding::ZERO }),
+    ];
+    modal(container(content).padding(30).into(), 900.0, Some(close))
+}
+
 fn panel_view(app: &App, panel: Panel) -> E<'_> {
+    if panel == Panel::Tv { return tv_panel(app); }
     let close = Msg::OpenPanel(None);
     let content: E = match panel {
+        Panel::Tv => space().into(),
         Panel::Search => {
             let mut list = Column::new().spacing(6).padding(Padding { top: 16.0, ..Padding::ZERO });
             if let Some(results) = &app.search_results {

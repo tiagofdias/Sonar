@@ -3,6 +3,10 @@ import { directCallUsers, voiceRoomUsers, answeredCalls, activity } from "./voic
 import { areFriends } from "./friends.js";
 import { pushTo } from "./push.js";
 export function validScreenSignal(signal) {
+  // TV shares name the channel; desktop viewers say so in their answer. Nothing else is allowed through.
+  if (signal.label !== undefined && (typeof signal.label !== "string" || signal.label.length > 80 || /[\u0000-\u001f<>]/.test(signal.label))) return false;
+  if (signal.tv !== undefined && typeof signal.tv !== "boolean") return false;
+  if (signal.client !== undefined && signal.client !== "desktop") return false;
   if (signal.type === "screen-stop") return true;
   if (signal.type === "screen-ice")
     return ["sharer", "viewer"].includes(signal.role) && typeof signal.candidate?.candidate === "string";

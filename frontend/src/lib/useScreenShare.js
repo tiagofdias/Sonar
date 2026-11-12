@@ -34,6 +34,8 @@ const applyPending = async (entry) => {
 export function useScreenShare({ send, targets }) {
   const [sharing, setSharing] = useState(false);
   const [remotes, setRemotes] = useState({});
+  // TV shares from the desktop app name their channel; screens have no label.
+  const [labels, setLabels] = useState({});
   const media = useRef(null);
   const bitrate = useRef(SCREEN_QUALITIES[1080].bitrate);
   const outgoing = useRef(new Map());
@@ -52,6 +54,12 @@ export function useScreenShare({ send, targets }) {
     const entry = incoming.current.get(id);
     if (entry) { incoming.current.delete(id); entry.pc.close(); }
     setRemotes((all) => {
+      if (!(id in all)) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+    setLabels((all) => {
       if (!(id in all)) return all;
       const rest = { ...all };
       delete rest[id];
@@ -157,6 +165,7 @@ export function useScreenShare({ send, targets }) {
       closeIncoming(from);
       const entry = { pc: null, pending: [] };
       incoming.current.set(from, entry);
+      if (signal.tv) setLabels((all) => ({ ...all, [from]: typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "TV" }));
       entry.pc = await newConnection();
       if (incoming.current.get(from) !== entry) return entry.pc.close();
       entry.pc.onicecandidate = ({ candidate }) => {
@@ -177,7 +186,7 @@ export function useScreenShare({ send, targets }) {
     }
   }, [closeIncoming]);
 
-  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, handle };
+  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, labels, handle };
 }
 
 export const applyScreenOutput = (player) =>

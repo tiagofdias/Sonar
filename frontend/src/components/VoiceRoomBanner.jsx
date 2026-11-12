@@ -26,7 +26,7 @@ export default function VoiceRoomBanner({ voiceRoom, watch }) {
     connected: states.filter((value) => value === "connected").length,
     failed: states.filter((value) => value === "failed").length,
   });
-  const nameOf = (id) => room.participants?.find((person) => person.userId === id)?.fullName || "Member";
+  const nameOf = (id) => room.participants?.find((person) => person.userId === id)?.name || "Member";
   return (
     <>
     <ScreenStage screen={voiceRoom.screen} nameOf={nameOf} deafened={voiceRoom.deafened} />

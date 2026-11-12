@@ -271,4 +271,11 @@ test("screen-share signals are validated before relay", async () => {
   assert.equal(validScreenSignal({ type: "screen-ice", role: "viewer", candidate: { candidate: "x" } }), true);
   assert.equal(validScreenSignal({ type: "screen-ice", role: "other", candidate: { candidate: "x" } }), false);
   assert.equal(validScreenSignal({ type: "screen-unknown" }), false);
+  // TV shares: a channel name for viewers, and desktop viewers saying so; nothing else.
+  assert.equal(validScreenSignal({ type: "screen-offer", tv: true, label: "Sport TV 1", sdp: { type: "offer", sdp: "v=0" } }), true);
+  assert.equal(validScreenSignal({ type: "screen-answer", client: "desktop", sdp: { type: "answer", sdp: "v=0" } }), true);
+  assert.equal(validScreenSignal({ type: "screen-offer", label: "<img src=x>", sdp: { type: "offer", sdp: "v=0" } }), false);
+  assert.equal(validScreenSignal({ type: "screen-offer", label: "x".repeat(81), sdp: { type: "offer", sdp: "v=0" } }), false);
+  assert.equal(validScreenSignal({ type: "screen-offer", tv: "yes", sdp: { type: "offer", sdp: "v=0" } }), false);
+  assert.equal(validScreenSignal({ type: "screen-answer", client: "evil", sdp: { type: "answer", sdp: "v=0" } }), false);
 });

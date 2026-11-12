@@ -1,6 +1,6 @@
 [package]
 name = "sonar-desktop"
-version = "0.3.9"
+version = "0.4.0"
 edition = "2021"
 publish = false
 
@@ -94,6 +94,9 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 tokio = { version = "1", features = ["rt", "time", "sync"] }
 aes-gcm = "0.10"
+# Sonar TV: AES-128 encrypted HLS segments (aes 0.8 is already used by aes-gcm).
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
 p256 = { version = "0.14", features = ["ecdh", "ecdsa", "pkcs8", "getrandom"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 base64 = "0.22"
