@@ -3,6 +3,7 @@
 // voice room and shares a channel from a local "provider"; Edge, signed in to the
 // web app as the other account in the same room, watches it.
 // Usage (from backend/): node scripts/test-tv-live.mjs [path-to-desktop-debug-exe]
+// SONAR_TV_CHANNEL=<http(s) stream URL> shares that real stream instead of the generated one.
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -21,8 +22,9 @@ const made = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-
   "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=90", "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high", "-pix_fmt", "yuv420p", "-g", "25", "-bf", "0", "-b:v", "3M", "-c:a", "aac", "-ac", "2", "-f", "mpegts", channel]);
 if (made.status !== 0) throw new Error("ffmpeg failed");
 const bytes = readFileSync(channel);
+const real = process.env.SONAR_TV_CHANNEL;
 const provider = createServer((req, res) => {
-  if (req.url === "/list.m3u") { res.end(`#EXTM3U\n#EXTINF:-1 group-title="Test",Test Channel HD\nhttp://127.0.0.1:${provider.address().port}/live/sonar-test-user/sonar-secret-9f3/1.ts\n`); return; }
+  if (req.url === "/list.m3u") { res.end(`#EXTM3U\n#EXTINF:-1 group-title="Test",Test Channel HD\n${real || `http://127.0.0.1:${provider.address().port}/live/sonar-test-user/sonar-secret-9f3/1.ts`}\n`); return; }
   if (req.url.startsWith("/live/")) { res.writeHead(200, { "Content-Length": bytes.length }); res.end(bytes); return; }
   res.writeHead(404).end();
 });
@@ -84,11 +86,11 @@ try {
   result = await page.evaluate((first) => {
     const video = document.querySelector(".screen-tile video");
     const quality = video.getVideoPlaybackQuality();
-    return { label: document.querySelector(".screen-tile figcaption span").textContent, size: `${video.videoWidth}x${video.videoHeight}`, framesIn8s: quality.totalVideoFrames - first, dropped: quality.droppedVideoFrames, theater: Boolean(document.querySelector(".screen-stage.theater")), chatHidden: !document.querySelector(".community-content")?.offsetParent };
+    return { label: document.querySelector(".screen-tile figcaption span").textContent, size: `${video.videoWidth}x${video.videoHeight}`, framesIn8s: quality.totalVideoFrames - first, hasSound: video.srcObject?.getAudioTracks().length > 0, dropped: quality.droppedVideoFrames, theater: Boolean(document.querySelector(".screen-stage.theater")), chatHidden: !document.querySelector(".community-content")?.offsetParent };
   }, first);
   await page.screenshot({ path: join(work, "web.png") });
 } catch (error) { result.detail = String(error).slice(0, 200); }
-const leaked = relayed.filter((line) => line.includes("sonar-secret-9f3") || line.includes("sonar-test-user") || line.includes("/live/"));
+const leaked = relayed.filter((line) => line.includes("sonar-secret-9f3") || line.includes("sonar-test-user") || line.includes("/live/") || (real && line.includes(new URL(real).host)));
 result.signalsRelayed = relayed.length;
 result.addressSeenByServer = leaked.length > 0;
 console.log(JSON.stringify(result, null, 1));
