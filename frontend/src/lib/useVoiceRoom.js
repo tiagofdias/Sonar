@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "./axios";
 import {
-  audioConstraints,
+  openMicrophone,
   useVoiceSettingsStore,
 } from "../store/useVoiceSettingsStore";
 import { applyAudioOutput } from "./audioOutput";
@@ -231,10 +231,7 @@ export function useVoiceRoom(socket) {
         throw new Error(
           "Voice rooms need microphone access over HTTPS or localhost.",
         );
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints(),
-        video: false,
-      });
+      const stream = await openMicrophone();
       if (current.current?.intent !== intent) {
         stream.getTracks().forEach((track) => track.stop());
         return;

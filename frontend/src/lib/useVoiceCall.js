@@ -8,7 +8,7 @@ import { denoisedStream } from "./noiseSuppression";
 import { useChatStore } from "../store/useChatStore";
 import { refreshVoiceConfiguration } from "./voiceConfigRefresh";
 import {
-  audioConstraints,
+  openMicrophone,
   useVoiceSettingsStore,
 } from "../store/useVoiceSettingsStore";
 const mediaError = (error) =>
@@ -158,10 +158,7 @@ export function useVoiceCall(socket, inRoom = false) {
       throw new Error(
         "Voice calls need microphone access over HTTPS or localhost.",
       );
-    const media = await navigator.mediaDevices.getUserMedia({
-      audio: audioConstraints(),
-      video: false,
-    });
+    const media = await openMicrophone();
     if (!valid(current.id)) {
       media.getTracks().forEach((track) => track.stop());
       throw new Error("Call ended");

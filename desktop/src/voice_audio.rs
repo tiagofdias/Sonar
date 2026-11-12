@@ -2,7 +2,7 @@
 //! This module is not yet connected to signaling or enabled in the UI.
 #![allow(dead_code)]
 use crate::voice_codec::{VoiceDecoder, VoiceEncoder, FRAME_SAMPLES, SAMPLE_RATE};
-use cpal::{traits::{DeviceTrait, HostTrait, StreamTrait}, SampleFormat, StreamConfig, SupportedStreamConfig};
+use cpal::{traits::{DeviceTrait, StreamTrait}, SampleFormat, StreamConfig, SupportedStreamConfig};
 use std::{collections::{HashMap, VecDeque}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc::{self, Receiver, SyncSender}}, thread::{self, JoinHandle}, time::Duration};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -210,16 +210,24 @@ impl ScreenPlayback {
 }
 impl Drop for ScreenPlayback { fn drop(&mut self) { self.stop.store(true, Ordering::Release); } }
 
-fn select_device(input: bool, selected: Option<String>) -> Result<cpal::Device, String> {
+fn select_device(input: bool, selected: Option<String>) -> Result<cpal::Device, String> { pick_device(input, selected) }
+/// The microphone or speakers chosen in settings, found by name. When that device is
+/// unplugged, renamed by Windows (wireless headsets come back as "3- …"), or several
+/// share the name, the Windows default is used instead of refusing to join a call.
+pub(crate) fn pick_device(input: bool, selected: Option<String>) -> Result<cpal::Device, String> {
+    use cpal::traits::HostTrait;
     let host = cpal::default_host();
     if let Some(name) = selected {
-        let devices = if input { host.input_devices() } else { host.output_devices() }.map_err(|_| "Could not list audio devices.")?;
-        let mut matches = devices.filter(|device| device.name().ok().as_deref() == Some(name.as_str()));
-        let device = matches.next().ok_or("The selected audio device is no longer available.")?;
-        if matches.next().is_some() { return Err("Several devices share that name. Use the Windows default instead.".into()); }
-        Ok(device)
-    } else if input { host.default_input_device().ok_or_else(|| "No default microphone was found.".into()) }
-    else { host.default_output_device().ok_or_else(|| "No default speakers were found.".into()) }
+        // Tests need a selection that always fails, to check a failed call start cleans up.
+        #[cfg(test)]
+        if name == "sonar-test-nonexistent-microphone" { return Err("Test microphone".into()); }
+        if let Ok(devices) = if input { host.input_devices() } else { host.output_devices() } {
+            let matching: Vec<cpal::Device> = devices.filter(|device| device.name().ok().as_deref() == Some(name.as_str())).collect();
+            if matching.len() == 1 { if let Some(device) = matching.into_iter().next() { return Ok(device); } }
+        }
+    }
+    if input { host.default_input_device().ok_or_else(|| "No microphone was found. Plug one in or check Windows sound settings.".into()) }
+    else { host.default_output_device().ok_or_else(|| "No speakers were found. Plug some in or check Windows sound settings.".into()) }
 }
 fn select_config(device: &cpal::Device, input: bool) -> Result<SupportedStreamConfig, String> {
     let ranges: Vec<_> = if input { device.supported_input_configs().map(|r| r.collect()) } else { device.supported_output_configs().map(|r| r.collect()) }.map_err(|_| "Could not read the audio formats of this device.")?;

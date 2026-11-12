@@ -16,14 +16,7 @@ pub fn enumerate() -> Result<Devices, String> {
 pub fn test_input(selected: Option<String>) -> Result<u32, String> {
     use cpal::{SampleFormat, StreamConfig};
     use std::sync::{Arc, atomic::{AtomicBool, AtomicU32, Ordering}};
-    let host = cpal::default_host();
-    let device = if let Some(name) = selected {
-        let mut matching = host.input_devices().map_err(|_| "Could not list microphones.")?
-            .filter(|device| device.name().ok().as_deref() == Some(name.as_str()));
-        let device = matching.next().ok_or("The selected microphone is no longer available.")?;
-        if matching.next().is_some() { return Err("Several microphones share that name. Use the Windows default instead.".into()); }
-        device
-    } else { host.default_input_device().ok_or("No default microphone was found.")? };
+    let device = crate::voice_audio::pick_device(true, selected)?;
     let supported = device.default_input_config().map_err(|_| "Could not set up the microphone.")?;
     let format = supported.sample_format();
     let config: StreamConfig = supported.into();
@@ -51,18 +44,8 @@ pub fn test_input(selected: Option<String>) -> Result<u32, String> {
     if !result_received.load(Ordering::Relaxed) { return Err("The microphone sent no sound during the test.".into()); }
     Ok(result_peak.load(Ordering::Relaxed))
 }
-fn output_device(selected: Option<String>) -> Result<cpal::Device, String> {
-    let host = cpal::default_host();
-    if let Some(name) = selected {
-        let mut matching = host.output_devices().map_err(|_| "Could not list speakers.")?
-            .filter(|device| device.name().ok().as_deref() == Some(name.as_str()));
-        let device = matching.next().ok_or("The selected device is no longer available.")?;
-        if matching.next().is_some() { return Err("Several devices share that name. Use the Windows default instead.")?; }
-        Ok(device)
-    } else {
-        Ok(host.default_output_device().ok_or("No default speakers were found.")?)
-    }
-}
+fn output_device(selected: Option<String>) -> Result<cpal::Device, String> { crate::voice_audio::pick_device(false, selected) }
+
 
 fn fill<T>(data: &mut [T], channels: usize, mut next: impl FnMut() -> f32, convert: impl Fn(f32) -> T) where T: Copy {
     for frame in data.chunks_mut(channels) { let value = convert(next()); frame.fill(value); }

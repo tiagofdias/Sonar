@@ -1915,8 +1915,9 @@ fn settings_view(app: &App) -> E<'_> {
             let mut inputs = vec![SYSTEM_DEFAULT.to_string()];
             let mut outputs = vec![SYSTEM_DEFAULT.to_string()];
             if let Some(d) = devices { inputs.extend(d.inputs.iter().cloned()); outputs.extend(d.outputs.iter().cloned()); }
-            let input = Some(app.settings.input.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
-            let output = Some(app.settings.output.clone().unwrap_or_else(|| SYSTEM_DEFAULT.into()));
+            // A saved device that is not plugged in now is not used (calls fall back to the default), so it is not shown either.
+            let input = Some(app.settings.input.clone().filter(|name| devices.is_none() || inputs.contains(name)).unwrap_or_else(|| SYSTEM_DEFAULT.into()));
+            let output = Some(app.settings.output.clone().filter(|name| devices.is_none() || outputs.contains(name)).unwrap_or_else(|| SYSTEM_DEFAULT.into()));
             let level = app.mic_level.unwrap_or(0).min(100) as u16;
             // A full-width track, filled as far as the level reaches.
             let fill: E = if level == 0 { space().width(0).into() } else { container(space()).width(Length::FillPortion(level)).height(FILL).style(t::gradient_panel(90.0, rgb(0x929ca3), rgb(0xd0d7dc), Color::TRANSPARENT, 8.0)).into() };

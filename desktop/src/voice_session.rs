@@ -197,7 +197,7 @@ mod tests {
         let prepared = prepare_incoming(&session, call, &fingerprint, false, vec!["127.0.0.1:0".into()]).await.unwrap();
         caller.set_remote(prepared.answer_sdp.clone(), &prepared.local_fingerprint, false).await.unwrap();
         caller.wait_connected().await.unwrap();
-        // A deliberately unavailable selection fails without opening a real mic;
+        // A selection made to fail in tests (see pick_device) fails without opening a real mic;
         // activation must release the already-established network transport.
         assert!(prepared.activate(Some("sonar-test-nonexistent-microphone".into()), None).await.is_err());
         caller.close().await;
