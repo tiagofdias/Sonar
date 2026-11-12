@@ -204,6 +204,8 @@ impl ScreenPlayback {
     /// One viewer's volume for one stream; nobody else is affected.
     pub fn set_volume(&self, source: u64, volume: f32) { if let Ok(mut volumes) = self.volumes.lock() { volumes.insert(source, volume.clamp(0.0, 1.0)); } }
     pub fn remove(&self, source: u64) { self.mixer.remove(source); }
+    /// Samples of this stream still waiting to be played.
+    pub fn queued(&self, source: u64) -> usize { self.mixer.sources.lock().ok().and_then(|s| s.get(&source).map(|(_, queue)| queue.len())).unwrap_or(0) }
     pub fn set_deafened(&self, value: bool) { self.deafened.store(value, Ordering::Release); }
 }
 impl Drop for ScreenPlayback { fn drop(&mut self) { self.stop.store(true, Ordering::Release); } }

@@ -56,6 +56,22 @@ pub fn start(address: Zeroizing<String>, shared: Arc<Shared>, out: mpsc::Sender<
 
 struct Clock { wall: Instant, ts: u64 }
 
+/// Sound is handed out this much before its time, into a speaker queue kept this
+/// full, so a slow video frame never leaves the speakers waiting.
+const SOUND_EARLY: Duration = Duration::from_millis(100);
+/// Reading stops while this much of the channel is already waiting to be played.
+const READ_AHEAD: Duration = Duration::from_secs(3);
+
+/// A unit waiting for its time. Units are read ahead of time and played from here,
+/// because channels mux sound and pictures at different offsets: sound often comes
+/// in chunks of a third of a second, which arrive late if reading follows the video.
+struct Pending { due: Instant, order: u64, unit: Unit }
+impl PartialEq for Pending { fn eq(&self, other: &Self) -> bool { (self.due, self.order) == (other.due, other.order) } }
+impl Eq for Pending {}
+impl PartialOrd for Pending { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+// Reversed, so the binary heap gives the earliest first.
+impl Ord for Pending { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (other.due, other.order).cmp(&(self.due, self.order)) } }
+
 struct Worker {
     shared: Arc<Shared>, out: mpsc::Sender<Out>, local: Local,
     clock: Option<Clock>, last_ts: Option<u64>, frame_ticks: u64,
@@ -73,12 +89,29 @@ impl Worker {
     fn send(&self, item: Out) -> bool { !self.stopped() && self.out.blocking_send(item).is_ok() }
 
     fn run(mut self, mut events: mpsc::Receiver<Event>) {
+        let mut waiting = std::collections::BinaryHeap::<Pending>::new();
+        let (mut order, mut latest, mut ended) = (0u64, Instant::now(), false);
         while !self.stopped() {
-            let Some(event) = events.blocking_recv() else { break };
-            match event {
-                Event::Units(units) => for unit in units { if self.stopped() { break; } self.unit(unit); },
-                Event::Ended => { self.drain(); self.send(Out::Ended); break; }
-                Event::Failed(message) => { self.send(Out::Failed(message)); break; }
+            // Play everything whose time has come.
+            while waiting.peek().is_some_and(|p| p.due <= Instant::now()) {
+                let Some(next) = waiting.pop() else { break };
+                self.unit(next.unit);
+                if self.stopped() { break; }
+            }
+            if ended && waiting.is_empty() { self.drain(); self.send(Out::Ended); break; }
+            let until_next = waiting.peek().map_or(Duration::from_millis(10), |p| p.due.saturating_duration_since(Instant::now())).min(Duration::from_millis(10));
+            if ended || latest > Instant::now() + READ_AHEAD { std::thread::sleep(until_next); continue; }
+            match events.try_recv() {
+                Ok(Event::Units(units)) => for unit in units {
+                    let due = self.due_of(&unit);
+                    latest = latest.max(due);
+                    order += 1;
+                    waiting.push(Pending { due, order, unit });
+                },
+                Ok(Event::Ended) => ended = true,
+                Ok(Event::Failed(message)) => { self.send(Out::Failed(message)); break; }
+                Err(mpsc::error::TryRecvError::Empty) => std::thread::sleep(until_next.max(Duration::from_millis(1))),
+                Err(mpsc::error::TryRecvError::Disconnected) => ended = true,
             }
         }
         self.shared.stop.store(true, Ordering::Release);
@@ -87,25 +120,31 @@ impl Worker {
         (self.local.notify)();
     }
 
-    /// Waits until a unit's time on the stream clock; re-anchors after jumps and long stalls.
-    fn pace(&mut self, ts: u64) {
+    /// When a unit should be played: its time on the stream clock, which runs a little
+    /// behind arrival and re-anchors after jumps and long stalls.
+    fn due_of(&mut self, unit: &Unit) -> Instant {
+        let (ts, early) = match unit {
+            Unit::Video { pts, dts, .. } => (dts.or(*pts), Duration::ZERO),
+            Unit::Audio { pts, .. } => (*pts, SOUND_EARLY),
+        };
         let now = Instant::now();
+        let Some(ts) = ts else { return now };
         let clock = self.clock.get_or_insert(Clock { wall: now + LEAD, ts });
-        let behind = |c: &Clock| ts < c.ts || ts - c.ts > TICKS * 3600;
-        if behind(clock) { *clock = Clock { wall: now + LEAD, ts }; }
-        let due = clock.wall + Duration::from_micros((ts - clock.ts) * 1_000_000 / TICKS);
-        if due + Duration::from_secs(2) < now { *clock = Clock { wall: now, ts }; return; }
-        while let Some(wait) = due.checked_duration_since(Instant::now()) {
-            if self.stopped() { return; }
-            std::thread::sleep(wait.min(Duration::from_millis(50)));
-        }
+        // Sound and pictures of the same moment can be muxed a second or two apart.
+        let ahead = ts as i64 - clock.ts as i64;
+        if ahead < -(TICKS as i64) * 3 || ahead > (TICKS as i64) * 3600 { *clock = Clock { wall: now + LEAD, ts }; }
+        let ahead = ts as i64 - clock.ts as i64;
+        let offset = Duration::from_micros(ahead.unsigned_abs() * 1_000_000 / TICKS);
+        let due = if ahead >= 0 { clock.wall + offset } else { clock.wall.checked_sub(offset).unwrap_or(now) };
+        // After a long stall, start again from now rather than rushing to catch up.
+        if due + Duration::from_secs(2) < now { *clock = Clock { wall: now + LEAD, ts }; return now + LEAD; }
+        due.checked_sub(early).unwrap_or(due)
     }
 
     fn unit(&mut self, unit: Unit) {
         match unit {
             Unit::Video { codec, pts, dts, data, .. } => {
                 let Some(ts) = dts.or(pts) else { return };
-                self.pace(ts);
                 if let Some(last) = self.last_ts { let delta = ts.wrapping_sub(last); if (300..=9000).contains(&delta) { self.frame_ticks = delta; } }
                 self.last_ts = Some(ts);
                 if self.codec != Some(codec) { self.codec = Some(codec); self.decoder = None; self.converter = None; self.frames = 0; self.reordered = false; self.announced = false; }
@@ -118,10 +157,7 @@ impl Worker {
                 if codec == VideoCodec::H264 && !self.send(Out::Native(data.clone(), duration)) { return; }
                 self.picture(codec, &data, duration);
             }
-            Unit::Audio { pts, sample_rate, channels, data, .. } => {
-                if let Some(ts) = pts { if self.last_ts.is_none() { self.pace(ts); } }
-                self.sound(sample_rate, channels, &data);
-            }
+            Unit::Audio { sample_rate, channels, data, .. } => self.sound(sample_rate, channels, &data),
         }
     }
 
@@ -187,7 +223,13 @@ impl Worker {
         mono.clear();
         let _ = audio.push(data, &mut |stereo| mono.extend(stereo.chunks_exact(2).map(|s| (s[0] + s[1]) * 0.5)), &mut |packet| packets.push(packet));
         self.audio = Some(audio);
-        if let Some(playback) = &self.local.playback { if !mono.is_empty() { playback.play(self.local.source, &mono); } }
+        if let Some(playback) = &self.local.playback {
+            if !mono.is_empty() {
+                // Keep the speakers SOUND_EARLY ahead, so playing stays smooth.
+                if playback.queued(self.local.source) == 0 { playback.play(self.local.source, &vec![0.0; (super::audio::RATE as u128 * SOUND_EARLY.as_millis() / 1000) as usize]); }
+                playback.play(self.local.source, &mono);
+            }
+        }
         self.mono = mono;
         for packet in packets { if !self.send(Out::Audio(packet)) { return; } }
     }
@@ -245,5 +287,40 @@ mod tests {
         assert!(!shared.web_native.load(Ordering::Acquire), "this channel has B-frames, so browsers get the converted copy");
         assert!(shared.native.load(Ordering::Acquire));
         assert!(pictures.lock().unwrap().is_empty(), "the picture is cleared when playback ends");
+    }
+
+    /// Channels often carry sound in chunks of a third of a second. It must still come
+    /// out at its own pace (about 5 Opus packets per 100 ms), not in bursts the
+    /// speakers' short queue would cut short.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sound_in_big_chunks_comes_out_at_its_own_pace() {
+        let ts = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/audio_big_chunks.ts")).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/1.ts", listener.local_addr().unwrap());
+        std::thread::spawn(move || for mut stream in listener.incoming().flatten() {
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(format!("HTTP/1.1 200 OK
+Content-Length: {}
+Connection: close
+
+", ts.len()).as_bytes());
+            let _ = stream.write_all(&ts);
+        });
+        let shared = Arc::new(Shared::default());
+        let (tx, mut rx) = mpsc::channel(256);
+        start(Zeroizing::new(address), shared, tx, Local { pictures: Arc::new(Mutex::new(Default::default())), key: "me".into(), playback: None, source: 1, notify: Box::new(|| {}) });
+        let mut arrivals = Vec::new();
+        while let Ok(Some(item)) = tokio::time::timeout(Duration::from_secs(15), rx.recv()).await {
+            match item {
+                Out::Audio(_) => arrivals.push(Instant::now()),
+                Out::Failed(message) => panic!("{message}"),
+                Out::Ended => break,
+                _ => {}
+            }
+        }
+        assert!(arrivals.len() >= 90, "about 100 packets for 2 s of sound: {}", arrivals.len());
+        let busiest = arrivals.iter().map(|a| arrivals.iter().filter(|b| **b >= *a && b.duration_since(*a) < Duration::from_millis(100)).count()).max().unwrap();
+        assert!(busiest <= 9, "at most about 100 ms of sound per 100 ms, got {busiest} packets");
     }
 }
