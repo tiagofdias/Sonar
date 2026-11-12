@@ -3108,11 +3108,21 @@ p {
 .conversation:has(> .watch-stage.theater) > .message-scroll,
 .conversation:has(> .watch-stage.theater) > .composer-area { display: none; }
 .watch-stage.theater { flex: 1 1 auto; min-height: 0; align-content: start; --watch-height: clamp(180px, calc(100dvh - 310px), 85dvh); }
-.watch-stage.empty .watch-controls > :not(.watch-view):not([aria-label="Stop watching"]) { display: none; }
-.watch-stage.empty .watch-controls { justify-content: flex-end; }
+.watch-stage.empty .watch-controls { display: none; }
 /* Chat view: the chat is back at full size and the video keeps playing in a small corner player. */
 .watch-stage.chat { position: fixed; right: 24px; bottom: 176px; z-index: 60; width: min(380px, calc(100vw - 32px)); margin: 0; padding: 8px; grid-template-columns: minmax(0, 1fr); gap: 6px; box-shadow: 0 16px 40px #000a; --watch-height: 214px; }
 .watch-stage.chat .watch-main { width: 100%; gap: 6px; }
 .watch-stage.chat .watch-queue, .watch-stage.chat .watch-viewers, .watch-stage.chat .watch-react, .watch-stage.chat .watch-time { display: none; }
 .watch-stage.chat.empty .watch-player { display: none; }
-.watch-stage.chat.empty .watch-controls::before { content: "Watch together"; flex: 1; font-size: 13px; color: #d0d7dc; padding-left: 6px; }
+.watch-stage.chat.empty .watch-bar::before { content: "Watch together"; flex: 1; font-size: 13px; color: #d0d7dc; padding-left: 6px; }
+/* Viewers on the left and the view switch and leave button on the right, on one line. */
+.watch-bar { display: flex; align-items: center; gap: 8px; }
+.watch-bar .watch-viewers { flex: 1; min-width: 0; }
+.watch-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+/* In theater view the call bar sits a little above the bottom line. */
+.conversation:has(> .watch-stage.theater) > .call-banner { margin-bottom: 14px; }
+/* In the corner player the view switch and leave button share the controls line. */
+.watch-stage.chat:not(.empty) .watch-main { position: relative; }
+.watch-stage.chat:not(.empty) .watch-bar { height: 0; }
+.watch-stage.chat:not(.empty) .watch-actions { position: absolute; right: 0; bottom: 0; height: 32px; }
+.watch-stage.chat:not(.empty) .watch-controls { padding-right: 72px; }

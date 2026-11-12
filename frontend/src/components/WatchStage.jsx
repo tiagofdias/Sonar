@@ -190,13 +190,9 @@ export default function WatchStage({ watch, me, standalone = false }) {
           <span className="watch-react">
             {REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => watch.react(emoji)}>{emoji}</button>)}
           </span>
-          {!standalone && (
-            <button className="icon-button watch-view" aria-label={view === "theater" ? "Chat view" : "Theater view"} title={view === "theater" ? "Chat view: show the chat, keep watching in the corner" : "Theater view"} onClick={switchView}>
-              {view === "theater" ? <MessageSquare size={17} /> : <Clapperboard size={17} />}
-            </button>
-          )}
-          {!standalone && <button className="icon-button" aria-label="Stop watching" title="Stop watching" onClick={watch.leave}><X size={18} /></button>}
         </div>
+        {/* Who is watching, with the view switch and leave button on the same line. */}
+        <div className="watch-bar">
         <div className="watch-viewers" aria-label="Who is watching">
           {state.viewers.map((viewer) => (
             <span key={viewer.userId} className={`watch-viewer state-${viewer.state}`} title={`${viewer.name}: ${STATE_LABEL[viewer.state] || viewer.state}`}>
@@ -204,6 +200,15 @@ export default function WatchStage({ watch, me, standalone = false }) {
               <span><strong>{viewer.userId === me ? "You" : viewer.name}</strong><small>{!item && viewer.state === "joining" ? "Here" : STATE_LABEL[viewer.state] || viewer.state}</small></span>
             </span>
           ))}
+        </div>
+        {!standalone && (
+          <span className="watch-actions">
+            <button className="icon-button watch-view" aria-label={view === "theater" ? "Chat view" : "Theater view"} title={view === "theater" ? "Chat view: show the chat, keep watching in the corner" : "Theater view"} onClick={switchView}>
+              {view === "theater" ? <MessageSquare size={17} /> : <Clapperboard size={17} />}
+            </button>
+            <button className="icon-button" aria-label="Stop watching" title="Stop watching" onClick={watch.leave}><X size={18} /></button>
+          </span>
+        )}
         </div>
       </div>
       <aside className="watch-queue" aria-label="Up next">
