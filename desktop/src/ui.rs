@@ -175,10 +175,15 @@ fn tv_playing(app: &App) -> bool { app.screen_sharing.as_deref().is_some_and(|s|
 fn apps_button<'a>(app: &'a App) -> E<'a> {
     let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
     let grid = tooltip(call_btn(Icon::LayoutGrid, 18.0, Some(Msg::ToggleApps), app.apps_open || tv_playing(app)), tip("Apps"), tooltip::Position::Bottom);
-    match &app.watch_note {
-        Some(_) => row![watch_button(app), grid].spacing(14).align_y(Vertical::Center).into(),
-        None => grid.into(),
+    let mut bar = Row::new().spacing(14).align_y(Vertical::Center);
+    // TV someone shares waits here until you choose to watch.
+    for (id, label) in &app.tv_available {
+        let short: String = label.chars().take(28).collect();
+        let join = button(lead_icon(Icon::Tv, format!("Join TV · {short}"), rgb(0xd0d7dc), 15.0, 13.0, 6.0)).padding([7, 10]).style(t::secondary()).on_press(Msg::TvJoin(id.clone()));
+        bar = bar.push(tooltip(join, container(text(format!("{} is sharing TV: {label}", app.screen_name(id))).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0)), tooltip::Position::Bottom));
     }
+    if app.watch_note.is_some() { bar = bar.push(watch_button(app)); }
+    bar.push(grid).into()
 }
 /// The open Apps menu, floating under the call bar on the right.
 fn apps_menu(app: &App) -> E<'_> {
@@ -188,13 +193,16 @@ fn apps_menu(app: &App) -> E<'_> {
             column![text(name).size(14).font(t::semibold()).color(t::TEXT), text(note).size(12).color(rgb(0x8f989f)).line_height(LineHeight::Relative(1.4))].spacing(2).width(FILL),
         ].spacing(12).align_y(Vertical::Center)).width(FILL).padding([9, 10]).style(t::person_row(false)).on_press_maybe(on).into()
     };
-    let tv: E = if tv_playing(app) { item(Icon::Square, "Stop TV", "End the channel that's playing", Some(Msg::ScreenStop)) }
-        else { item(Icon::Tv, "Sonar TV", "Your IPTV channels, shared at their original quality", app.screen_controls.is_some().then_some(Msg::OpenTv)) };
-    let list = column![
+    let mut list = column![
         container(t::eyebrow("APPS", 10.0, t::EYEBROW)).padding(Padding { top: 4.0, bottom: 6.0, left: 10.0, right: 10.0 }),
         item(Icon::MonitorPlay, "Watch together", "YouTube in sync, opens in your browser", Some(Msg::OpenWatch)),
-        tv,
     ].spacing(2);
+    if tv_playing(app) {
+        list = list.push(item(Icon::Tv, "Change channel", "Pick another one; people watching stay connected", Some(Msg::OpenTv)));
+        list = list.push(item(Icon::Square, "Stop TV", "End the channel that's playing", Some(Msg::ScreenStop)));
+    } else {
+        list = list.push(item(Icon::Tv, "Sonar TV", "Your IPTV channels, shared at their original quality", app.screen_controls.is_some().then_some(Msg::OpenTv)));
+    }
     let card = container(list).padding(6).width(320).style(|_| container::Style {
         background: Some(rgb(0x161a1e).into()), border: t::border(rgb(0x2c343d), 1.0, 10.0),
         shadow: iced::Shadow { color: Color { a: 0.55, ..Color::BLACK }, offset: iced::Vector::new(0.0, 12.0), blur_radius: 32.0 }, ..Default::default()
@@ -228,17 +236,31 @@ fn screen_caption(app: &App, id: &str) -> String {
     }
 }
 
+/// Buttons for a TV tile: your own gets previous / channels / next; someone else's gets "stop watching".
+fn tv_controls<'a>(app: &'a App, id: &str) -> E<'a> {
+    let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
+    if !app.screen_labels.contains_key(id) { return space().width(0).into(); }
+    if id == app.me() {
+        return row![
+            tooltip(icon_btn(Icon::ChevronLeft, 16.0, Some(Msg::TvStep(-1)), false), tip("Previous channel"), tooltip::Position::Top),
+            tooltip(icon_btn(Icon::Tv, 16.0, Some(Msg::OpenTv), false), tip("All channels"), tooltip::Position::Top),
+            tooltip(icon_btn(Icon::ChevronRight, 16.0, Some(Msg::TvStep(1)), false), tip("Next channel"), tooltip::Position::Top),
+        ].spacing(2).into();
+    }
+    tooltip(icon_btn(Icon::LogOut, 16.0, Some(Msg::TvLeave(id.to_owned())), false), tip("Stop watching (you can join again)"), tooltip::Position::Top).into()
+}
+
 fn screen_stage(app: &App) -> Option<E<'_>> {
     use iced::widget::image;
     if app.screen_views.is_empty() { return None; }
     if let Some((id, (handle, _, _))) = app.screen_expanded.as_ref().and_then(|id| app.screen_views.get_key_value(id)) {
-        let header = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
+        let header = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Minimize, 16.0, Some(Msg::ScreenExpand(None)), false)].spacing(8).align_y(Vertical::Center);
         return Some(opaque(container(column![container(header).padding([6, 10]), image(handle.clone()).width(FILL).height(FILL)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000)))));
     }
     let mut tiles = Column::new().spacing(10);
     for (id, (handle, width, height)) in &app.screen_views {
         let aspect = *height as f32 / (*width).max(1) as f32;
-        let caption = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).width(FILL), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
+        let caption = row![text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).wrapping(text::Wrapping::None).width(FILL), tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false)].spacing(8).align_y(Vertical::Center);
         tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(520.0 * aspect), container(caption).padding([6, 10])]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
     }
     Some(container(container(opaque(tiles)).width(520)).width(FILL).height(FILL).align_x(Horizontal::Right).align_y(Vertical::Bottom).padding(18).into())
@@ -1352,6 +1374,8 @@ fn tv_panel(app: &App) -> E<'_> {
         list = ranked.into_iter().map(|(_, index, channel, kind)| (index, channel, kind)).collect();
     }
     let (mut shown, mut group) = (0, None::<String>);
+    // The channel that is on now, highlighted.
+    let playing = if tv_playing(app) { app.screen_labels.get(app.me()).map(String::as_str) } else { None };
     for (index, channel, heading) in list {
         let favorite = favorites.contains(channel.name.as_str());
         shown += 1;
@@ -1366,7 +1390,7 @@ fn tv_panel(app: &App) -> E<'_> {
             text(channel.name.clone()).size(14).color(t::TEXT).wrapping(text::Wrapping::None).width(FILL),
             small("Watch", false, Some(Msg::TvPlay(index, false))),
             small("Share with call", true, Some(Msg::TvPlay(index, true))),
-        ].spacing(10).align_y(Vertical::Center)).padding([7, 10]).clip(true).style(t::panel(rgb(0x1f252b), rgb(0x1f252b), 8.0)));
+        ].spacing(10).align_y(Vertical::Center)).padding([7, 10]).clip(true).style(if playing == Some(channel.name.as_str()) { t::panel(rgb(0x14303f), rgb(0x2b6f86), 8.0) } else { t::panel(rgb(0x1f252b), rgb(0x1f252b), 8.0) }));
     }
     let status: E = if app.tv_loading { body("Loading channels from your provider…", 14.0, muted, 1.6).into() }
         else if app.tv_source.is_none() { body("Choose a source to see its channels.", 14.0, muted, 1.6).into() }

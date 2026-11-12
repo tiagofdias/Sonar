@@ -78,12 +78,14 @@ struct Worker {
     codec: Option<VideoCodec>, decoder: Option<Decoder>, converter: Option<FrameEncoder>, converter_failed: bool,
     audio: Option<TvAudio>, audio_failed: bool,
     frames: u64, reordered: bool, announced: bool, converted_time: i64, rgba: Vec<u8>, mono: Vec<f32>,
+    /// The original is forwarded from the first keyframe, so viewers never get a broken picture.
+    keyed: bool,
 }
 
 impl Worker {
     fn new(shared: Arc<Shared>, out: mpsc::Sender<Out>, local: Local) -> Self {
         Self { shared, out, local, clock: None, last_ts: None, frame_ticks: 3600, codec: None, decoder: None, converter: None, converter_failed: false,
-            audio: None, audio_failed: false, frames: 0, reordered: false, announced: false, converted_time: 0, rgba: Vec::new(), mono: Vec::new() }
+            audio: None, audio_failed: false, frames: 0, reordered: false, announced: false, converted_time: 0, rgba: Vec::new(), mono: Vec::new(), keyed: false }
     }
     fn stopped(&self) -> bool { self.shared.stop.load(Ordering::Acquire) }
     fn send(&self, item: Out) -> bool { !self.stopped() && self.out.blocking_send(item).is_ok() }
@@ -143,8 +145,9 @@ impl Worker {
 
     fn unit(&mut self, unit: Unit) {
         match unit {
-            Unit::Video { codec, pts, dts, data, .. } => {
+            Unit::Video { codec, pts, dts, data, key } => {
                 let Some(ts) = dts.or(pts) else { return };
+                if key { self.keyed = true; }
                 if let Some(last) = self.last_ts { let delta = ts.wrapping_sub(last); if (300..=9000).contains(&delta) { self.frame_ticks = delta; } }
                 self.last_ts = Some(ts);
                 if self.codec != Some(codec) { self.codec = Some(codec); self.decoder = None; self.converter = None; self.frames = 0; self.reordered = false; self.announced = false; }
@@ -154,7 +157,7 @@ impl Worker {
                 // Browsers show B-frames out of order, so they get the original only without them.
                 self.shared.web_native.store(codec == VideoCodec::H264 && !self.reordered && self.frames >= 50, Ordering::Release);
                 let duration = Duration::from_micros(self.frame_ticks * 1_000_000 / TICKS);
-                if codec == VideoCodec::H264 && !self.send(Out::Native(data.clone(), duration)) { return; }
+                if codec == VideoCodec::H264 && self.keyed && !self.send(Out::Native(data.clone(), duration)) { return; }
                 self.picture(codec, &data, duration);
             }
             Unit::Audio { sample_rate, channels, data, .. } => self.sound(sample_rate, channels, &data),

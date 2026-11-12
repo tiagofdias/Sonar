@@ -181,6 +181,16 @@ pub fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
     x.len().cmp(&y.len())
 }
 
+/// The order the TV panel lists channels in first: favorites in their sections, or
+/// (with no favorites) every channel. Next / previous channel follow it.
+pub fn play_order(channels: &[Channel], favorites: &[String]) -> Vec<usize> {
+    if favorites.is_empty() { return (0..channels.len()).collect(); }
+    let wanted: std::collections::HashSet<&str> = favorites.iter().map(String::as_str).collect();
+    let mut list: Vec<(usize, String, usize)> = channels.iter().enumerate().filter(|(_, c)| wanted.contains(c.name.as_str())).map(|(i, c)| { let (rank, kind) = section(c); (rank, kind, i) }).collect();
+    list.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| natural_order(&channels[a.2].name, &channels[b.2].name)));
+    list.into_iter().map(|(_, _, i)| i).collect()
+}
+
 // ----- Loading a source's channel list ---------------------------------------------
 
 const MAX_LIST: usize = 40 * 1024 * 1024;
@@ -274,6 +284,13 @@ mod tests {
         let mut names = ["Sport TV 10", "Sport TV 2", "sport tv 1", "Sport TV+"];
         names.sort_by(|a, b| natural_order(a, b));
         assert_eq!(names, ["sport tv 1", "Sport TV 2", "Sport TV 10", "Sport TV+"]);
+    }
+    #[test]
+    fn next_channel_follows_the_favorites_as_listed() {
+        let channels: Vec<Channel> = ["Sport TV 2", "RTP 1", "Sport TV 1", "CNN Portugal", "Cinema"].iter().map(|n| Channel::new(*n, "", "http://x/1.ts")).collect();
+        let names = |order: Vec<usize>| order.into_iter().map(|i| channels[i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(play_order(&channels, &[])), ["Sport TV 2", "RTP 1", "Sport TV 1", "CNN Portugal", "Cinema"]);
+        assert_eq!(names(play_order(&channels, &["RTP 1".into(), "Sport TV 2".into(), "CNN Portugal".into(), "Sport TV 1".into()])), ["Sport TV 1", "Sport TV 2", "CNN Portugal", "RTP 1"]);
     }
     #[test]
     fn sources_saved_before_favorites_still_load() {

@@ -310,6 +310,10 @@ pub struct App {
     pub tv_pass: zeroize::Zeroizing<String>,
     /// What each share is: a TV channel's name (including our own), or none for a screen.
     pub screen_labels: HashMap<String, String>,
+    /// TV shares waiting for us to join: sharer -> channel.
+    pub tv_available: HashMap<String, String>,
+    /// Our TV is shared with the call (not only watched here).
+    pub tv_shared: bool,
     pub screen_controls: Option<screen::Controls>,
     pub screen_sharing: Option<String>,
     pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
@@ -521,6 +525,10 @@ pub enum Msg {
     TvFavorite(String),
     TvFavoritesOnly(bool),
     TvPlay(usize, bool),
+    /// The next (1) or previous (-1) channel, on the same share.
+    TvStep(i64),
+    TvJoin(String),
+    TvLeave(String),
     WatchOpened(Result<(), String>),
     ScreenSources(Vec<screen::Shareable>, bool),
     ScreenClosePicker,
@@ -619,7 +627,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), tv_available: HashMap::new(), tv_shared: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -703,7 +711,7 @@ impl App {
 
     fn sync_screen(&mut self) {
         if self.screen_spec().is_none() {
-            self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_allocations.clear(); self.screen_ended.extend(self.screen_uploading.drain().map(|(id, _)| id)); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
+            self.tv_available.clear(); self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_allocations.clear(); self.screen_ended.extend(self.screen_uploading.drain().map(|(id, _)| id)); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
             return;
         }
         let Some(controls) = self.screen_controls.clone() else { return };
@@ -2018,6 +2026,15 @@ impl App {
                         if info.is_none() { let me = self.me().to_owned(); self.forget_screen(&me); self.screen_labels.remove(&me); if self.screen_expanded.as_ref() == Some(&me) { self.screen_expanded = None; } }
                         self.screen_sharing = info;
                     }
+                    screen::Update::TvAvailable(id, label) => match label {
+                        Some(label) => {
+                            if self.tv_available.insert(id.clone(), label.clone()).is_none() {
+                                let name = self.screen_name(&id);
+                                self.toast(ToastKind::Plain, format!("{name} is sharing TV: {label}. Press Join TV to watch."));
+                            }
+                        }
+                        None => { self.tv_available.remove(&id); }
+                    },
                     screen::Update::Label(id, label) => match label { Some(label) => { self.screen_labels.insert(id, label); } None => { self.screen_labels.remove(&id); } },
                     screen::Update::Notice(text) => self.toast(ToastKind::Plain, text),
                     screen::Update::SoundFailed => self.toast(ToastKind::Plain, "Sharing without sound: Windows could not capture that app's audio."),
@@ -2169,10 +2186,28 @@ impl App {
                 } else if empty { self.tv_favorites_only = false; }
             }
             Msg::TvFavoritesOnly(on) => { self.tv_favorites_only = on; if on { self.tv_query.clear(); } }
+            Msg::TvJoin(id) => {
+                self.tv_available.remove(&id);
+                if let Some(controls) = &self.screen_controls { controls.send(screen::Command::JoinTv(id)); }
+            }
+            Msg::TvLeave(id) => if let Some(controls) = &self.screen_controls { controls.send(screen::Command::LeaveTv(id)); },
+            Msg::TvStep(step) => {
+                let me = self.me().to_owned();
+                let Some(current) = self.screen_labels.get(&me).cloned() else { return Task::none() };
+                let favorites = self.tv_source.as_ref().and_then(|id| self.tv_sources.iter().find(|s| &s.id == id)).map(|s| s.favorites.clone()).unwrap_or_default();
+                let order = tv::sources::play_order(&self.tv_channels, &favorites);
+                if order.is_empty() { return Task::none(); }
+                let next = match order.iter().position(|&i| self.tv_channels[i].name == current) {
+                    Some(at) => order[(at as i64 + step).rem_euclid(order.len() as i64) as usize],
+                    None => order[0],
+                };
+                return self.update(Msg::TvPlay(next, self.tv_shared));
+            }
             Msg::TvPlay(index, share) => {
                 let Some(channel) = self.tv_channels.get(index).cloned() else { return Task::none() };
                 let Some(controls) = &self.screen_controls else { self.toast(ToastKind::Plain, "Join a call or voice room to watch TV here."); return Task::none(); };
                 controls.send(screen::Command::StartTv(screen::TvChoice { address: zeroize::Zeroizing::new(channel.url().to_owned()), label: channel.name.clone(), share }));
+                self.tv_shared = share;
                 let me = self.me().to_owned();
                 self.screen_labels.insert(me, channel.name.clone());
                 self.panel = None;
@@ -2624,6 +2659,9 @@ impl App {
             "tvadd" => { self.tv_xtream = false; self.tv_name = "Test playlist".into(); self.tv_url = value.clone(); Some(Msg::TvAdd) }
             "tvquery" => Some(Msg::TvQuery(value.clone())),
             "tvfav" => value.parse::<usize>().ok().and_then(|i| self.tv_channels.get(i)).map(|c| Msg::TvFavorite(c.name.clone())),
+            "tvnext" => Some(Msg::TvStep(value.parse().unwrap_or(1))),
+            "tvjoin" => self.tv_available.keys().next().cloned().map(Msg::TvJoin),
+            "tvleave" => self.screen_labels.keys().find(|id| id.as_str() != self.me()).cloned().map(Msg::TvLeave),
             "tvplay" => value.split_once(',').and_then(|(index, share)| Some(Msg::TvPlay(index.parse().ok()?, share == "share"))),
             "dismissrecovery" => { self.recovery_saved = true; Some(Msg::DismissRecovery) }
             "personmenu" => self.people.iter().chain(self.community.iter().flat_map(|c| c.member_details.iter())).find(|p| p.name == value).map(|p| Msg::TogglePersonMenu(p.id.clone())),

@@ -278,4 +278,9 @@ test("screen-share signals are validated before relay", async () => {
   assert.equal(validScreenSignal({ type: "screen-offer", label: "x".repeat(81), sdp: { type: "offer", sdp: "v=0" } }), false);
   assert.equal(validScreenSignal({ type: "screen-offer", tv: "yes", sdp: { type: "offer", sdp: "v=0" } }), false);
   assert.equal(validScreenSignal({ type: "screen-answer", client: "evil", sdp: { type: "answer", sdp: "v=0" } }), false);
+  // Joining TV when you choose: leaving, and the sharer switching channel.
+  assert.equal(validScreenSignal({ type: "screen-leave" }), true);
+  assert.equal(validScreenSignal({ type: "screen-label", label: "Sport TV 2" }), true);
+  assert.equal(validScreenSignal({ type: "screen-label" }), false);
+  assert.equal(validScreenSignal({ type: "screen-label", label: "<b>" }), false);
 });

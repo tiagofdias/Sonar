@@ -246,7 +246,7 @@ macro_rules! icons {
 }
 icons! {
     MessageCircle => "message-circle", Users => "users", ShieldCheck => "shield-check", ChevronDown => "chevron-down",
-    ChevronLeft => "chevron-left", ArrowUpRight => "arrow-up-right", Search => "search", LockKeyhole => "lock-keyhole",
+    ChevronLeft => "chevron-left", ChevronRight => "chevron-right", ArrowUpRight => "arrow-up-right", Search => "search", LockKeyhole => "lock-keyhole",
     LogOut => "log-out", Phone => "phone", PhoneOff => "phone-off", PhoneIncoming => "phone-incoming", PhoneMissed => "phone-missed", Settings => "settings", Smile => "smile", Paperclip => "paperclip", File => "file", ScreenShare => "screen-share", ScreenShareOff => "screen-share-off", Maximize => "maximize", Minimize => "minimize", Pin => "pin",
     Ellipsis => "ellipsis", Timer => "timer", Headphones => "headphones", HeadphoneOff => "headphone-off", Check => "check",
     Reply => "reply", Trash => "trash-2", Send => "send", X => "x", SmilePlus => "smile-plus", Mic => "mic",

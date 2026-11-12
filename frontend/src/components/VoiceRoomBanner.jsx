@@ -76,7 +76,7 @@ export default function VoiceRoomBanner({ voiceRoom, watch }) {
         )}
       </button>
       <ScreenShareButton screen={voiceRoom.screen} />
-      {room.status === "joined" && <AppsMenu watch={watch} />}
+      {room.status === "joined" && <AppsMenu watch={watch} screen={voiceRoom.screen} nameOf={nameOf} />}
       <button
         className="end-call"
         aria-label="Leave voice room"

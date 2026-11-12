@@ -24,7 +24,8 @@ if (made.status !== 0) throw new Error("ffmpeg failed");
 const bytes = readFileSync(channel);
 const real = process.env.SONAR_TV_CHANNEL;
 const provider = createServer((req, res) => {
-  if (req.url === "/list.m3u") { res.end(`#EXTM3U\n#EXTINF:-1 group-title="Test",Test Channel HD\n${real || `http://127.0.0.1:${provider.address().port}/live/sonar-test-user/sonar-secret-9f3/1.ts`}\n`); return; }
+  const local = (n) => `http://127.0.0.1:${provider.address().port}/live/sonar-test-user/sonar-secret-9f3/${n}.ts`;
+  if (req.url === "/list.m3u") { res.end(`#EXTM3U\n#EXTINF:-1 group-title="Test",Test Channel HD\n${real || local(1)}\n#EXTINF:-1 group-title="Test",Second Channel\n${local(2)}\n`); return; }
   if (req.url.startsWith("/live/")) { res.writeHead(200, { "Content-Length": bytes.length }); res.end(bytes); return; }
   res.writeHead(404).end();
 });
@@ -72,13 +73,21 @@ say("web viewer is in the voice room");
 
 const data = join(work, "localappdata");
 const script = ["wait:9000", "dismissrecovery:", "wait:1000", "mode:community", "wait:1500", "community:TvTest", "wait:3000", "room:Lounge", "wait:5000",
-  `tvadd:http://127.0.0.1:${provider.address().port}/list.m3u`, "wait:3000", "tvplay:0,share", "wait:40000", `shot:${join(work, "desktop.png")}`, "leave:", "wait:1000"].join(";");
+  `tvadd:http://127.0.0.1:${provider.address().port}/list.m3u`, "wait:3000", "tvplay:0,share", "wait:15000", `shot:${join(work, "desktop.png")}`, "wait:30000", "tvnext:1", "wait:30000", "leave:", "wait:1000"].join(";");
 const desktop = spawn(exe, [], { env: { ...process.env, LOCALAPPDATA: data, SONAR_DEV_SERVER: origin, SONAR_DEV_EMAIL: "host@example.invalid", SONAR_DEV_PASSWORD: "correct-horse-battery", SONAR_DEV_SCRIPT: script, SONAR_DEV_OFFSCREEN: "1", SONAR_DEV_SILENT_AUDIO: "1" }, stdio: "ignore" });
 say("desktop app started");
 
 let result = { error: "the TV share never appeared" };
 try {
-  await page.waitForSelector("figcaption >> text=/is sharing TV/", { timeout: 70000 });
+  // TV waits for the viewer to join: a Join button, and no video until it is pressed.
+  await page.waitForSelector("button.apps-join >> text=/Join TV/", { timeout: 70000 });
+  const autoOpened = Boolean(await page.$(".screen-tile video"));
+  await page.click('[aria-label="Apps"]');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: join(work, "web-apps-menu.png") });
+  await page.click('[aria-label="Apps"]');
+  await page.click("button.apps-join >> text=/Join TV/");
+  await page.waitForSelector("figcaption >> text=/is sharing TV/", { timeout: 20000 });
   say("web viewer sees:", await page.textContent(".screen-tile figcaption span"));
   await page.waitForFunction(() => document.querySelector(".screen-tile video")?.videoWidth > 0, null, { timeout: 20000 });
   const first = await page.evaluate(() => document.querySelector(".screen-tile video").getVideoPlaybackQuality().totalVideoFrames);
@@ -88,7 +97,18 @@ try {
     const quality = video.getVideoPlaybackQuality();
     return { label: document.querySelector(".screen-tile figcaption span").textContent, size: `${video.videoWidth}x${video.videoHeight}`, framesIn8s: quality.totalVideoFrames - first, hasSound: video.srcObject?.getAudioTracks().length > 0, dropped: quality.droppedVideoFrames, theater: Boolean(document.querySelector(".screen-stage.theater")), chatHidden: !document.querySelector(".community-content")?.offsetParent };
   }, first);
+  result.autoOpened = autoOpened;
   await page.screenshot({ path: join(work, "web.png") });
+  // The sharer switches channel: same connection, new name, the picture keeps going.
+  await page.waitForSelector("figcaption >> text=/Second Channel/", { timeout: 40000 });
+  const before = await page.evaluate(() => document.querySelector(".screen-tile video").getVideoPlaybackQuality().totalVideoFrames);
+  await page.waitForTimeout(5000);
+  result.afterSwitch = await page.evaluate((before) => ({ label: document.querySelector(".screen-tile figcaption span").textContent, framesIn5s: document.querySelector(".screen-tile video").getVideoPlaybackQuality().totalVideoFrames - before }), before);
+  await page.screenshot({ path: join(work, "web-switched.png") });
+  // Leaving closes it, and it can be joined again.
+  await page.click('[aria-label="Stop watching"]');
+  await page.waitForSelector("button.apps-join >> text=/Join TV · Second Channel/", { timeout: 20000 });
+  result.canRejoin = !(await page.$(".screen-tile video"));
 } catch (error) { result.detail = String(error).slice(0, 200); }
 const leaked = relayed.filter((line) => line.includes("sonar-secret-9f3") || line.includes("sonar-test-user") || line.includes("/live/") || (real && line.includes(new URL(real).host)));
 result.signalsRelayed = relayed.length;
@@ -98,4 +118,4 @@ console.log("screenshots:", work);
 desktop.kill();
 await browser.close();
 provider.close();
-process.exit(result.error || result.addressSeenByServer ? 1 : 0);
+process.exit(result.error || result.detail || result.addressSeenByServer || result.autoOpened || !result.canRejoin || !(result.afterSwitch?.framesIn5s > 0) ? 1 : 0);

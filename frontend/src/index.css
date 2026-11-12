@@ -3067,12 +3067,18 @@ p {
 .watch-credit { font-size: 11px; color: #6f7b85; }
 .apps-menu { position: relative; display: inline-flex; align-items: center; gap: 8px; }
 .apps-join { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.apps-options { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 40; min-width: 260px; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: #161a1e; border: 1px solid #2c343d; border-radius: 10px; box-shadow: 0 12px 32px #0008; }
-.apps-options button { display: flex; align-items: center; gap: 11px; padding: 9px 10px; text-align: left; border-radius: 7px; color: #c8cdd1; }
+.apps-options { position: absolute; top: calc(100% + 10px); right: 0; z-index: 40; width: 320px; display: flex; flex-direction: column; gap: 2px; padding: 6px; background: #161a1e; border: 1px solid #2c343d; border-radius: 10px; box-shadow: 0 12px 32px #0008; }
+.apps-title { padding: 4px 10px 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #7fa7b5; }
+.apps-options button { display: flex; align-items: center; gap: 12px; padding: 9px 10px; text-align: left; border-radius: 7px; color: #c8cdd1; }
 .apps-options button:hover:not(:disabled) { background: #222930; }
 .apps-options button:disabled { opacity: 0.6; }
-.apps-options strong { display: block; font-size: 14px; }
-.apps-options small { font-size: 12px; color: #8f989f; }
+.apps-icon { flex-shrink: 0; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #14303f; color: #70eeff; }
+.apps-options strong { display: block; font-size: 14px; font-weight: 600; color: #e6e9eb; }
+.apps-options small { display: block; margin-top: 2px; font-size: 12px; line-height: 1.4; color: #8f989f; }
+.tv-notice { display: flex; align-items: center; gap: 10px; }
+.tv-notice > svg { color: #70eeff; flex-shrink: 0; }
+.tv-notice strong { display: block; font-size: 14px; }
+.tv-notice small { display: block; font-size: 12px; color: #8f989f; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .watch-page { min-height: 100vh; display: flex; flex-direction: column; background: #0f1215; color: #d0d7dc; }
 .watch-page > header { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid #22282e; font-size: 14px; color: #8f989f; }
 .watch-page > header strong { color: #d0d7dc; }

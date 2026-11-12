@@ -108,7 +108,7 @@ export default function VoiceCallBanner({ voice, users = [], voiceRoom, watch })
             )}
           </button>
           {(call.status === "connected" || call.status === "reconnecting") && <ScreenShareButton screen={voice.screen} />}
-          {(call.status === "connected" || call.status === "reconnecting") && <AppsMenu watch={watch} />}
+          {(call.status === "connected" || call.status === "reconnecting") && <AppsMenu watch={watch} screen={voice.screen} nameOf={() => peerName} />}
         </>
       )}
       <button

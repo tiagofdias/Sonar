@@ -8,6 +8,10 @@ export function validScreenSignal(signal) {
   if (signal.tv !== undefined && typeof signal.tv !== "boolean") return false;
   if (signal.client !== undefined && signal.client !== "desktop") return false;
   if (signal.type === "screen-stop") return true;
+  // A viewer stops watching a TV share (the sharer offers it again so they can rejoin).
+  if (signal.type === "screen-leave") return true;
+  // The sharer switched channel: the new name, on the same connection.
+  if (signal.type === "screen-label") return typeof signal.label === "string" && signal.label.length > 0;
   if (signal.type === "screen-ice")
     return ["sharer", "viewer"].includes(signal.role) && typeof signal.candidate?.candidate === "string";
   const kind = { "screen-offer": "offer", "screen-answer": "answer" }[signal.type];

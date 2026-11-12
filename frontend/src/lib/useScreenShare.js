@@ -36,6 +36,9 @@ export function useScreenShare({ send, targets }) {
   const [remotes, setRemotes] = useState({});
   // TV shares from the desktop app name their channel; screens have no label.
   const [labels, setLabels] = useState({});
+  // TV shares wait here until we choose to join: sharer id -> channel name.
+  const [available, setAvailable] = useState({});
+  const offers = useRef(new Map());
   const media = useRef(null);
   const bitrate = useRef(SCREEN_QUALITIES[1080].bitrate);
   const outgoing = useRef(new Map());
@@ -49,6 +52,15 @@ export function useScreenShare({ send, targets }) {
     outgoing.current.delete(id);
     entry.pc.close();
     if (notify) Promise.resolve(sendRef.current(id, { type: "screen-stop" })).catch(() => {});
+  }, []);
+  const forgetOffer = useCallback((id) => {
+    offers.current.delete(id);
+    setAvailable((all) => {
+      if (!(id in all)) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
   }, []);
   const closeIncoming = useCallback((id) => {
     const entry = incoming.current.get(id);
@@ -133,10 +145,11 @@ export function useScreenShare({ send, targets }) {
   useEffect(() => {
     const wanted = targetKey ? targetKey.split(",") : [];
     for (const id of [...incoming.current.keys()]) if (!wanted.includes(id)) closeIncoming(id);
+    for (const id of [...offers.current.keys()]) if (!wanted.includes(id)) forgetOffer(id);
     for (const id of [...outgoing.current.keys()]) if (!wanted.includes(id)) closeOutgoing(id, false);
     if (!wanted.length && media.current) stop();
     if (sharing) wanted.forEach(offerTo);
-  }, [targetKey, sharing, offerTo, stop, closeIncoming, closeOutgoing]);
+  }, [targetKey, sharing, offerTo, stop, closeIncoming, closeOutgoing, forgetOffer]);
 
   useEffect(() => () => {
     for (const entry of outgoing.current.values()) entry.pc?.close();
@@ -144,28 +157,12 @@ export function useScreenShare({ send, targets }) {
     media.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
-  const handle = useCallback(async (from, signal) => {
+  const answer = useCallback(async (from, signal) => {
+    closeIncoming(from);
+    const entry = { pc: null, pending: [] };
+    incoming.current.set(from, entry);
+    if (signal.tv) setLabels((all) => ({ ...all, [from]: typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "TV" }));
     try {
-      if (signal.type === "screen-stop") return closeIncoming(from);
-      if (signal.type === "screen-answer") {
-        const entry = outgoing.current.get(from);
-        if (!entry?.pc || entry.pc.signalingState !== "have-local-offer") return;
-        await entry.pc.setRemoteDescription(signal.sdp);
-        await applyPending(entry);
-        return;
-      }
-      if (signal.type === "screen-ice") {
-        const entry = (signal.role === "sharer" ? incoming : outgoing).current.get(from);
-        if (!entry) return;
-        if (entry.pc?.remoteDescription) await entry.pc.addIceCandidate(signal.candidate);
-        else if (entry.pending.length < 128) entry.pending.push(signal.candidate);
-        return;
-      }
-      if (signal.type !== "screen-offer") return;
-      closeIncoming(from);
-      const entry = { pc: null, pending: [] };
-      incoming.current.set(from, entry);
-      if (signal.tv) setLabels((all) => ({ ...all, [from]: typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "TV" }));
       entry.pc = await newConnection();
       if (incoming.current.get(from) !== entry) return entry.pc.close();
       entry.pc.onicecandidate = ({ candidate }) => {
@@ -182,11 +179,65 @@ export function useScreenShare({ send, targets }) {
       await entry.pc.setLocalDescription(await entry.pc.createAnswer());
       await sendRef.current(from, { type: "screen-answer", sdp: entry.pc.localDescription.toJSON() });
     } catch {
-      if (signal.type === "screen-offer") closeIncoming(from);
+      closeIncoming(from);
     }
   }, [closeIncoming]);
 
-  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, labels, handle };
+  // Start watching a TV share that is waiting for us.
+  const join = useCallback((from) => {
+    const signal = offers.current.get(from);
+    forgetOffer(from);
+    if (signal) answer(from, signal);
+  }, [answer, forgetOffer]);
+  // Stop watching; the sharer offers it again, so it can be joined later.
+  const leave = useCallback((from) => {
+    closeIncoming(from);
+    Promise.resolve(sendRef.current(from, { type: "screen-leave" })).catch(() => {});
+  }, [closeIncoming]);
+
+  const handle = useCallback(async (from, signal) => {
+    try {
+      if (signal.type === "screen-stop") { forgetOffer(from); return closeIncoming(from); }
+      if (signal.type === "screen-leave") {
+        // Someone stopped watching our share: offer it again so they can come back.
+        if (outgoing.current.has(from)) { closeOutgoing(from, false); if (media.current) offerTo(from); }
+        return;
+      }
+      if (signal.type === "screen-answer") {
+        const entry = outgoing.current.get(from);
+        if (!entry?.pc || entry.pc.signalingState !== "have-local-offer") return;
+        await entry.pc.setRemoteDescription(signal.sdp);
+        await applyPending(entry);
+        return;
+      }
+      if (signal.type === "screen-ice") {
+        const entry = (signal.role === "sharer" ? incoming : outgoing).current.get(from);
+        if (!entry) return;
+        if (entry.pc?.remoteDescription) await entry.pc.addIceCandidate(signal.candidate);
+        else if (entry.pending.length < 128) entry.pending.push(signal.candidate);
+        return;
+      }
+      if (signal.type === "screen-label") {
+        const label = signal.label.slice(0, 80);
+        if (incoming.current.has(from)) setLabels((all) => ({ ...all, [from]: label }));
+        if (offers.current.has(from)) setAvailable((all) => ({ ...all, [from]: label }));
+        return;
+      }
+      if (signal.type !== "screen-offer") return;
+      closeIncoming(from);
+      // TV is joined when you choose; screens open straight away.
+      if (signal.tv) {
+        offers.current.set(from, signal);
+        setAvailable((all) => ({ ...all, [from]: typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "TV" }));
+        return;
+      }
+      await answer(from, signal);
+    } catch {
+      if (signal.type === "screen-offer") closeIncoming(from);
+    }
+  }, [closeIncoming, closeOutgoing, offerTo, forgetOffer, answer]);
+
+  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, labels, available, join, leave, handle };
 }
 
 export const applyScreenOutput = (player) =>

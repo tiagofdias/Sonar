@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Maximize, MessageSquare, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
+import { Clapperboard, LogOut, Maximize, MessageSquare, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
 import { applyScreenOutput, SCREEN_QUALITIES } from "../lib/useScreenShare";
 
 export function ScreenShareButton({ screen }) {
@@ -29,7 +29,7 @@ export function ScreenShareButton({ screen }) {
   );
 }
 
-function RemoteScreen({ stream, name, deafened, label, theater, onView }) {
+function RemoteScreen({ stream, name, deafened, label, theater, onView, onLeave }) {
   const video = useRef(null);
   const [volume, setVolume] = useState(1);
   useEffect(() => { video.current.volume = volume; }, [volume]);
@@ -63,6 +63,11 @@ function RemoteScreen({ stream, name, deafened, label, theater, onView }) {
             {theater ? <MessageSquare size={16} /> : <Clapperboard size={16} />}
           </button>
         )}
+        {onLeave && (
+          <button className="icon-button" aria-label="Stop watching" title="Stop watching (you can join again)" onClick={onLeave}>
+            <LogOut size={16} />
+          </button>
+        )}
         <button className="icon-button" aria-label="Full screen" title="Full screen" onClick={() => video.current.requestFullscreen?.()}>
           <Maximize size={16} />
         </button>
@@ -82,7 +87,7 @@ export default function ScreenStage({ screen, nameOf, deafened }) {
   return (
     <aside className={`screen-stage ${tv && theater ? "theater" : ""}`} aria-label="Shared screens">
       {entries.map(([id, stream]) => (
-        <RemoteScreen key={id} stream={stream} name={nameOf(id)} deafened={deafened} label={labels[id]} theater={theater} onView={labels[id] ? () => setTheater((value) => !value) : null} />
+        <RemoteScreen key={id} stream={stream} name={nameOf(id)} deafened={deafened} label={labels[id]} theater={theater} onView={labels[id] ? () => setTheater((value) => !value) : null} onLeave={labels[id] && screen.leave ? () => screen.leave(id) : null} />
       ))}
     </aside>
   );

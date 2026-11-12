@@ -1,16 +1,40 @@
 import { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
 import { LayoutGrid, MonitorPlay, Tv } from "lucide-react";
 
-// Apps that run inside a call or voice room. Watch Together is the first.
+// Apps that run inside a call or voice room. Same list and look as the desktop app.
 const APPS = [
   { id: "watch", name: "Watch together", note: "YouTube in sync, with sponsor segments skipped", icon: MonitorPlay },
   // Sharing a TV channel starts from the desktop app (browsers can't open IPTV streams); web members watch it here.
-  { id: "tv", name: "Sonar TV", note: "Share your IPTV channel from the Sonar desktop app. Click to download it.", icon: Tv },
+  { id: "tv", name: "Sonar TV", note: "Your IPTV channels at their original quality. Shared from the desktop app: click to get it.", icon: Tv },
 ];
 
-export default function AppsMenu({ watch }) {
+// Says once when someone starts sharing TV, with a Join button; nothing opens until you choose.
+function useTvNotices(screen, nameOf) {
+  const seen = useRef(new Set());
+  const available = screen?.available || {};
+  const key = Object.keys(available).join(",");
+  useEffect(() => {
+    const ids = key ? key.split(",") : [];
+    for (const id of [...seen.current]) if (!ids.includes(id)) { seen.current.delete(id); toast.dismiss(`tv-${id}`); }
+    for (const id of ids) {
+      if (seen.current.has(id)) continue;
+      seen.current.add(id);
+      toast((t) => (
+        <span className="tv-notice">
+          <Tv size={18} />
+          <span><strong>{nameOf(id)} is sharing TV</strong><small>{available[id]}</small></span>
+          <button className="primary compact" onClick={() => { toast.dismiss(t.id); screen.join(id); }}>Join</button>
+        </span>
+      ), { id: `tv-${id}`, duration: 12000 });
+    }
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+export default function AppsMenu({ watch, screen, nameOf = () => "Someone" }) {
   const [open, setOpen] = useState(false);
   const box = useRef(null);
+  useTvNotices(screen, nameOf);
   useEffect(() => {
     if (!open) return undefined;
     const outside = (event) => { if (!box.current?.contains(event.target)) setOpen(false); };
@@ -25,21 +49,28 @@ export default function AppsMenu({ watch }) {
     if (id === "watch" && !watch.joined) watch.join();
     if (id === "tv") window.open("/downloads/Sonar-Desktop-windows-x64.zip", "_blank", "noopener");
   };
+  const tvShares = Object.entries(screen?.available || {});
   return (
     <span className="apps-menu" ref={box}>
+      {tvShares.map(([id, label]) => (
+        <button key={id} className="secondary compact apps-join" onClick={() => screen.join(id)} title={`${nameOf(id)} is sharing TV: ${label}`}>
+          <Tv size={15} /> Join TV · {label}
+        </button>
+      ))}
       {watch.available && !watch.joined && (
         <button className="secondary compact apps-join" onClick={watch.join} title={watch.available.title || "Watch together"}>
           <MonitorPlay size={15} /> Join watch together{watch.available.viewers ? ` · ${watch.available.viewers}` : ""}
         </button>
       )}
-      <button className={`icon-button ${watch.joined ? "accent" : ""}`} aria-label="Apps" title="Apps" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className={`icon-button ${open || watch.joined ? "accent" : ""}`} aria-label="Apps" title="Apps" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <LayoutGrid size={18} />
       </button>
       {open && (
         <span className="apps-options" role="menu" aria-label="Apps">
+          <span className="apps-title">Apps</span>
           {APPS.map(({ id, name, note, icon: Icon }) => (
             <button key={id} role="menuitem" onClick={() => start(id)} disabled={id === "watch" && watch.joined}>
-              <Icon size={18} />
+              <span className="apps-icon"><Icon size={18} /></span>
               <span><strong>{name}</strong><small>{id === "watch" && watch.joined ? "You're watching" : note}</small></span>
             </button>
           ))}
