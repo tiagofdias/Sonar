@@ -1,6 +1,6 @@
 [package]
 name = "sonar-desktop"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 publish = false
 
@@ -86,6 +86,8 @@ opt-level = 3
 opt-level = 3
 
 [dependencies]
+# Only for image::allocate (iced re-exports it only with image codecs, which we do not need).
+iced_runtime = "0.14"
 iced = { version = "0.14", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "web-colors", "advanced", "image-without-codecs"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

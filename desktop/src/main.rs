@@ -313,6 +313,10 @@ pub struct App {
     pub screen_views: HashMap<String, (iced::widget::image::Handle, u32, u32)>,
     pub screen_expanded: Option<String>,
     pub screen_volumes: HashMap<String, f32>,
+    /// Keeps each shown frame's GPU upload alive; a frame only replaces the shown one once uploaded, so video never blinks black.
+    pub screen_allocations: HashMap<String, iced_runtime::image::Allocation>,
+    pub screen_uploading: HashMap<String, std::time::Instant>,
+    pub screen_ended: std::collections::HashSet<String>,
     pub screen_picker: Option<ScreenPicker>,
     screen_targets: Vec<screen::Target>,
     screen_deafened: bool,
@@ -522,6 +526,7 @@ pub enum Msg {
     ScreenStop,
     ScreenExpand(Option<String>),
     ScreenVolume(String, f32),
+    ScreenUploaded(String, u32, u32, Result<iced_runtime::image::Allocation, iced_runtime::image::Error>),
     NoiseSuppression(bool),
     MissedCallSent(String, Result<chat::Message, String>),
     JoinInvite(String),
@@ -610,7 +615,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -675,6 +680,12 @@ impl App {
     }
 
     /// Screen sharing exists only inside a connected call or a joined room.
+    /// Drops someone's shared picture, including a frame still being uploaded for them.
+    fn forget_screen(&mut self, id: &str) {
+        self.screen_views.remove(id);
+        self.screen_allocations.remove(id);
+        if self.screen_uploading.remove(id).is_some() { self.screen_ended.insert(id.to_owned()); }
+    }
     fn screen_spec(&self) -> Option<screen::Spec> {
         let session = self.session.clone()?;
         let socket = self.socket.clone()?;
@@ -688,7 +699,7 @@ impl App {
 
     fn sync_screen(&mut self) {
         if self.screen_spec().is_none() {
-            self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
+            self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_allocations.clear(); self.screen_ended.extend(self.screen_uploading.drain().map(|(id, _)| id)); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
             return;
         }
         let Some(controls) = self.screen_controls.clone() else { return };
@@ -2000,20 +2011,29 @@ impl App {
                     screen::Update::Ready(controls) => { self.screen_targets.clear(); self.screen_controls = Some(controls); }
                     screen::Update::Sharing(info) => {
                         // When our TV (or screen) stops, its picture here goes too.
-                        if info.is_none() { let me = self.me().to_owned(); self.screen_views.remove(&me); self.screen_labels.remove(&me); if self.screen_expanded.as_ref() == Some(&me) { self.screen_expanded = None; } }
+                        if info.is_none() { let me = self.me().to_owned(); self.forget_screen(&me); self.screen_labels.remove(&me); if self.screen_expanded.as_ref() == Some(&me) { self.screen_expanded = None; } }
                         self.screen_sharing = info;
                     }
                     screen::Update::Label(id, label) => match label { Some(label) => { self.screen_labels.insert(id, label); } None => { self.screen_labels.remove(&id); } },
                     screen::Update::Notice(text) => self.toast(ToastKind::Plain, text),
                     screen::Update::SoundFailed => self.toast(ToastKind::Plain, "Sharing without sound: Windows could not capture that app's audio."),
-                    screen::Update::ViewerGone(id) => { self.screen_views.remove(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
+                    screen::Update::ViewerGone(id) => { self.forget_screen(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
                     screen::Update::Pictures => if let Some(controls) = &self.screen_controls {
+                        // Upload each new frame first and show it only once it is on the GPU; until then the last frame stays.
+                        // A frame still uploading holds back newer ones for that person (they stay in the mailbox, newest wins).
+                        let mut uploads = Vec::new();
                         if let Ok(mut slot) = controls.pictures.lock() {
-                            for (id, picture) in slot.drain() {
-                                let handle = iced::widget::image::Handle::from_rgba(picture.width, picture.height, bytes::Bytes::from(picture.rgba));
-                                self.screen_views.insert(id, (handle, picture.width, picture.height));
+                            // An upload iced never answers (no window drawing) is given up after a second.
+                            let ready: Vec<String> = slot.keys().filter(|id| self.screen_uploading.get(*id).is_none_or(|since| since.elapsed() > std::time::Duration::from_secs(1))).cloned().collect();
+                            for id in ready {
+                                let Some(picture) = slot.remove(&id) else { continue };
+                                let (width, height) = (picture.width, picture.height);
+                                let handle = iced::widget::image::Handle::from_rgba(width, height, bytes::Bytes::from(picture.rgba));
+                                self.screen_uploading.insert(id.clone(), std::time::Instant::now());
+                                uploads.push(iced_runtime::image::allocate(handle).map(move |result| Msg::ScreenUploaded(id.clone(), width, height, result)));
                             }
                         }
+                        return Task::batch(uploads);
                     },
                 }
             }
@@ -2163,6 +2183,16 @@ impl App {
             },
             Msg::ScreenStop => { self.apps_open = false; if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Stop); } }
             Msg::ScreenExpand(id) => self.screen_expanded = id,
+            Msg::ScreenUploaded(id, width, height, result) => {
+                self.screen_uploading.remove(&id);
+                // A share that ended while its frame was uploading stays gone.
+                let ended = self.screen_ended.remove(&id);
+                if let (Ok(allocation), false) = (result, ended || self.screen_controls.is_none()) {
+                    self.screen_views.insert(id.clone(), (allocation.handle().clone(), width, height));
+                    self.screen_allocations.insert(id.clone(), allocation);
+                }
+                if let Some(controls) = &self.screen_controls { if controls.pictures.lock().is_ok_and(|slot| slot.contains_key(&id)) { if let Some(key) = self.screen_spec().map(|s| s.key.clone()) { return self.update(Msg::ScreenUpdate(key, screen::Update::Pictures)); } } }
+            }
             Msg::ScreenVolume(id, volume) => {
                 if let Some(controls) = &self.screen_controls { controls.send(screen::Command::Volume { from: id.clone(), volume }); }
                 self.screen_volumes.insert(id, volume);
