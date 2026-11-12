@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "sonar-desktop"
-version = "0.4.9"
+version = "0.4.10"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm",

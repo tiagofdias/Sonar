@@ -136,7 +136,7 @@ impl Link {
         if !crate::ice_candidate::valid_remote_candidate(&candidate) { return; }
         if self.remote_set { let _ = self.connection.add_ice_candidate(candidate).await; } else if self.pending.len() < 128 { self.pending.push(candidate); }
     }
-    fn close(self) { tokio::spawn(async move { let _ = self.connection.close().await; }); }
+    fn close(self) { if let Ok(runtime) = tokio::runtime::Handle::try_current() { runtime.spawn(async move { let _ = self.connection.close().await; }); } }
 }
 
 struct OutTrack { track: Arc<TrackLocalStaticSample>, sender: Arc<dyn RtpSender>, mime: &'static str, ready: Option<(u32, u8)> }
@@ -161,7 +161,32 @@ impl OutTrack {
 }
 
 /// `desktop`: the viewer is the Sonar app, which plays a TV channel's original stream even with B-frames.
-struct Outgoing { link: Link, video: OutTrack, audio: OutTrack, joined: bool, offered_to: Target, desktop: bool, tv: bool }
+struct Outgoing { link: Link, media: mpsc::Sender<Packet>, joined: bool, offered_to: Target, desktop: bool, tv: bool }
+/// Media for one viewer, written by that viewer's own task.
+enum Packet { Video(bytes::Bytes, Duration), Audio(bytes::Bytes) }
+fn spawn_writer(mut video: OutTrack, mut audio: OutTrack) -> mpsc::Sender<Packet> {
+    // About two seconds of video: a viewer that falls further behind loses frames, nobody else does.
+    let (tx, mut rx) = mpsc::channel::<Packet>(160);
+    tokio::spawn(async move {
+        while let Some(packet) = rx.recv().await {
+            match packet {
+                Packet::Video(data, duration) => { let _ = video.write(&data, duration).await; }
+                Packet::Audio(data) => { let _ = audio.write(&data, Duration::from_millis(20)).await; }
+            }
+        }
+    });
+    tx
+}
+/// Everything the share loop holds open. Dropped when the call or room is left, it ends
+/// every TV player, capture and connection, so nothing keeps playing after leaving.
+struct Links { outgoing: HashMap<String, Outgoing>, incoming: HashMap<String, Incoming>, stops: Vec<Arc<AtomicBool>> }
+impl Drop for Links {
+    fn drop(&mut self) {
+        for stop in &self.stops { stop.store(true, Ordering::Release); }
+        for (_, view) in self.incoming.drain() { view.stop.store(true, Ordering::Release); view.link.close(); }
+        for (_, out) in self.outgoing.drain() { out.link.close(); }
+    }
+}
 struct Incoming { link: Link, stop: Arc<AtomicBool> }
 
 enum Media { Video(Vec<u8>), Audio(Vec<u8>) }
@@ -178,7 +203,8 @@ fn start_capture(choice: Choice, media: mpsc::Sender<Media>, updates: mpsc::Unbo
         let mut keep = move || !flag.load(Ordering::Acquire);
         let report = video_updates.clone();
         let mut ready = |quality: Quality, codec: Codec, name: &str| { let _ = report.send(Update::Sharing(Some(format!("{}p {codec:?} via {name}", quality.height)))); };
-        let mut packet = |data: &[u8], _key: bool, _: Duration| { let _ = video_media.try_send(Media::Video(data.to_vec())); };
+        let closed = video_stop.clone();
+        let mut packet = |data: &[u8], _key: bool, _: Duration| { if let Err(mpsc::error::TrySendError::Closed(_)) = video_media.try_send(Media::Video(data.to_vec())) { closed.store(true, Ordering::Release); } };
         match screen_media::run(choice.source, Quality::for_height(height), &key, &mut keep, &mut ready, &mut packet) {
             Ok(Ended::TooSlow) if height > 720 => { let lower = match height { 2160 => 1440, 1440 => 1080, _ => 720 }; let _ = restarts.send(lower); }
             Ok(_) => {}
@@ -260,7 +286,7 @@ async fn offer(spec: &Spec, target: &Target, tv: Option<&str>) -> Result<Outgoin
     let mut signal = json!({ "type": "screen-offer", "sdp": { "type": "offer", "sdp": sdp } });
     if let Some(label) = tv { signal["tv"] = json!(true); signal["label"] = json!(label.chars().take(80).collect::<String>()); }
     send(spec, target, signal).await?;
-    Ok(Outgoing { link, video, audio, joined: false, offered_to: target.clone(), desktop: false, tv: tv.is_some() })
+    Ok(Outgoing { link, media: spawn_writer(video, audio), joined: false, offered_to: target.clone(), desktop: false, tv: tv.is_some() })
 }
 
 pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
@@ -277,8 +303,18 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
         let (restart_tx, mut restarts) = mpsc::unbounded_channel::<u32>();
         let (media_tx, mut media) = mpsc::channel::<Media>(16);
         let (mut targets, mut sharing, mut choice): (Vec<Target>, Option<Sharing>, Option<Choice>) = (Vec::new(), None, None);
-        let mut outgoing: HashMap<String, Outgoing> = HashMap::new();
-        let mut incoming: HashMap<String, Incoming> = HashMap::new();
+        let mut links = Links { outgoing: HashMap::new(), incoming: HashMap::new(), stops: Vec::new() };
+        // Connections for new viewers are prepared in the background (network setup can take
+        // seconds); the share keeps flowing to everyone else meanwhile. `epoch` tells a finished
+        // offer whether it still belongs to the share that is running.
+        let (offer_tx, mut offers_ready) = mpsc::unbounded_channel::<(u64, Target, Result<Outgoing, String>)>();
+        let mut epoch: u64 = 0;
+        let mut preparing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let prepare = |epoch: u64, target: Target, label: Option<String>, preparing: &mut std::collections::HashSet<String>| {
+            if !preparing.insert(target.user.clone()) { return; }
+            let (spec, done) = (spec.clone(), offer_tx.clone());
+            tokio::spawn(async move { let result = offer(&spec, &target, label.as_deref()).await; let _ = done.send((epoch, target, result)); });
+        };
         let mut playback: Option<Arc<ScreenPlayback>> = None;
         let mut deafened = false;
         let mut volumes: HashMap<String, f32> = HashMap::new();
@@ -300,45 +336,51 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             choice = None;
                             stop_tv(&mut tv);
                             if switching {
-                                for out in outgoing.values_mut() { out.joined = false; let _ = send(&spec, &out.offered_to, json!({ "type": "screen-label", "label": choice_tv.label.chars().take(80).collect::<String>() })).await; }
+                                for out in links.outgoing.values_mut() { out.joined = false; let _ = send(&spec, &out.offered_to, json!({ "type": "screen-label", "label": choice_tv.label.chars().take(80).collect::<String>() })).await; }
                             } else {
-                                for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                                for (_, out) in links.outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
                             }
                             if playback.is_none() { if let Ok(p) = ScreenPlayback::open(spec.output.clone()) { p.set_deafened(deafened); playback = Some(Arc::new(p)); } }
                             let shared = Arc::new(crate::tv::player::Shared::default());
                             let (tx, rx) = mpsc::channel(64);
                             let notify = update_tx.clone();
+                            links.stops.retain(|stop| !stop.load(Ordering::Acquire));
+                            links.stops.push(shared.stop.clone());
                             crate::tv::player::start(choice_tv.address, shared.clone(), tx, crate::tv::player::Local { pictures: pictures.clone(), key: spec.session.me().to_owned(), playback: playback.clone(), source: stable_source(spec.session.me()), notify: Box::new(move || { let _ = notify.send(Update::Pictures); }) });
                             tv_out = Some(rx);
                             tv = Some((shared, choice_tv.label.clone(), choice_tv.share));
                             let _ = output.send(Update::Sharing(Some(format!("TV · {}", choice_tv.label)))).await;
-                            if choice_tv.share && !switching { for target in targets.clone() { if let Ok(out) = offer(&spec, &target, Some(&choice_tv.label)).await { outgoing.insert(target.user.clone(), out); } } }
+                            if !switching { epoch += 1; preparing.clear(); }
+                            if choice_tv.share && !switching { for target in targets.clone() { prepare(epoch, target, Some(choice_tv.label.clone()), &mut preparing); } }
                         }
                         Command::Start(next) => {
                             stop_tv(&mut tv);
                             tv_out = None;
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
                             choice = Some(next.clone());
-                            sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone()));
-                            for target in targets.clone() { if let Ok(out) = offer(&spec, &target, None).await { if let Some(old) = outgoing.insert(target.user.clone(), out) { old.link.close(); } } }
+                            sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone())); if let Some(active) = &sharing { links.stops.retain(|stop| !stop.load(Ordering::Acquire)); links.stops.push(active.stop.clone()); }
+                            epoch += 1; preparing.clear();
+                            for (_, old) in links.outgoing.drain() { old.link.close(); }
+                            for target in targets.clone() { prepare(epoch, target, None, &mut preparing); }
                         }
                         Command::Stop => {
+                            epoch += 1; preparing.clear();
                             stop_tv(&mut tv);
                             tv_out = None;
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
                             choice = None;
-                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            for (_, out) in links.outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
                             let _ = output.send(Update::Sharing(None)).await;
                         }
                         Command::Targets(next) => {
-                            let gone: Vec<String> = outgoing.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
-                            for id in gone { if let Some(out) = outgoing.remove(&id) { out.link.close(); } }
-                            let left: Vec<String> = incoming.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
-                            for id in left { if let Some(view) = incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
+                            let gone: Vec<String> = links.outgoing.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
+                            for id in gone { if let Some(out) = links.outgoing.remove(&id) { out.link.close(); } }
+                            let left: Vec<String> = links.incoming.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
+                            for id in left { if let Some(view) = links.incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
                             let waiting: Vec<String> = offers.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
                             for id in waiting { offers.remove(&id); let _ = output.send(Update::TvAvailable(id, None)).await; }
                             let label = tv.as_ref().filter(|(_, _, share)| *share).map(|(_, label, _)| label.clone());
-                            if sharing.is_some() || label.is_some() { for target in &next { if !outgoing.contains_key(&target.user) { if let Ok(out) = offer(&spec, target, label.as_deref()).await { outgoing.insert(target.user.clone(), out); } } } }
+                            if sharing.is_some() || label.is_some() { for target in &next { if !links.outgoing.contains_key(&target.user) { prepare(epoch, target.clone(), label.clone(), &mut preparing); } } }
                             targets = next;
                         }
                         Command::Volume { from, volume } => {
@@ -353,7 +395,7 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             }
                         }
                         Command::LeaveTv(from) => {
-                            if let Some(view) = incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); }
+                            if let Some(view) = links.incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); }
                             if let Ok(mut slot) = pictures.lock() { slot.remove(&from); }
                             let _ = output.send(Update::ViewerGone(from.clone())).await;
                             // The sharer offers it again, so it can be joined later.
@@ -365,35 +407,36 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             match kind.as_str() {
                                 "screen-leave" => {
                                     // Someone stopped watching our TV: offer it again so they can come back.
-                                    if let Some(out) = outgoing.remove(&from) { out.link.close(); }
+                                    if let Some(out) = links.outgoing.remove(&from) { out.link.close(); }
                                     let label = tv.as_ref().filter(|(_, _, share)| *share).map(|(_, label, _)| label.clone());
                                     if let (Some(target), true) = (targets.iter().find(|t| t.user == from).cloned(), sharing.is_some() || label.is_some()) {
-                                        if let Ok(out) = offer(&spec, &target, label.as_deref()).await { outgoing.insert(target.user.clone(), out); }
+                                        preparing.remove(&target.user);
+                                        prepare(epoch, target, label, &mut preparing);
                                     }
                                 }
                                 "screen-label" => {
                                     let label: String = signal.get("label").and_then(Value::as_str).unwrap_or("TV").chars().filter(|c| !c.is_control()).take(80).collect();
                                     if let Some(waiting) = offers.get_mut(&from) { waiting["label"] = json!(label.clone()); let _ = output.send(Update::TvAvailable(from.clone(), Some(label.clone()))).await; }
-                                    if incoming.contains_key(&from) { let _ = output.send(Update::Label(from.clone(), Some(label))).await; }
+                                    if links.incoming.contains_key(&from) { let _ = output.send(Update::Label(from.clone(), Some(label))).await; }
                                 }
-                                "screen-stop" => { if offers.remove(&from).is_some() { let _ = output.send(Update::TvAvailable(from.clone(), None)).await; } if let Some(view) = incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); } if let Ok(mut slot) = pictures.lock() { slot.remove(&from); } let _ = output.send(Update::ViewerGone(from)).await; }
+                                "screen-stop" => { if offers.remove(&from).is_some() { let _ = output.send(Update::TvAvailable(from.clone(), None)).await; } if let Some(view) = links.incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); } if let Ok(mut slot) = pictures.lock() { slot.remove(&from); } let _ = output.send(Update::ViewerGone(from)).await; }
                                 "screen-answer" => {
                                     let sdp = signal.get("sdp").and_then(|v| v.get("sdp")).and_then(Value::as_str).unwrap_or_default().to_owned();
-                                    if let Some(out) = outgoing.get_mut(&from) {
+                                    if let Some(out) = links.outgoing.get_mut(&from) {
                                         out.desktop = signal.get("client").and_then(Value::as_str) == Some("desktop");
                                         if fingerprint(&sdp).is_ok() { if let Ok(answer) = RTCSessionDescription::answer(sdp) { let _ = out.link.set_remote(answer).await; } }
                                     }
                                 }
                                 "screen-ice" => {
                                     let candidate = signal.get("candidate").cloned().unwrap_or_default();
-                                    if signal.get("role").and_then(Value::as_str) == Some("sharer") { if let Some(view) = incoming.get_mut(&from) { view.link.add_candidate(&candidate).await; } }
-                                    else if let Some(out) = outgoing.get_mut(&from) { out.link.add_candidate(&candidate).await; }
+                                    if signal.get("role").and_then(Value::as_str) == Some("sharer") { if let Some(view) = links.incoming.get_mut(&from) { view.link.add_candidate(&candidate).await; } }
+                                    else if let Some(out) = links.outgoing.get_mut(&from) { out.link.add_candidate(&candidate).await; }
                                 }
                                 "screen-offer" => {
                                     let Some(target) = targets.iter().find(|t| t.user == from).cloned() else { continue };
                                     let sdp = signal.get("sdp").and_then(|v| v.get("sdp")).and_then(Value::as_str).unwrap_or_default().to_owned();
                                     if sdp.len() > 32000 || fingerprint(&sdp).is_err() { continue; }
-                                    if let Some(old) = incoming.remove(&from) { old.stop.store(true, Ordering::Release); old.link.close(); }
+                                    if let Some(old) = links.incoming.remove(&from) { old.stop.store(true, Ordering::Release); old.link.close(); }
                                     // TV waits until we choose to join; screens open straight away.
                                     let is_tv = signal.get("tv").and_then(Value::as_bool) == Some(true);
                                     if is_tv && signal.get("sonarJoin").is_none() {
@@ -420,7 +463,7 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                                     if send(&spec, &target, json!({ "type": "screen-answer", "client": "desktop", "sdp": { "type": "answer", "sdp": local } })).await.is_err() { view.close(); continue; }
                                     let stop = Arc::new(AtomicBool::new(false));
                                     start_viewer(from.clone(), rtp_rx, pictures.clone(), player, stable_source(&from), update_tx.clone(), stop.clone());
-                                    incoming.insert(from, Incoming { link: view, stop });
+                                    links.incoming.insert(from, Incoming { link: view, stop });
                                 }
                                 _ => {}
                             }
@@ -429,12 +472,9 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                 }
                 item = media.recv() => {
                     let Some(item) = item else { continue };
-                    for out in outgoing.values_mut() {
-                        if !out.link.connected.load(Ordering::Acquire) { continue; }
-                        match &item {
-                            Media::Video(data) => { let _ = out.video.write(data, frame).await; }
-                            Media::Audio(data) => { let _ = out.audio.write(data, Duration::from_millis(20)).await; }
-                        }
+                    let packet = |item: &Media| match item { Media::Video(data) => Packet::Video(bytes::Bytes::copy_from_slice(data), frame), Media::Audio(data) => Packet::Audio(bytes::Bytes::copy_from_slice(data)) };
+                    for out in links.outgoing.values() {
+                        if out.link.connected.load(Ordering::Acquire) { let _ = out.media.try_send(packet(&item)); }
                     }
                 }
                 item = async { match tv_out.as_mut() { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
@@ -444,23 +484,32 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                     let (native, web_native) = (shared.native.load(Ordering::Acquire), shared.web_native.load(Ordering::Acquire));
                     let takes_original = |out: &Outgoing| native && (out.desktop || web_native);
                     match item {
-                        Out::Native(data, duration) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) && takes_original(out) { let _ = out.video.write(&data, duration).await; } },
-                        Out::Converted(data, duration) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) && !takes_original(out) { let _ = out.video.write(&data, duration).await; } },
-                        Out::Audio(packet) => for out in outgoing.values_mut() { if out.tv && out.link.connected.load(Ordering::Acquire) { let _ = out.audio.write(&packet, Duration::from_millis(20)).await; } },
+                        Out::Native(data, duration) => { let data = bytes::Bytes::from(data); for out in links.outgoing.values() { if out.tv && out.link.connected.load(Ordering::Acquire) && takes_original(out) { let _ = out.media.try_send(Packet::Video(data.clone(), duration)); } } }
+                        Out::Converted(data, duration) => { let data = bytes::Bytes::from(data); for out in links.outgoing.values() { if out.tv && out.link.connected.load(Ordering::Acquire) && !takes_original(out) { let _ = out.media.try_send(Packet::Video(data.clone(), duration)); } } }
+                        Out::Audio(packet) => { let packet = bytes::Bytes::from(packet); for out in links.outgoing.values() { if out.tv && out.link.connected.load(Ordering::Acquire) { let _ = out.media.try_send(Packet::Audio(packet.clone())); } } }
                         Out::Info(text) => { let _ = output.send(Update::Sharing(Some(format!("TV · {label} · {text}")))).await; }
                         Out::Failed(message) => {
-                            stop_tv(&mut tv); tv_out = None;
-                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            stop_tv(&mut tv); tv_out = None; epoch += 1; preparing.clear();
+                            for (_, out) in links.outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
                             let _ = output.send(Update::Notice(message)).await;
                             let _ = output.send(Update::Sharing(None)).await;
                         }
                         Out::Ended => {
-                            stop_tv(&mut tv); tv_out = None;
-                            for (_, out) in outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
+                            stop_tv(&mut tv); tv_out = None; epoch += 1; preparing.clear();
+                            for (_, out) in links.outgoing.drain() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-stop" })).await; out.link.close(); }
                             let _ = output.send(Update::Notice("The channel ended.".into())).await;
                             let _ = output.send(Update::Sharing(None)).await;
                         }
                     }
+                }
+                ready = offers_ready.recv() => {
+                    let Some((made_for, target, result)) = ready else { continue };
+                    let Ok(out) = result else { if made_for == epoch { preparing.remove(&target.user); } continue };
+                    let wanted = made_for == epoch && targets.iter().any(|t| t.user == target.user) && !links.outgoing.contains_key(&target.user)
+                        && (sharing.is_some() || tv.as_ref().is_some_and(|(_, _, shared)| *shared));
+                    if made_for == epoch { preparing.remove(&target.user); }
+                    if wanted { links.outgoing.insert(target.user.clone(), out); }
+                    else { out.link.close(); if targets.iter().any(|t| t.user == target.user) && made_for != epoch && sharing.is_none() && tv.as_ref().is_none_or(|(_, _, shared)| !*shared) { let _ = send(&spec, &target, json!({ "type": "screen-stop" })).await; } }
                 }
                 update = updates.recv() => { if let Some(update) = update { if matches!(update, Update::Pictures) { let _ = output.try_send(update); } else { let _ = output.send(update).await; } } }
                 lower = restarts.recv() => {
@@ -468,14 +517,14 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                         next.height = height;
                         if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
                         choice = Some(next.clone());
-                        sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone()));
+                        sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone())); if let Some(active) = &sharing { links.stops.retain(|stop| !stop.load(Ordering::Acquire)); links.stops.push(active.stop.clone()); }
                         let _ = output.send(Update::Notice(format!("Your PC could not keep up, so sharing dropped to {height}p."))).await;
                     }
                 }
                 _ = tick.tick() => {
                     let tv_flags = tv.as_ref().map(|(shared, ..)| (shared.clone(), shared.native.load(Ordering::Acquire), shared.web_native.load(Ordering::Acquire)));
                     let mut need_converted = false;
-                    for out in outgoing.values_mut() {
+                    for out in links.outgoing.values_mut() {
                         let original = tv_flags.as_ref().is_some_and(|(_, native, web)| *native && (out.desktop || *web));
                         if out.tv && out.link.connected.load(Ordering::Acquire) && !original { need_converted = true; }
                         if !out.joined && out.link.connected.load(Ordering::Acquire) {
@@ -486,15 +535,15 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                     }
                     // The converted copy costs the graphics card some work, so it runs only while someone needs it.
                     if let Some((shared, ..)) = &tv_flags { shared.want_converted.store(need_converted, Ordering::Release); }
-                    let failed: Vec<String> = incoming.iter().filter(|(_, v)| v.link.failed.load(Ordering::Acquire)).map(|(id, _)| id.clone()).collect();
-                    for id in failed { if let Some(view) = incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
+                    let failed: Vec<String> = links.incoming.iter().filter(|(_, v)| v.link.failed.load(Ordering::Acquire)).map(|(id, _)| id.clone()).collect();
+                    for id in failed { if let Some(view) = links.incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
                 }
             }
         }
         if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
         stop_tv(&mut tv);
-        for (_, view) in incoming.drain() { view.stop.store(true, Ordering::Release); view.link.close(); }
-        for (_, out) in outgoing.drain() { out.link.close(); }
+        for (_, view) in links.incoming.drain() { view.stop.store(true, Ordering::Release); view.link.close(); }
+        for (_, out) in links.outgoing.drain() { out.link.close(); }
         std::future::pending::<()>().await;
     })
 }

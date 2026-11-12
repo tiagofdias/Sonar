@@ -49,31 +49,37 @@ const signup = async (fullName, email, username) => {
 };
 const host = await signup("Tiago Host", "host@example.invalid", "tiagohost");
 const guest = await signup("Ana Guest", "guest@example.invalid", "anaguest");
-await Community.create({ name: "TvTest", ownerId: host, members: [host, guest], channels: [{ name: "general" }, { name: "Lounge", type: "voice" }] });
+const third = await signup("Bea Late", "late@example.invalid", "bealate");
+await Community.create({ name: "TvTest", ownerId: host, members: [host, guest, third], channels: [{ name: "general" }, { name: "Lounge", type: "voice" }] });
 say("server ready with two accounts and a voice room");
 
 const browser = await chromium.launch({ headless: true, executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] });
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-page.on("pageerror", (e) => say("web error:", String(e).slice(0, 160)));
-await page.goto(`${origin}/login`);
-await page.fill('input[autocomplete="email"]', "guest@example.invalid");
-await page.fill('input[autocomplete="current-password"]', "correct-horse-battery");
-await page.click("button.primary");
-await page.waitForSelector(".recovery-confirm input", { timeout: 30000 });
-await page.check(".recovery-confirm input");
-await page.click("text=Continue to Sonar");
-await page.waitForTimeout(1500);
-// New accounts with no friends see the People panel first; clicking outside closes it.
-if (await page.$(".modal-backdrop")) await page.click(".modal-backdrop", { position: { x: 8, y: 8 } });
-await page.click('[title="Communities"]');
-await page.click('[title="TvTest"]');
-await page.click('[aria-label="Join voice room Lounge"]');
-await page.waitForSelector('[aria-label="Connected to Lounge"]', { timeout: 20000 });
+// Signs a web member in and puts them in the voice room.
+const enterRoom = async (email) => {
+  const tab = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
+  tab.on("pageerror", (e) => say("web error:", String(e).slice(0, 160)));
+  await tab.goto(`${origin}/login`);
+  await tab.fill('input[autocomplete="email"]', email);
+  await tab.fill('input[autocomplete="current-password"]', "correct-horse-battery");
+  await tab.click("button.primary");
+  await tab.waitForSelector(".recovery-confirm input", { timeout: 30000 });
+  await tab.check(".recovery-confirm input");
+  await tab.click("text=Continue to Sonar");
+  await tab.waitForTimeout(1500);
+  // New accounts with no friends see the People panel first; clicking outside closes it.
+  if (await tab.$(".modal-backdrop")) await tab.click(".modal-backdrop", { position: { x: 8, y: 8 } });
+  await tab.click('[title="Communities"]');
+  await tab.click('[title="TvTest"]');
+  await tab.click('[aria-label="Join voice room Lounge"]');
+  await tab.waitForSelector('[aria-label^="Connected"]', { timeout: 20000 });
+  return tab;
+};
+const page = await enterRoom("guest@example.invalid");
 say("web viewer is in the voice room");
 
 const data = join(work, "localappdata");
 const script = ["wait:9000", "dismissrecovery:", "wait:1000", "mode:community", "wait:1500", "community:TvTest", "wait:3000", "room:Lounge", "wait:5000",
-  `tvadd:http://127.0.0.1:${provider.address().port}/list.m3u`, "wait:3000", "tvplay:0,share", "wait:15000", `shot:${join(work, "desktop.png")}`, "wait:30000", "tvnext:1", "wait:30000", "leave:", "wait:1000"].join(";");
+  `tvadd:http://127.0.0.1:${provider.address().port}/list.m3u`, "wait:3000", "tvplay:0,share", "wait:15000", `shot:${join(work, "desktop.png")}`, "wait:50000", "tvnext:1", "wait:30000", "leave:", "wait:15000"].join(";");
 const desktop = spawn(exe, [], { env: { ...process.env, LOCALAPPDATA: data, SONAR_DEV_SERVER: origin, SONAR_DEV_EMAIL: "host@example.invalid", SONAR_DEV_PASSWORD: "correct-horse-battery", SONAR_DEV_SCRIPT: script, SONAR_DEV_OFFSCREEN: "1", SONAR_DEV_SILENT_AUDIO: "1" }, stdio: "ignore" });
 say("desktop app started");
 
@@ -99,8 +105,24 @@ try {
   }, first);
   result.autoOpened = autoOpened;
   await page.screenshot({ path: join(work, "web.png") });
+  // Someone else joins the room, then starts watching: the first viewer's picture must not stall.
+  await page.evaluate(() => {
+    const video = document.querySelector(".screen-tile video");
+    window.frameGap = { last: performance.now(), longest: 0 };
+    const each = () => { const now = performance.now(); window.frameGap.longest = Math.max(window.frameGap.longest, now - window.frameGap.last); window.frameGap.last = now; video.requestVideoFrameCallback(each); };
+    video.requestVideoFrameCallback(each);
+  });
+  const late = await enterRoom("late@example.invalid");
+  say("a third member joined the room");
+  await late.waitForSelector("button.apps-join >> text=/Join TV/", { timeout: 30000 });
+  await late.click("button.apps-join >> text=/Join TV/");
+  await late.waitForFunction(() => document.querySelector(".screen-tile video")?.videoWidth > 0, null, { timeout: 20000 });
+  say("the third member is watching too");
+  await page.waitForTimeout(4000);
+  result.longestStallWhileOthersJoinedMs = Math.round(await page.evaluate(() => window.frameGap.longest));
+  result.lateViewerSees = await late.evaluate(() => document.querySelector(".screen-tile video").videoWidth > 0);
   // The sharer switches channel: same connection, new name, the picture keeps going.
-  await page.waitForSelector("figcaption >> text=/Second Channel/", { timeout: 40000 });
+  await page.waitForSelector("figcaption >> text=/Second Channel/", { timeout: 90000 });
   const before = await page.evaluate(() => document.querySelector(".screen-tile video").getVideoPlaybackQuality().totalVideoFrames);
   await page.waitForTimeout(5000);
   result.afterSwitch = await page.evaluate((before) => ({ label: document.querySelector(".screen-tile figcaption span").textContent, framesIn5s: document.querySelector(".screen-tile video").getVideoPlaybackQuality().totalVideoFrames - before }), before);
@@ -109,6 +131,10 @@ try {
   await page.click('[aria-label="Stop watching"]');
   await page.waitForSelector("button.apps-join >> text=/Join TV · Second Channel/", { timeout: 20000 });
   result.canRejoin = !(await page.$(".screen-tile video"));
+  // The sharer leaves the room: TV ends for everyone, and the waiting Join button goes too.
+  await late.waitForSelector(".screen-tile video", { state: "detached", timeout: 60000 });
+  await page.waitForSelector("button.apps-join >> text=/Join TV/", { state: "detached", timeout: 10000 });
+  result.endsWhenSharerLeaves = true;
 } catch (error) { result.detail = String(error).slice(0, 200); }
 const leaked = relayed.filter((line) => line.includes("sonar-secret-9f3") || line.includes("sonar-test-user") || line.includes("/live/") || (real && line.includes(new URL(real).host)));
 result.signalsRelayed = relayed.length;
@@ -118,4 +144,4 @@ console.log("screenshots:", work);
 desktop.kill();
 await browser.close();
 provider.close();
-process.exit(result.error || result.detail || result.addressSeenByServer || result.autoOpened || !result.canRejoin || !(result.afterSwitch?.framesIn5s > 0) ? 1 : 0);
+process.exit(result.error || result.detail || result.addressSeenByServer || result.autoOpened || !result.canRejoin || !(result.afterSwitch?.framesIn5s > 0) || !(result.longestStallWhileOthersJoinedMs < 1000) || !result.endsWhenSharerLeaves ? 1 : 0);

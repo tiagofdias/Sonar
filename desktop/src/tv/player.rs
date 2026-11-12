@@ -88,7 +88,13 @@ impl Worker {
             audio: None, audio_failed: false, frames: 0, reordered: false, announced: false, converted_time: 0, rgba: Vec::new(), mono: Vec::new(), keyed: false }
     }
     fn stopped(&self) -> bool { self.shared.stop.load(Ordering::Acquire) }
-    fn send(&self, item: Out) -> bool { !self.stopped() && self.out.blocking_send(item).is_ok() }
+    /// When nobody reads any more (the call or room was left), the channel stops playing.
+    fn send(&self, item: Out) -> bool {
+        if self.stopped() { return false; }
+        if self.out.blocking_send(item).is_ok() { return true; }
+        self.shared.stop.store(true, Ordering::Release);
+        false
+    }
 
     fn run(mut self, mut events: mpsc::Receiver<Event>) {
         let mut waiting = std::collections::BinaryHeap::<Pending>::new();
@@ -303,11 +309,7 @@ mod tests {
         std::thread::spawn(move || for mut stream in listener.incoming().flatten() {
             let mut request = [0u8; 2048];
             let _ = stream.read(&mut request);
-            let _ = stream.write_all(format!("HTTP/1.1 200 OK
-Content-Length: {}
-Connection: close
-
-", ts.len()).as_bytes());
+            let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", ts.len()).as_bytes());
             let _ = stream.write_all(&ts);
         });
         let shared = Arc::new(Shared::default());
@@ -325,5 +327,29 @@ Connection: close
         assert!(arrivals.len() >= 90, "about 100 packets for 2 s of sound: {}", arrivals.len());
         let busiest = arrivals.iter().map(|a| arrivals.iter().filter(|b| **b >= *a && b.duration_since(*a) < Duration::from_millis(100)).count()).max().unwrap();
         assert!(busiest <= 9, "at most about 100 ms of sound per 100 ms, got {busiest} packets");
+    }
+
+    /// Leaving the call or room drops the share loop that reads the player: the player must
+    /// then stop by itself (no more downloading, no sound left playing here).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stops_when_nobody_reads_it_any_more() {
+        let ts = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/tv/audio_big_chunks.ts")).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/1.ts", listener.local_addr().unwrap());
+        std::thread::spawn(move || for mut stream in listener.incoming().flatten() {
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", ts.len()).as_bytes());
+            let _ = stream.write_all(&ts);
+        });
+        let shared = Arc::new(Shared::default());
+        let (tx, mut rx) = mpsc::channel(4);
+        start(Zeroizing::new(address), shared.clone(), tx, Local { pictures: Arc::new(Mutex::new(Default::default())), key: "me".into(), playback: None, source: 1, notify: Box::new(|| {}) });
+        let _ = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await;
+        assert!(!shared.stop.load(Ordering::Acquire), "playing");
+        drop(rx);
+        let gone = Instant::now();
+        while !shared.stop.load(Ordering::Acquire) && gone.elapsed() < Duration::from_secs(5) { tokio::time::sleep(Duration::from_millis(20)).await; }
+        assert!(shared.stop.load(Ordering::Acquire), "the player stopped once its output was dropped");
     }
 }
