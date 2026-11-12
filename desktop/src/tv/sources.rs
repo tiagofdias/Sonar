@@ -130,6 +130,57 @@ pub fn parse_xtream(server: &str, username: &str, password: &str, categories: &s
     Ok(channels)
 }
 
+// ----- Sorting favorites into sections ----------------------------------------
+
+/// The sections favorites are grouped into, in the order they are shown. A keyword
+/// matches the start of a word in the channel name; one ending in a space must be the whole word.
+const KINDS: [(&str, &[&str]); 7] = [
+    ("Sports", &["sport", "eleven", "dazn", "btv", "benfica", "canal 11", "a bola", "espn", "bein", "eurosport", "nba", "nfl", "f1 ", "golf", "tennis", "fight", "futebol", "football", "liga", "motor"]),
+    ("News", &["news", "noticias", "cnn", "euronews", "rtp3", "rtp 3", "tvi24", "tvi 24", "cmtv", "bloomberg", "cnbc", "al jazeera", "france 24", "dw ", "parlamento"]),
+    ("Kids", &["disney", "panda", "cartoon", "nick", "kids", "baby", "junior", "jr ", "boomerang", "cbeebies", "biggs", "sic k "]),
+    ("Documentaries", &["discovery", "geographic", "nat geo", "history", "historia", "odisseia", "animal", "planet", "travel", "24kitchen", "food", "documentar", "science", "investigation"]),
+    ("Music", &["music", "musica", "mtv", "vh1", "trace", "mezzo", "kiss"]),
+    ("Movies & series", &["cine", "tvcine", "cinemundo", "movie", "film", "hollywood", "axn", "fox", "amc", "hbo", "syfy", "series", "comedy", "paramount", "star movies", "star channel", "star life", "studio"]),
+    ("General", &["rtp", "sic ", "tvi", "porto canal", "globo", "record", "bbc one", "itv", "tf1", "rai "]),
+];
+
+fn plain_words(text: &str) -> String {
+    let mut out = String::from(" ");
+    for c in text.to_lowercase().chars() {
+        out.push(match c { 'á' | 'à' | 'â' | 'ã' | 'ä' => 'a', 'é' | 'è' | 'ê' => 'e', 'í' | 'ì' => 'i', 'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o', 'ú' | 'ù' | 'ü' => 'u', 'ç' => 'c', c if c.is_alphanumeric() => c, _ => ' ' });
+    }
+    out.push(' ');
+    out
+}
+
+/// The section a channel belongs in (its rank, then its name): by what its name says it
+/// shows, or else the provider's own category.
+pub fn section(channel: &Channel) -> (usize, String) {
+    let words = plain_words(&channel.name);
+    for (rank, (kind, keywords)) in KINDS.iter().enumerate() {
+        if keywords.iter().any(|k| words.contains(&format!(" {k}"))) { return (rank, (*kind).to_owned()); }
+    }
+    (KINDS.len(), if channel.group.is_empty() { "Other".to_owned() } else { channel.group.clone() })
+}
+
+/// Name order with numbers compared as numbers: "Sport TV 2" before "Sport TV 10".
+pub fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn parts(text: &str) -> Vec<(bool, String)> {
+        let mut out: Vec<(bool, String)> = Vec::new();
+        for c in text.to_lowercase().chars() {
+            let digit = c.is_ascii_digit();
+            match out.last_mut() { Some((d, part)) if *d == digit => part.push(c), _ => out.push((digit, c.to_string())) }
+        }
+        out
+    }
+    let (x, y) = (parts(a), parts(b));
+    for (p, q) in x.iter().zip(&y) {
+        let order = if p.0 && q.0 { let (m, n) = (p.1.trim_start_matches('0'), q.1.trim_start_matches('0')); m.len().cmp(&n.len()).then_with(|| m.cmp(n)) } else { p.1.cmp(&q.1) };
+        if order.is_ne() { return order; }
+    }
+    x.len().cmp(&y.len())
+}
+
 // ----- Loading a source's channel list ---------------------------------------------
 
 const MAX_LIST: usize = 40 * 1024 * 1024;
@@ -206,6 +257,23 @@ mod tests {
         assert_eq!(xtream_api("https://tv.example", "ana", "p&w", "get_live_streams").unwrap().as_str(), "https://tv.example/player_api.php?username=ana&password=p%26w&action=get_live_streams");
         assert!(xtream_api("tv.example", "an/a", "x", "a").is_err());
         assert!(xtream_base("ftp://tv.example").is_err());
+    }
+    #[test]
+    fn favorites_are_sorted_into_sections_by_what_they_show() {
+        let kind = |name: &str, group: &str| section(&Channel::new(name, group, "http://x/1.ts")).1;
+        assert_eq!(kind("PT: SPORT TV 1 FHD", "Portugal"), "Sports");
+        assert_eq!(kind("SIC Notícias HD", "Portugal"), "News");
+        assert_eq!(kind("SIC HD", "Portugal"), "General");
+        assert_eq!(kind("RTP 1", "Portugal"), "General");
+        assert_eq!(kind("Disney Channel", ""), "Kids");
+        assert_eq!(kind("National Geographic", ""), "Documentaries");
+        assert_eq!(kind("TVCine Top", ""), "Movies & series");
+        assert_eq!(kind("MTV Portugal", ""), "Music");
+        assert_eq!(kind("Canal Q", "Entretenimento"), "Entretenimento");
+        assert_eq!(kind("Mystery", ""), "Other");
+        let mut names = ["Sport TV 10", "Sport TV 2", "sport tv 1", "Sport TV+"];
+        names.sort_by(|a, b| natural_order(a, b));
+        assert_eq!(names, ["sport tv 1", "Sport TV 2", "Sport TV 10", "Sport TV+"]);
     }
     #[test]
     fn sources_saved_before_favorites_still_load() {

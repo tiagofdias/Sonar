@@ -1337,17 +1337,28 @@ fn tv_panel(app: &App) -> E<'_> {
     // Searching always looks through every channel; otherwise favorites come first when there are any.
     let only_favorites = app.tv_favorites_only && !favorites.is_empty() && query.is_empty();
     let mut channels = Column::new().spacing(3).padding(Padding { right: 14.0, ..Padding::ZERO });
-    let (mut shown, mut group) = (0, None::<&str>);
+    // Each channel to show, with the section heading it goes under: the provider's
+    // category, or for favorites what the channel shows (Sports, News…), sorted by name.
+    let mut list: Vec<(usize, &crate::tv::sources::Channel, String)> = Vec::new();
     for (index, channel) in app.tv_channels.iter().enumerate() {
-        let favorite = favorites.contains(channel.name.as_str());
-        if only_favorites && !favorite { continue; }
+        if only_favorites && !favorites.contains(channel.name.as_str()) { continue; }
         if !query.is_empty() && !channel.name.to_lowercase().contains(&query) && !channel.group.to_lowercase().contains(&query) { continue; }
+        if list.len() > 200 { break; }
+        list.push((index, channel, if channel.group.is_empty() { "Other".to_owned() } else { channel.group.clone() }));
+    }
+    if only_favorites {
+        let mut ranked: Vec<_> = list.into_iter().map(|(index, channel, _)| { let (rank, kind) = crate::tv::sources::section(channel); (rank, index, channel, kind) }).collect();
+        ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.3.cmp(&b.3)).then_with(|| crate::tv::sources::natural_order(&a.2.name, &b.2.name)));
+        list = ranked.into_iter().map(|(_, index, channel, kind)| (index, channel, kind)).collect();
+    }
+    let (mut shown, mut group) = (0, None::<String>);
+    for (index, channel, heading) in list {
+        let favorite = favorites.contains(channel.name.as_str());
         shown += 1;
         if shown > 200 { break; }
-        if !only_favorites && group != Some(channel.group.as_str()) {
-            group = Some(channel.group.as_str());
-            let label = if channel.group.is_empty() { "OTHER".to_owned() } else { channel.group.to_uppercase() };
-            channels = channels.push(container(text(label).size(11).font(t::bold()).color(t::EYEBROW).wrapping(text::Wrapping::None)).padding(Padding { top: if shown == 1 { 0.0 } else { 12.0 }, bottom: 4.0, left: 4.0, right: 0.0 }));
+        if group.as_ref() != Some(&heading) {
+            channels = channels.push(container(text(heading.to_uppercase()).size(11).font(t::bold()).color(t::EYEBROW).wrapping(text::Wrapping::None)).padding(Padding { top: if shown == 1 { 0.0 } else { 12.0 }, bottom: 4.0, left: 4.0, right: 0.0 }));
+            group = Some(heading);
         }
         let star = icon_btn(if favorite { Icon::StarFilled } else { Icon::Star }, 15.0, Some(Msg::TvFavorite(channel.name.clone())), favorite);
         channels = channels.push(container(row![
