@@ -1333,19 +1333,25 @@ fn tv_panel(app: &App) -> E<'_> {
     ].spacing(8).align_y(Vertical::Center);
 
     let query = app.tv_query.trim().to_lowercase();
+    let favorites: std::collections::HashSet<&str> = app.tv_source.as_ref().and_then(|id| app.tv_sources.iter().find(|s| &s.id == id)).map(|s| s.favorites.iter().map(String::as_str).collect()).unwrap_or_default();
+    // Searching always looks through every channel; otherwise favorites come first when there are any.
+    let only_favorites = app.tv_favorites_only && !favorites.is_empty() && query.is_empty();
     let mut channels = Column::new().spacing(3).padding(Padding { right: 14.0, ..Padding::ZERO });
     let (mut shown, mut group) = (0, None::<&str>);
     for (index, channel) in app.tv_channels.iter().enumerate() {
+        let favorite = favorites.contains(channel.name.as_str());
+        if only_favorites && !favorite { continue; }
         if !query.is_empty() && !channel.name.to_lowercase().contains(&query) && !channel.group.to_lowercase().contains(&query) { continue; }
         shown += 1;
         if shown > 200 { break; }
-        if group != Some(channel.group.as_str()) {
+        if !only_favorites && group != Some(channel.group.as_str()) {
             group = Some(channel.group.as_str());
             let label = if channel.group.is_empty() { "OTHER".to_owned() } else { channel.group.to_uppercase() };
             channels = channels.push(container(text(label).size(11).font(t::bold()).color(t::EYEBROW).wrapping(text::Wrapping::None)).padding(Padding { top: if shown == 1 { 0.0 } else { 12.0 }, bottom: 4.0, left: 4.0, right: 0.0 }));
         }
+        let star = icon_btn(if favorite { Icon::StarFilled } else { Icon::Star }, 15.0, Some(Msg::TvFavorite(channel.name.clone())), favorite);
         channels = channels.push(container(row![
-            t::icon(Icon::Tv, 15.0, rgb(0x6f7a84)),
+            tooltip(star, tip(if favorite { "Remove from favorites" } else { "Add to favorites" }), tooltip::Position::Left),
             text(channel.name.clone()).size(14).color(t::TEXT).wrapping(text::Wrapping::None).width(FILL),
             small("Watch", false, Some(Msg::TvPlay(index, false))),
             small("Share with call", true, Some(Msg::TvPlay(index, true))),
@@ -1356,11 +1362,20 @@ fn tv_panel(app: &App) -> E<'_> {
         else if app.tv_error.is_some() { space().height(0).into() }
         else if shown == 0 && app.tv_channels.is_empty() { body("This source has no live channels.", 14.0, muted, 1.6).into() }
         else if shown == 0 { body("No channels match your search.", 14.0, muted, 1.6).into() }
+        else if only_favorites { body("Your favorite channels. Use the star on any channel to add or remove it.", 12.0, rgb(0x7f8a94), 1.6).into() }
         else if shown > 200 { body("Showing the first 200 channels. Search to find the others.", 12.0, rgb(0x7f8a94), 1.6).into() }
         else { body(format!("{} channels", if query.is_empty() { app.tv_channels.len() } else { shown }), 12.0, rgb(0x7f8a94), 1.6).into() };
+    // "Favorites" and "All channels", once the source has a favorite.
+    let views: E = if favorites.is_empty() { space().height(0).into() } else {
+        let view = |label: String, on: bool, msg: Msg| -> E<'_> { button(text(label).size(13).font(t::semibold()).color(if on { rgb(0x1e2329) } else { rgb(0xd0d7dc) })).padding([6, 14]).style(if on { t::primary() } else { t::secondary() }).on_press(msg).into() };
+        row![
+            view(format!("Favorites ({})", favorites.len()), only_favorites, Msg::TvFavoritesOnly(true)),
+            view("All channels".into(), !only_favorites, Msg::TvFavoritesOnly(false)),
+        ].spacing(6).into()
+    };
     let content = column![
         header,
-        container(column![toolbar, error, status, scroll_area(channels).height(440)].spacing(10)).padding(Padding { top: 16.0, ..Padding::ZERO }),
+        container(column![toolbar, views, error, status, scroll_area(channels).height(440)].spacing(10)).padding(Padding { top: 16.0, ..Padding::ZERO }),
     ];
     modal(container(content).padding(30).into(), 860.0, Some(close))
 }

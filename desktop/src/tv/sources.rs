@@ -12,13 +12,20 @@ pub enum SourceKind {
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
-pub struct Source { pub id: String, pub name: String, pub kind: SourceKind }
+pub struct Source {
+    pub id: String,
+    pub name: String,
+    pub kind: SourceKind,
+    /// Names of the channels marked as favorites, shown first when the source opens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub favorites: Vec<String>,
+}
 
 // Addresses and logins are private: never print them.
 impl std::fmt::Debug for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match self.kind { SourceKind::M3u { .. } => "m3u", SourceKind::Xtream { .. } => "xtream" };
-        f.debug_struct("Source").field("id", &self.id).field("name", &self.name).field("kind", &kind).finish()
+        f.debug_struct("Source").field("id", &self.id).field("name", &self.name).field("kind", &kind).field("favorites", &self.favorites.len()).finish()
     }
 }
 
@@ -165,7 +172,7 @@ pub fn load() -> Vec<Source> {
 #[cfg(windows)]
 pub fn save(sources: &[Source]) -> Result<(), String> {
     let plain = Zeroizing::new(serde_json::to_vec(sources).map_err(|_| "Could not save your TV sources.")?);
-    if plain.len() > 4096 { return Err("Too many TV sources saved. Remove one first.".into()); }
+    if plain.len() > 256 * 1024 { return Err("Too many TV sources saved. Remove one first.".into()); }
     let sealed = crate::key_store::crypt(&plain, SCOPE, true).map_err(|_| "Could not protect your TV sources on this PC.")?;
     let _ = std::fs::create_dir_all(crate::store::root());
     std::fs::write(file(), sealed.as_slice()).map_err(|_| "Could not save your TV sources.".to_string())
@@ -194,10 +201,20 @@ mod tests {
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].url(), "http://tv.example:8080/live/ana/s3cret/101.ts");
         assert_eq!(channels[0].group, "Desporto");
-        let printed = format!("{:?} {:?}", channels[0], Source { id: "1".into(), name: "Mine".into(), kind: SourceKind::Xtream { server: "tv.example".into(), username: "ana".into(), password: "s3cret".into() } });
+        let printed = format!("{:?} {:?}", channels[0], Source { id: "1".into(), name: "Mine".into(), kind: SourceKind::Xtream { server: "tv.example".into(), username: "ana".into(), password: "s3cret".into() }, favorites: Vec::new() });
         assert!(!printed.contains("s3cret") && !printed.contains("ana") && !printed.contains("tv.example"), "{printed}");
         assert_eq!(xtream_api("https://tv.example", "ana", "p&w", "get_live_streams").unwrap().as_str(), "https://tv.example/player_api.php?username=ana&password=p%26w&action=get_live_streams");
         assert!(xtream_api("tv.example", "an/a", "x", "a").is_err());
         assert!(xtream_base("ftp://tv.example").is_err());
+    }
+    #[test]
+    fn sources_saved_before_favorites_still_load() {
+        let old: Source = serde_json::from_str(r#"{"id":"1","name":"Mine","kind":{"kind":"m3u","url":"http://tv.example/list.m3u"}}"#).unwrap();
+        assert!(old.favorites.is_empty());
+        let mut source = old.clone();
+        source.favorites.push("Sport 1".into());
+        let again: Source = serde_json::from_slice(&serde_json::to_vec(&source).unwrap()).unwrap();
+        assert_eq!(again.favorites, ["Sport 1"]);
+        assert!(!serde_json::to_string(&old).unwrap().contains("favorites"));
     }
 }
