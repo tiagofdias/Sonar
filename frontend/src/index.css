@@ -3150,3 +3150,12 @@ p {
 .settings-inline-form input { flex: 1; min-width: 0; padding: 10px 12px; font-size: 14px; color: #edeeef; background: #171b20; border: 1px solid #37414c; border-radius: 7px; }
 .settings-inline-form input:focus { outline: none; border-color: #d0d7dc; }
 .settings-content .security-card > .settings-caption { margin: 0; }
+
+/* Listen together: what someone plays for the call, under the call banner (same as the desktop app). */
+.music-bars { display: flex; flex-direction: column; gap: 6px; margin: 8px 33px 0; }
+.music-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: #1a2329; border: 1px solid #2a3a45; border-radius: 9px; }
+.music-icon { flex-shrink: 0; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; background: #14303f; color: #70eeff; }
+.music-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.music-text small { font-size: 12px; color: #8f989f; }
+.music-text strong { font-size: 14px; font-weight: 600; color: #e6e9eb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-bar audio { display: none; }

@@ -6,6 +6,8 @@ export function validScreenSignal(signal) {
   // TV shares name the channel; desktop viewers say so in their answer. Nothing else is allowed through.
   if (signal.label !== undefined && (typeof signal.label !== "string" || signal.label.length > 80 || /[\u0000-\u001f<>]/.test(signal.label))) return false;
   if (signal.tv !== undefined && typeof signal.tv !== "boolean") return false;
+  // Listen together: music from the sharer's PC, named by what is playing.
+  if (signal.music !== undefined && typeof signal.music !== "boolean") return false;
   if (signal.client !== undefined && signal.client !== "desktop") return false;
   if (signal.type === "screen-stop") return true;
   // A viewer stops watching a TV share (the sharer offers it again so they can rejoin).

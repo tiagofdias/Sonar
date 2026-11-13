@@ -55,7 +55,11 @@ fn open(sound: Sound) -> Result<IAudioClient, String> {
 }
 
 /// Delivers mono 48 kHz frames until `stop` is set.
-pub fn run(sound: Sound, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) -> Result<(), String> {
+pub fn run(sound: Sound, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) -> Result<(), String> { capture(sound, false, stop, on_frame) }
+/// Delivers interleaved stereo 48 kHz frames (20 ms each) until `stop` is set, for music.
+pub fn run_stereo(sound: Sound, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) -> Result<(), String> { capture(sound, true, stop, on_frame) }
+
+fn capture(sound: Sound, stereo: bool, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let client = open(sound)?;
@@ -65,7 +69,8 @@ pub fn run(sound: Sound, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) ->
         client.SetEventHandle(event).map_err(|e| format!("Sound capture: {e}"))?;
         let capture: IAudioCaptureClient = client.GetService().map_err(|e| format!("Sound capture: {e}"))?;
         client.Start().map_err(|e| format!("Sound capture: {e}"))?;
-        let mut frame = Vec::with_capacity(FRAME);
+        let size = if stereo { FRAME * 2 } else { FRAME };
+        let mut frame = Vec::with_capacity(size);
         while !stop.load(Ordering::Acquire) {
             if WaitForSingleObject(event, 100) != WAIT_OBJECT_0 { continue; }
             loop {
@@ -74,8 +79,9 @@ pub fn run(sound: Sound, stop: &AtomicBool, on_frame: &mut dyn FnMut(&[f32])) ->
                 let silent = flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0;
                 let samples = std::slice::from_raw_parts(data as *const i16, count as usize * 2);
                 for pair in samples.chunks_exact(2) {
-                    frame.push(if silent { 0.0 } else { (pair[0] as f32 + pair[1] as f32) / 65536.0 });
-                    if frame.len() == FRAME { on_frame(&frame); frame.clear(); }
+                    if stereo { frame.extend(if silent { [0.0, 0.0] } else { [pair[0] as f32 / 32768.0, pair[1] as f32 / 32768.0] }); }
+                    else { frame.push(if silent { 0.0 } else { (pair[0] as f32 + pair[1] as f32) / 65536.0 }); }
+                    if frame.len() == size { on_frame(&frame); frame.clear(); }
                 }
                 let _ = capture.ReleaseBuffer(count);
             }

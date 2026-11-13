@@ -146,7 +146,7 @@ pub enum UnlockReason { Recovery, Password, Missing }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode { Direct, Community }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Panel { People, Privacy, Search, Group, Tv }
+pub enum Panel { People, Privacy, Search, Group, Tv, Music }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab { Profile, Security, Privacy, Voice, Alerts }
 /// Moving (or resizing) the floating player: where it started, and where the cursor was first seen.
@@ -327,6 +327,10 @@ pub struct App {
     pub pip: Option<(String, iced::Size)>,
     /// TV shares waiting for us to join: sharer -> channel.
     pub tv_available: HashMap<String, String>,
+    /// Music others play for the call: sharer -> what is playing now.
+    pub music_now: HashMap<String, String>,
+    /// Apps on this PC that can play music for the call (Listen together).
+    pub music_apps: Option<Vec<screen::Shareable>>,
     /// Our TV is shared with the call (not only watched here).
     pub tv_shared: bool,
     pub screen_controls: Option<screen::Controls>,
@@ -550,6 +554,9 @@ pub enum Msg {
     /// The next (1) or previous (-1) channel, on the same share.
     TvStep(i64),
     TvJoin(String),
+    OpenMusic,
+    MusicApps(Vec<screen::Shareable>),
+    MusicStart(usize),
     TvLeave(String),
     WatchOpened(Result<(), String>),
     ScreenSources(Vec<screen::Shareable>, bool),
@@ -649,7 +656,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), window_size: start_size(), player_drag: None, pip: None, tv_available: HashMap::new(), tv_shared: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), window_size: start_size(), player_drag: None, pip: None, tv_available: HashMap::new(), music_now: HashMap::new(), music_apps: None, tv_shared: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -766,7 +773,7 @@ impl App {
 
     fn sync_screen(&mut self) {
         if self.screen_spec().is_none() {
-            self.tv_available.clear(); self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_allocations.clear(); self.screen_ended.extend(self.screen_uploading.drain().map(|(id, _)| id)); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
+            self.tv_available.clear(); self.music_now.clear(); self.screen_controls = None; self.screen_sharing = None; self.screen_views.clear(); self.screen_allocations.clear(); self.screen_ended.extend(self.screen_uploading.drain().map(|(id, _)| id)); self.screen_expanded = None; self.screen_picker = None; self.screen_targets.clear();
             return;
         }
         let Some(controls) = self.screen_controls.clone() else { return };
@@ -2089,6 +2096,12 @@ impl App {
                         if info.is_none() { let me = self.me().to_owned(); self.forget_screen(&me); self.screen_labels.remove(&me); if self.screen_expanded.as_ref() == Some(&me) { self.screen_expanded = None; } }
                         self.screen_sharing = info;
                     }
+                    screen::Update::Music(id, title) => {
+                        if self.music_now.insert(id.clone(), title.clone()).is_none() {
+                            let name = self.screen_name(&id);
+                            self.toast(ToastKind::Plain, format!("{name} is playing music for everyone: {title}"));
+                        }
+                    }
                     screen::Update::TvAvailable(id, label) => match label {
                         Some(label) => {
                             if self.tv_available.insert(id.clone(), label.clone()).is_none() {
@@ -2101,7 +2114,7 @@ impl App {
                     screen::Update::Label(id, label) => match label { Some(label) => { self.screen_labels.insert(id, label); } None => { self.screen_labels.remove(&id); } },
                     screen::Update::Notice(text) => self.toast(ToastKind::Plain, text),
                     screen::Update::SoundFailed => self.toast(ToastKind::Plain, "Sharing without sound: Windows could not capture that app's audio."),
-                    screen::Update::ViewerGone(id) => { if self.pip.as_ref().is_some_and(|(pip, _)| *pip == id) { self.forget_screen(&id); self.screen_labels.remove(&id); return self.leave_pip(); } self.forget_screen(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
+                    screen::Update::ViewerGone(id) => { self.music_now.remove(&id); if self.pip.as_ref().is_some_and(|(pip, _)| *pip == id) { self.forget_screen(&id); self.screen_labels.remove(&id); return self.leave_pip(); } self.forget_screen(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
                     screen::Update::Pictures => if let Some(controls) = &self.screen_controls {
                         // Upload each new frame first and show it only once it is on the GPU; until then the last frame stays.
                         // A frame still uploading holds back newer ones for that person (they stay in the mailbox, newest wins).
@@ -2249,6 +2262,21 @@ impl App {
                 } else if empty { self.tv_favorites_only = false; }
             }
             Msg::TvFavoritesOnly(on) => { self.tv_favorites_only = on; if on { self.tv_query.clear(); } }
+            Msg::OpenMusic => {
+                self.apps_open = false;
+                self.panel = Some(Panel::Music);
+                self.music_apps = None;
+                return Task::perform(async { tokio::task::spawn_blocking(screen::list_shareable).await.unwrap_or_default() }, Msg::MusicApps);
+            }
+            // Apps only (not whole screens): their sound alone is sent, never the call's own.
+            Msg::MusicApps(list) => self.music_apps = Some(list.into_iter().filter(|s| !s.monitor).collect()),
+            Msg::MusicStart(index) => {
+                let Some(chosen) = self.music_apps.as_ref().and_then(|list| list.get(index)).cloned() else { return Task::none() };
+                let Some(controls) = &self.screen_controls else { self.toast(ToastKind::Plain, "Join a call or voice room to play music for it."); return Task::none(); };
+                let screen_media::Source::Window(window) = chosen.source else { return Task::none() };
+                controls.send(screen::Command::StartMusic(screen::MusicChoice { sound: chosen.sound, window, app: chosen.label.clone() }));
+                self.panel = None;
+            }
             Msg::TvJoin(id) => {
                 self.tv_available.remove(&id);
                 if let Some(controls) = &self.screen_controls { controls.send(screen::Command::JoinTv(id)); }
@@ -2760,6 +2788,8 @@ impl App {
                 } else { None }
             }
             "pip" => Some(Msg::Pip(if value == "off" { None } else { self.screen_views.keys().next().cloned() })),
+            "musicapp" => self.music_apps.as_ref().and_then(|apps| apps.iter().position(|a| a.label.contains(value.as_str()))).map(Msg::MusicStart),
+            "music" => Some(if value.is_empty() { Msg::OpenMusic } else { Msg::MusicStart(value.parse().unwrap_or(0)) }),
             "tvnext" => Some(Msg::TvStep(value.parse().unwrap_or(1))),
             "tvjoin" => self.tv_available.keys().next().cloned().map(Msg::TvJoin),
             "tvleave" => self.screen_labels.keys().find(|id| id.as_str() != self.me()).cloned().map(Msg::TvLeave),

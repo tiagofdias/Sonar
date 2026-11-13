@@ -172,11 +172,12 @@ fn watch_button<'a>(app: &'a App) -> E<'a> {
 }
 
 fn tv_playing(app: &App) -> bool { app.screen_sharing.as_deref().is_some_and(|s| s.starts_with("TV")) }
+fn music_playing(app: &App) -> bool { app.screen_sharing.as_deref().is_some_and(|s| s.starts_with("Music")) }
 /// One "Apps" button for everything that runs inside a call or room (Watch together, TV), like the web app.
 /// When friends are already watching together, a join shortcut sits beside it.
 fn apps_button<'a>(app: &'a App) -> E<'a> {
     let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
-    let grid = tooltip(call_btn(Icon::LayoutGrid, 18.0, Some(Msg::ToggleApps), app.apps_open || tv_playing(app)), tip("Apps"), tooltip::Position::Bottom);
+    let grid = tooltip(call_btn(Icon::LayoutGrid, 18.0, Some(Msg::ToggleApps), app.apps_open || tv_playing(app) || music_playing(app)), tip("Apps"), tooltip::Position::Bottom);
     let mut bar = Row::new().spacing(14).align_y(Vertical::Center);
     // TV someone shares waits here until you choose to watch.
     for (id, label) in &app.tv_available {
@@ -199,6 +200,12 @@ fn apps_menu(app: &App) -> E<'_> {
         container(t::eyebrow("APPS", 10.0, t::EYEBROW)).padding(Padding { top: 4.0, bottom: 6.0, left: 10.0, right: 10.0 }),
         item(Icon::MonitorPlay, "Watch together", "YouTube in sync, opens in your browser", Some(Msg::OpenWatch)),
     ].spacing(2);
+    if music_playing(app) {
+        list = list.push(item(Icon::Music, "Change the music app", "Play from another app on your PC", Some(Msg::OpenMusic)));
+        list = list.push(item(Icon::Square, "Stop music", "Everyone stops hearing it", Some(Msg::ScreenStop)));
+    } else {
+        list = list.push(item(Icon::Music, "Listen together", "Play music from your PC for everyone, in high quality", app.screen_controls.is_some().then_some(Msg::OpenMusic)));
+    }
     if tv_playing(app) {
         list = list.push(item(Icon::Tv, "Change channel", "Pick another one; people watching stay connected", Some(Msg::OpenTv)));
         list = list.push(item(Icon::Square, "Stop TV", "End the channel that's playing", Some(Msg::ScreenStop)));
@@ -212,14 +219,59 @@ fn apps_menu(app: &App) -> E<'_> {
     let away = mouse_area(container(space()).width(FILL).height(FILL)).on_press(Msg::ToggleApps);
     stack![away, container(opaque(card)).width(FILL).align_x(Horizontal::Right).padding(Padding { top: 6.0, right: 33.0, ..Padding::ZERO })].width(FILL).height(FILL).into()
 }
-/// "Sport TV 1 · 1080p50 · H.264" while TV plays, for the call bar.
+/// "Sport TV 1 · 1080p50 · H.264" while TV plays, or what plays for Listen together, for the call bar.
 fn tv_status(app: &App) -> String {
+    if let Some(song) = app.screen_sharing.as_deref().and_then(|s| s.strip_prefix("Music · ")) { return format!(" · 🎵 {song}"); }
     app.screen_sharing.as_deref().filter(|s| s.starts_with("TV")).map_or_else(String::new, |s| format!(" · 📺 {}", s.trim_start_matches("TV · ")))
+}
+/// Music someone plays for the call: what is playing, and a volume of your own. Under the call bar.
+fn music_bar(app: &App) -> Option<E<'_>> {
+    if app.music_now.is_empty() { return None; }
+    let mut rows = Column::new().spacing(6);
+    for (id, title) in &app.music_now {
+        rows = rows.push(container(row![
+            container(t::icon(Icon::Music, 16.0, rgb(0x70eeff))).center_x(30).center_y(30).style(t::panel(rgb(0x14303f), rgb(0x14303f), 7.0)),
+            column![
+                text(format!("{} is playing", app.screen_name(id))).size(12).color(rgb(0x8f989f)),
+                text(title.clone()).size(14).font(t::semibold()).color(t::TEXT).wrapping(text::Wrapping::None),
+            ].spacing(2).width(FILL).clip(true),
+            screen_volume(app, id),
+        ].spacing(12).align_y(Vertical::Center)).padding([8, 12]).width(FILL).style(t::panel(rgb(0x1a2329), rgb(0x2a3a45), 9.0)));
+    }
+    Some(container(rows).padding(Padding { top: 8.0, left: 33.0, right: 33.0, bottom: 0.0 }).into())
+}
+
+/// Listen together: choose the app that plays the music.
+fn music_panel(app: &App) -> E<'_> {
+    let close = Msg::OpenPanel(None);
+    let mut list = Column::new().spacing(6);
+    match &app.music_apps {
+        None => list = list.push(body("Looking for apps…", 14.0, rgb(0x8f989f), 1.6)),
+        Some(apps) if apps.is_empty() => list = list.push(body("No open apps were found. Open your music app first.", 14.0, rgb(0x8f989f), 1.6)),
+        Some(apps) => for (index, chosen) in apps.iter().enumerate() {
+            list = list.push(container(row![
+                t::icon(Icon::AudioLines, 15.0, rgb(0x6f7a84)),
+                text(chosen.label.clone()).size(14).color(t::TEXT).wrapping(text::Wrapping::None).width(FILL),
+                button(text("Play for everyone").size(13).font(t::semibold()).color(rgb(0x1e2329))).padding([6, 12]).style(t::primary()).on_press(Msg::MusicStart(index)),
+            ].spacing(10).align_y(Vertical::Center)).padding([7, 10]).clip(true).style(t::panel(rgb(0x1f252b), rgb(0x1f252b), 8.0)));
+        },
+    }
+    let replaces: E = if tv_playing(app) || (app.screen_sharing.is_some() && !music_playing(app)) {
+        container(body("Playing music replaces what you are sharing now (TV or screen): one share at a time.", 13.0, rgb(0xe3c08a), 1.6)).padding([8, 12]).width(FILL).style(t::panel(rgb(0x2a261c), rgb(0x4a4130), 8.0)).into()
+    } else { space().height(0).into() };
+    let content = column![
+        modal_header(Icon::Music, 26.0, close.clone()),
+        modal_title("Listen together"),
+        body("Play music in any app on your PC (Spotify, YouTube Music, a music player…) and everyone in the call hears it, in stereo and high quality, right away. Search, queue and skip in that app; only its sound is sent, never the call.", 14.0, rgb(0x9099a0), 1.7),
+        replaces,
+        container(scroll_area(list).height(360)).padding(Padding { top: 8.0, ..Padding::ZERO }),
+    ].spacing(10);
+    modal(container(content).padding(30).into(), 640.0, Some(close))
 }
 
 fn screen_button<'a>(app: &'a App) -> E<'a> {
     // Only a screen share lights this up; TV has its own place in the Apps menu.
-    let sharing = app.screen_sharing.is_some() && !tv_playing(app);
+    let sharing = app.screen_sharing.is_some() && !tv_playing(app) && !music_playing(app);
     call_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
 }
 
@@ -858,6 +910,7 @@ fn conversation(app: &App) -> E<'_> {
     let banner = call_banner(app);
     let apps = app.apps_open && banner.is_some();
     if let Some(banner) = banner { main = main.push(banner); }
+    if let Some(bar) = music_bar(app) { main = main.push(bar); }
     let thread: E = match app.mode {
         Mode::Direct => direct_thread(app, me),
         Mode::Community => community_thread(app, me),
@@ -1447,9 +1500,10 @@ fn tv_panel(app: &App) -> E<'_> {
 
 fn panel_view(app: &App, panel: Panel) -> E<'_> {
     if panel == Panel::Tv { return tv_panel(app); }
+    if panel == Panel::Music { return music_panel(app); }
     let close = Msg::OpenPanel(None);
     let content: E = match panel {
-        Panel::Tv => space().into(),
+        Panel::Tv | Panel::Music => space().into(),
         Panel::Search => {
             let mut list = Column::new().spacing(6).padding(Padding { top: 16.0, ..Padding::ZERO });
             if let Some(results) = &app.search_results {

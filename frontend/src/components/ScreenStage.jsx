@@ -100,7 +100,8 @@ export default function ScreenStage({ screen, nameOf, deafened }) {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
-  const entries = Object.entries(screen?.remotes || {});
+  // Music has no picture: it plays in the "now playing" bar instead (MusicBar).
+  const entries = Object.entries(screen?.remotes || {}).filter(([id]) => !screen?.music?.[id]);
   const labels = screen?.labels || {};
   const heightFor = (width) => entries.reduce((sum, [id]) => sum + width * (ratios[id] || 9 / 16) + CAPTION, 0) + 10 * Math.max(0, entries.length - 1);
   // The same rules as the desktop app: at least 320 px wide, always inside the window.

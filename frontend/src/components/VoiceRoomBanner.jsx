@@ -2,6 +2,7 @@ import { useMicActivity } from "../lib/useMicActivity";
 import { roomStatus } from "../lib/roomStatus";
 import ScreenStage, { ScreenShareButton } from "./ScreenStage";
 import AppsMenu from "./AppsMenu";
+import MusicBar from "./MusicBar";
 import WatchStage from "./WatchStage";
 import { useAuthStore } from "../store/useAuthStore";
 import {
@@ -86,6 +87,7 @@ export default function VoiceRoomBanner({ voiceRoom, watch }) {
         <LogOut size={18} />
       </button>
     </section>
+    <MusicBar screen={voiceRoom.screen} nameOf={nameOf} deafened={voiceRoom.deafened} />
     </>
   );
 }

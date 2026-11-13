@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { axiosInstance as api } from "./axios";
 import { applyAudioOutput } from "./audioOutput";
+import { preferStereo } from "./sdpStereo";
 import { useVoiceSettingsStore } from "../store/useVoiceSettingsStore";
 
 // AV1 first; other codecs stay as a fallback for browsers that cannot do AV1.
@@ -38,6 +39,8 @@ export function useScreenShare({ send, targets }) {
   const [labels, setLabels] = useState({});
   // TV shares wait here until we choose to join: sharer id -> channel name.
   const [available, setAvailable] = useState({});
+  // Listen together: sharer id -> what is playing (music, heard straight away, no picture).
+  const [music, setMusic] = useState({});
   const offers = useRef(new Map());
   const media = useRef(null);
   const bitrate = useRef(SCREEN_QUALITIES[1080].bitrate);
@@ -72,6 +75,12 @@ export function useScreenShare({ send, targets }) {
       return rest;
     });
     setLabels((all) => {
+      if (!(id in all)) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+    setMusic((all) => {
       if (!(id in all)) return all;
       const rest = { ...all };
       delete rest[id];
@@ -161,7 +170,9 @@ export function useScreenShare({ send, targets }) {
     closeIncoming(from);
     const entry = { pc: null, pending: [] };
     incoming.current.set(from, entry);
-    if (signal.tv) setLabels((all) => ({ ...all, [from]: typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "TV" }));
+    const name = typeof signal.label === "string" && signal.label ? signal.label.slice(0, 80) : "";
+    if (signal.music) setMusic((all) => ({ ...all, [from]: name || "Music" }));
+    else if (signal.tv) setLabels((all) => ({ ...all, [from]: name || "TV" }));
     try {
       entry.pc = await newConnection();
       if (incoming.current.get(from) !== entry) return entry.pc.close();
@@ -176,7 +187,9 @@ export function useScreenShare({ send, targets }) {
       };
       await entry.pc.setRemoteDescription(signal.sdp);
       await applyPending(entry);
-      await entry.pc.setLocalDescription(await entry.pc.createAnswer());
+      // TV and music are sent in stereo; browsers only keep both channels when the answer asks for it.
+      const made = await entry.pc.createAnswer();
+      await entry.pc.setLocalDescription(signal.music || signal.tv ? { type: made.type, sdp: preferStereo(made.sdp) } : made);
       await sendRef.current(from, { type: "screen-answer", sdp: entry.pc.localDescription.toJSON() });
     } catch {
       closeIncoming(from);
@@ -219,7 +232,10 @@ export function useScreenShare({ send, targets }) {
       }
       if (signal.type === "screen-label") {
         const label = signal.label.slice(0, 80);
-        if (incoming.current.has(from)) setLabels((all) => ({ ...all, [from]: label }));
+        if (incoming.current.has(from)) {
+          setMusic((all) => (from in all ? { ...all, [from]: label } : all));
+          setLabels((all) => (from in all ? { ...all, [from]: label } : all));
+        }
         if (offers.current.has(from)) setAvailable((all) => ({ ...all, [from]: label }));
         return;
       }
@@ -237,7 +253,7 @@ export function useScreenShare({ send, targets }) {
     }
   }, [closeIncoming, closeOutgoing, offerTo, forgetOffer, answer]);
 
-  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, labels, available, join, leave, handle };
+  return { supported: Boolean(navigator.mediaDevices?.getDisplayMedia), sharing, start, stop, remotes, labels, music, available, join, leave, handle };
 }
 
 export const applyScreenOutput = (player) =>

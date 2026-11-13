@@ -1,6 +1,7 @@
 import { useMicActivity } from "../lib/useMicActivity";
 import ScreenStage, { ScreenShareButton } from "./ScreenStage";
 import AppsMenu from "./AppsMenu";
+import MusicBar from "./MusicBar";
 import WatchStage from "./WatchStage";
 import { useAuthStore } from "../store/useAuthStore";
 import { useEffect, useState } from "react";
@@ -120,6 +121,7 @@ export default function VoiceCallBanner({ voice, users = [], voiceRoom, watch })
         <PhoneOff size={18} />
       </button>
     </section>
+    <MusicBar screen={voice.screen} nameOf={() => peerName} deafened={voice.deafened} />
     </>
   );
 }

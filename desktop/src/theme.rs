@@ -255,7 +255,7 @@ icons! {
     ArrowLeft => "arrow-left", AudioLines => "audio-lines", RotateCcw => "rotate-ccw", CircleCheck => "circle-check",
     CircleX => "circle-x", Server => "server", Refresh => "refresh-cw", UserMinus => "user-minus", Ban => "ban",
     Crown => "crown", Shield => "shield", Pencil => "pencil", Speaker => "speaker", Play => "play", Square => "square",
-    Eye => "eye", EyeOff => "eye-off", UserPlus => "user-plus", MonitorPlay => "monitor-play", Tv => "tv", LayoutGrid => "layout-grid", Pip => "picture-in-picture-2", Grip => "grip-horizontal", ResizeCorner => "move-diagonal-2", Star => "star", StarFilled => "star-filled", Info => "info", Bell => "bell", BellOff => "bell-off",
+    Eye => "eye", EyeOff => "eye-off", UserPlus => "user-plus", MonitorPlay => "monitor-play", Tv => "tv", LayoutGrid => "layout-grid", Music => "music", Pip => "picture-in-picture-2", Grip => "grip-horizontal", ResizeCorner => "move-diagonal-2", Star => "star", StarFilled => "star-filled", Info => "info", Bell => "bell", BellOff => "bell-off",
     Whale => "../../../frontend/public/animals/whale", Shark => "../../../frontend/public/animals/shark", Turtle => "../../../frontend/public/animals/turtle", Dolphin => "../../../frontend/public/animals/dolphin",
     Anglerfish => "../../../frontend/public/animals/anglerfish", Jellyfish => "../../../frontend/public/animals/jellyfish", Seahorse => "../../../frontend/public/animals/seahorse", Crab => "../../../frontend/public/animals/crab",
     Pufferfish => "../../../frontend/public/animals/pufferfish", Manta => "../../../frontend/public/animals/manta", Orca => "../../../frontend/public/animals/orca", Seal => "../../../frontend/public/animals/seal",

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { LayoutGrid, MonitorPlay, Tv } from "lucide-react";
+import { LayoutGrid, MonitorPlay, Music, Tv } from "lucide-react";
 
 // Apps that run inside a call or voice room. Same list and look as the desktop app.
 const APPS = [
   { id: "watch", name: "Watch together", note: "YouTube in sync, with sponsor segments skipped", icon: MonitorPlay },
   // Sharing a TV channel starts from the desktop app (browsers can't open IPTV streams); web members watch it here.
+  { id: "music", name: "Listen together", note: "Music from someone's PC, heard by everyone in high quality. Playing it starts in the desktop app (listening works here). Click to get it.", icon: Music },
   { id: "tv", name: "Sonar TV", note: "Browsers can't open IPTV streams, so sharing starts in the desktop app (watching works here). Click to get it.", icon: Tv },
 ];
 
@@ -47,7 +48,7 @@ export default function AppsMenu({ watch, screen, nameOf = () => "Someone" }) {
   const start = (id) => {
     setOpen(false);
     if (id === "watch" && !watch.joined) watch.join();
-    if (id === "tv") window.open("/downloads/Sonar-Desktop-windows-x64.zip", "_blank", "noopener");
+    if (id === "tv" || id === "music") window.open("/downloads/Sonar-Desktop-windows-x64.zip", "_blank", "noopener");
   };
   const tvShares = Object.entries(screen?.available || {});
   return (

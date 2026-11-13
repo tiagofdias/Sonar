@@ -53,13 +53,19 @@ pub struct Choice { pub source: Source, pub sound: Sound, pub height: u32 }
 pub struct TvChoice { pub address: zeroize::Zeroizing<String>, pub label: String, pub share: bool }
 impl std::fmt::Debug for TvChoice { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.debug_struct("TvChoice").field("label", &self.label).field("share", &self.share).finish_non_exhaustive() } }
 
+/// Music for the call: one app's sound, in stereo. `window` is that app's window, whose
+/// title ("Artist - Song" in most players) tells listeners what is playing.
+#[derive(Clone, Debug)]
+pub struct MusicChoice { pub sound: Sound, pub window: isize, pub app: String }
+
 #[derive(Debug)]
 /// `JoinTv` / `LeaveTv`: start or stop watching someone's TV share (it waits until you join).
-pub enum Command { Start(Choice), StartTv(TvChoice), Stop, Signal { from: String, signal: Value }, Targets(Vec<Target>), Deafen(bool), Volume { from: String, volume: f32 }, JoinTv(String), LeaveTv(String) }
+pub enum Command { StartMusic(MusicChoice), Start(Choice), StartTv(TvChoice), Stop, Signal { from: String, signal: Value }, Targets(Vec<Target>), Deafen(bool), Volume { from: String, volume: f32 }, JoinTv(String), LeaveTv(String) }
 
 #[derive(Clone, Debug)]
 /// `TvAvailable`: someone shares TV and it is waiting for us to join (None: no longer).
-pub enum Update { Ready(Controls), Sharing(Option<String>), Notice(String), Pictures, ViewerGone(String), SoundFailed, Label(String, Option<String>), TvAvailable(String, Option<String>) }
+/// `Music`: someone plays music for the call, and what is playing now.
+pub enum Update { Ready(Controls), Sharing(Option<String>), Notice(String), Pictures, ViewerGone(String), SoundFailed, Label(String, Option<String>), TvAvailable(String, Option<String>), Music(String, String) }
 
 pub struct Picture { pub width: u32, pub height: u32, pub rgba: Vec<u8> }
 /// Only the newest picture per sharer is kept, so a slow screen never grows memory.
@@ -105,7 +111,7 @@ fn engine(tv: bool) -> Result<MediaEngine, String> {
     for (index, fmtp) in H264_FMTP.iter().enumerate() {
         media.register_codec(RTCRtpCodecParameters { rtp_codec: RTCRtpCodec { mime_type: MIME_TYPE_H264.into(), clock_rate: 90000, channels: 0, sdp_fmtp_line: (*fmtp).into(), rtcp_feedback: feedback() }, payload_type: 102 + index as u8 * 2 }, RtpCodecKind::Video).map_err(|_| "Video codec unavailable")?;
     }
-    media.register_codec(RTCRtpCodecParameters { rtp_codec: RTCRtpCodec { mime_type: MIME_TYPE_OPUS.into(), clock_rate: 48000, channels: 2, sdp_fmtp_line: "minptime=10;useinbandfec=1".into(), rtcp_feedback: vec![] }, payload_type: 111 }, RtpCodecKind::Audio).map_err(|_| "Audio codec unavailable")?;
+    media.register_codec(RTCRtpCodecParameters { rtp_codec: RTCRtpCodec { mime_type: MIME_TYPE_OPUS.into(), clock_rate: 48000, channels: 2, sdp_fmtp_line: "minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1".into(), rtcp_feedback: vec![] }, payload_type: 111 }, RtpCodecKind::Audio).map_err(|_| "Audio codec unavailable")?;
     Ok(media)
 }
 
@@ -273,7 +279,44 @@ async fn send(spec: &Spec, target: &Target, mut signal: Value) -> Result<(), Str
 }
 
 /// `tv`: the channel's name, for a TV share (High-profile video, labelled for viewers).
-async fn offer(spec: &Spec, target: &Target, tv: Option<&str>) -> Result<Outgoing, String> {
+/// What is shared, as the offer tells the viewer: a screen, a TV channel (its name), or music (what is playing).
+#[derive(Clone, Debug)]
+enum Kind { Screen, Tv(String), Music(String) }
+struct Music { window: isize, title: String, checked: Instant }
+fn share_kind(music: &Option<Music>, tv: &Option<(Arc<crate::tv::player::Shared>, String, bool)>, screen: bool) -> Option<Kind> {
+    if let Some(music) = music { return Some(Kind::Music(music.title.clone())); }
+    if let Some((_, label, true)) = tv { return Some(Kind::Tv(label.clone())); }
+    screen.then_some(Kind::Screen)
+}
+/// The title of the music app's window, without its control characters.
+fn window_title(window: isize) -> Option<String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+    let mut buffer = [0u16; 256];
+    let length = unsafe { GetWindowTextW(window as _, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if length <= 0 { return None; }
+    let title: String = String::from_utf16_lossy(&buffer[..length as usize]).chars().filter(|c| !c.is_control()).take(80).collect();
+    (!title.trim().is_empty()).then(|| title.trim().to_owned())
+}
+/// Captures one app's sound in stereo and encodes it as music-quality Opus for the call.
+fn start_music(sound: Sound, media: mpsc::Sender<Media>, updates: mpsc::UnboundedSender<Update>) -> Sharing {
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop.clone();
+    std::thread::spawn(move || {
+        let Ok(mut opus) = crate::tv::audio::OpusMusic::new() else { return };
+        let closed = thread_stop.clone();
+        let mut frame = |samples: &[f32]| opus.push(samples, &mut |packet| {
+            if let Err(mpsc::error::TrySendError::Closed(_)) = media.try_send(Media::Audio(packet)) { closed.store(true, Ordering::Release); }
+        });
+        if let Err(error) = screen_audio::run_stereo(sound, &thread_stop, &mut frame) {
+            let _ = updates.send(Update::Notice(format!("Listen together stopped: {error}")));
+            let _ = updates.send(Update::Sharing(None));
+        }
+    });
+    Sharing { stop, force_key: Arc::new(AtomicBool::new(false)) }
+}
+
+async fn offer(spec: &Spec, target: &Target, kind: &Kind) -> Result<Outgoing, String> {
+    let tv = match kind { Kind::Tv(label) => Some(label.as_str()), _ => None };
     let (servers, relay) = spec.session.voice_configuration().await?.into_servers(spec.relay_only)?;
     let mut link = link(servers, relay, None, tv.is_some()).await?;
     let fmtp = if tv.is_some() { H264_HIGH } else { H264_FMTP[0] };
@@ -285,6 +328,7 @@ async fn offer(spec: &Spec, target: &Target, tv: Option<&str>) -> Result<Outgoin
     if sdp.len() > 30000 { return Err("Screen description too large".into()); }
     let mut signal = json!({ "type": "screen-offer", "sdp": { "type": "offer", "sdp": sdp } });
     if let Some(label) = tv { signal["tv"] = json!(true); signal["label"] = json!(label.chars().take(80).collect::<String>()); }
+    if let Kind::Music(title) = kind { signal["music"] = json!(true); signal["label"] = json!(title.chars().take(80).collect::<String>()); }
     send(spec, target, signal).await?;
     Ok(Outgoing { link, media: spawn_writer(video, audio), joined: false, offered_to: target.clone(), desktop: false, tv: tv.is_some() })
 }
@@ -310,10 +354,13 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
         let (offer_tx, mut offers_ready) = mpsc::unbounded_channel::<(u64, Target, Result<Outgoing, String>)>();
         let mut epoch: u64 = 0;
         let mut preparing: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let prepare = |epoch: u64, target: Target, label: Option<String>, preparing: &mut std::collections::HashSet<String>| {
+        let mut music: Option<Music> = None;
+        // Sharers whose stream to us is music (shown as "now playing", not as a picture).
+        let mut music_from: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let prepare = |epoch: u64, target: Target, kind: Kind, preparing: &mut std::collections::HashSet<String>| {
             if !preparing.insert(target.user.clone()) { return; }
             let (spec, done) = (spec.clone(), offer_tx.clone());
-            tokio::spawn(async move { let result = offer(&spec, &target, label.as_deref()).await; let _ = done.send((epoch, target, result)); });
+            tokio::spawn(async move { let result = offer(&spec, &target, &kind).await; let _ = done.send((epoch, target, result)); });
         };
         let mut playback: Option<Arc<ScreenPlayback>> = None;
         let mut deafened = false;
@@ -329,7 +376,22 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                 command = commands.recv() => {
                     let Some(command) = command else { break };
                     match command {
+                        Command::StartMusic(chosen) => {
+                            stop_tv(&mut tv); tv_out = None;
+                            if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
+                            choice = None;
+                            sharing = Some(start_music(chosen.sound, media_tx.clone(), update_tx.clone()));
+                            if let Some(active) = &sharing { links.stops.retain(|stop| !stop.load(Ordering::Acquire)); links.stops.push(active.stop.clone()); }
+                            let title = window_title(chosen.window).unwrap_or(chosen.app.clone());
+                            music = Some(Music { window: chosen.window, title: title.clone(), checked: Instant::now() });
+                            epoch += 1; preparing.clear();
+                            for (_, old) in links.outgoing.drain() { old.link.close(); }
+                            let _ = output.send(Update::Sharing(Some(format!("Music · {title}")))).await;
+                            // Everyone hears it straight away: no join step for music.
+                            for target in targets.clone() { prepare(epoch, target, Kind::Music(title.clone()), &mut preparing); }
+                        }
                         Command::StartTv(choice_tv) => {
+                            music = None;
                             // Another channel while sharing TV: the same connections carry it, so nobody has to join again.
                             let switching = choice_tv.share && tv.as_ref().is_some_and(|(_, _, shared)| *shared);
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
@@ -351,9 +413,10 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             tv = Some((shared, choice_tv.label.clone(), choice_tv.share));
                             let _ = output.send(Update::Sharing(Some(format!("TV · {}", choice_tv.label)))).await;
                             if !switching { epoch += 1; preparing.clear(); }
-                            if choice_tv.share && !switching { for target in targets.clone() { prepare(epoch, target, Some(choice_tv.label.clone()), &mut preparing); } }
+                            if choice_tv.share && !switching { for target in targets.clone() { prepare(epoch, target, Kind::Tv(choice_tv.label.clone()), &mut preparing); } }
                         }
                         Command::Start(next) => {
+                            music = None;
                             stop_tv(&mut tv);
                             tv_out = None;
                             if let Some(old) = sharing.take() { old.stop.store(true, Ordering::Release); }
@@ -361,9 +424,10 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             sharing = Some(start_capture(next, media_tx.clone(), update_tx.clone(), restart_tx.clone())); if let Some(active) = &sharing { links.stops.retain(|stop| !stop.load(Ordering::Acquire)); links.stops.push(active.stop.clone()); }
                             epoch += 1; preparing.clear();
                             for (_, old) in links.outgoing.drain() { old.link.close(); }
-                            for target in targets.clone() { prepare(epoch, target, None, &mut preparing); }
+                            for target in targets.clone() { prepare(epoch, target, Kind::Screen, &mut preparing); }
                         }
                         Command::Stop => {
+                            music = None;
                             epoch += 1; preparing.clear();
                             stop_tv(&mut tv);
                             tv_out = None;
@@ -379,8 +443,7 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                             for id in left { if let Some(view) = links.incoming.remove(&id) { view.stop.store(true, Ordering::Release); view.link.close(); if let Ok(mut slot) = pictures.lock() { slot.remove(&id); } let _ = output.send(Update::ViewerGone(id)).await; } }
                             let waiting: Vec<String> = offers.keys().filter(|id| !next.iter().any(|t| &t.user == *id)).cloned().collect();
                             for id in waiting { offers.remove(&id); let _ = output.send(Update::TvAvailable(id, None)).await; }
-                            let label = tv.as_ref().filter(|(_, _, share)| *share).map(|(_, label, _)| label.clone());
-                            if sharing.is_some() || label.is_some() { for target in &next { if !links.outgoing.contains_key(&target.user) { prepare(epoch, target.clone(), label.clone(), &mut preparing); } } }
+                            if let Some(kind) = share_kind(&music, &tv, sharing.is_some()) { for target in &next { if !links.outgoing.contains_key(&target.user) { prepare(epoch, target.clone(), kind.clone(), &mut preparing); } } }
                             targets = next;
                         }
                         Command::Volume { from, volume } => {
@@ -408,16 +471,18 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                                 "screen-leave" => {
                                     // Someone stopped watching our TV: offer it again so they can come back.
                                     if let Some(out) = links.outgoing.remove(&from) { out.link.close(); }
-                                    let label = tv.as_ref().filter(|(_, _, share)| *share).map(|(_, label, _)| label.clone());
-                                    if let (Some(target), true) = (targets.iter().find(|t| t.user == from).cloned(), sharing.is_some() || label.is_some()) {
+                                    if let (Some(target), Some(kind)) = (targets.iter().find(|t| t.user == from).cloned(), share_kind(&music, &tv, sharing.is_some())) {
                                         preparing.remove(&target.user);
-                                        prepare(epoch, target, label, &mut preparing);
+                                        prepare(epoch, target, kind, &mut preparing);
                                     }
                                 }
                                 "screen-label" => {
                                     let label: String = signal.get("label").and_then(Value::as_str).unwrap_or("TV").chars().filter(|c| !c.is_control()).take(80).collect();
                                     if let Some(waiting) = offers.get_mut(&from) { waiting["label"] = json!(label.clone()); let _ = output.send(Update::TvAvailable(from.clone(), Some(label.clone()))).await; }
-                                    if links.incoming.contains_key(&from) { let _ = output.send(Update::Label(from.clone(), Some(label))).await; }
+                                    if links.incoming.contains_key(&from) {
+                                        if music_from.contains(&from) { let _ = output.send(Update::Music(from.clone(), label)).await; }
+                                        else { let _ = output.send(Update::Label(from.clone(), Some(label))).await; }
+                                    }
                                 }
                                 "screen-stop" => { if offers.remove(&from).is_some() { let _ = output.send(Update::TvAvailable(from.clone(), None)).await; } if let Some(view) = links.incoming.remove(&from) { view.stop.store(true, Ordering::Release); view.link.close(); } if let Ok(mut slot) = pictures.lock() { slot.remove(&from); } let _ = output.send(Update::ViewerGone(from)).await; }
                                 "screen-answer" => {
@@ -447,6 +512,10 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                                     }
                                     let label = (signal.get("tv").and_then(Value::as_bool) == Some(true)).then(|| signal.get("label").and_then(Value::as_str).unwrap_or("TV").chars().filter(|c| !c.is_control()).take(80).collect::<String>());
                                     let _ = output.send(Update::Label(from.clone(), label)).await;
+                                    if signal.get("music").and_then(Value::as_bool) == Some(true) {
+                                        music_from.insert(from.clone());
+                                        let _ = output.send(Update::Music(from.clone(), signal.get("label").and_then(Value::as_str).unwrap_or("Music").chars().filter(|c| !c.is_control()).take(80).collect())).await;
+                                    } else { music_from.remove(&from); }
                                     if playback.is_none() { if let Ok(p) = ScreenPlayback::open(spec.output.clone()) { p.set_deafened(deafened); playback = Some(Arc::new(p)); } }
                                     let Some(player) = playback.clone() else { continue };
                                     if let Some(volume) = volumes.get(&from) { player.set_volume(stable_source(&from), *volume); }
@@ -522,6 +591,14 @@ pub fn run(spec: &Spec) -> impl Stream<Item = Update> + 'static {
                     }
                 }
                 _ = tick.tick() => {
+                    if let Some(playing) = music.as_mut().filter(|m| m.checked.elapsed() >= Duration::from_secs(2)) {
+                        playing.checked = Instant::now();
+                        if let Some(title) = window_title(playing.window).filter(|t| *t != playing.title) {
+                            playing.title = title.clone();
+                            for out in links.outgoing.values() { let _ = send(&spec, &out.offered_to, json!({ "type": "screen-label", "label": title.clone() })).await; }
+                            let _ = output.send(Update::Sharing(Some(format!("Music · {title}")))).await;
+                        }
+                    }
                     let tv_flags = tv.as_ref().map(|(shared, ..)| (shared.clone(), shared.native.load(Ordering::Acquire), shared.web_native.load(Ordering::Acquire)));
                     let mut need_converted = false;
                     for out in links.outgoing.values_mut() {
