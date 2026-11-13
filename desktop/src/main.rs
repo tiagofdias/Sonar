@@ -174,7 +174,7 @@ pub enum CallStatus { Calling, Connecting, Connected }
 #[serde(rename_all = "camelCase")]
 pub struct Participant { pub user_id: String, #[serde(default)] pub name: String, pub session_id: String, #[serde(default)] pub muted: bool, #[serde(default)] pub deafened: bool }
 #[derive(Clone, Debug)]
-pub struct ScreenPicker { pub sources: Vec<screen::Shareable>, pub selected: usize, pub height: u32, pub hardware: bool }
+pub struct ScreenPicker { pub sources: Vec<screen::Shareable>, pub selected: usize, pub height: u32, pub hardware: bool, pub tv_playing: bool }
 #[derive(Clone)]
 pub struct RoomState {
     pub spec: Option<room::Spec>,
@@ -323,6 +323,8 @@ pub struct App {
     pub screen_labels: HashMap<String, String>,
     pub window_size: iced::Size,
     pub player_drag: Option<PlayerDrag>,
+    /// Picture-in-picture: the window shrinks to this one stream and stays on top; the size to go back to.
+    pub pip: Option<(String, iced::Size)>,
     /// TV shares waiting for us to join: sharer -> channel.
     pub tv_available: HashMap<String, String>,
     /// Our TV is shared with the call (not only watched here).
@@ -542,6 +544,8 @@ pub enum Msg {
     PlayerGrab(bool),
     PlayerCursor(iced::Point),
     PlayerRelease,
+    /// Picture-in-picture for this stream, or back to the full window.
+    Pip(Option<String>),
     WindowSize(iced::Size),
     /// The next (1) or previous (-1) channel, on the same share.
     TvStep(i64),
@@ -645,7 +649,7 @@ impl App {
             unread_counts: HashMap::new(), shown_badge: 0, update_ready: None, shown_tip: 0, deferred_preferences: false, hidden: false, preferences: Default::default(), editing: None, search_query: String::new(), search_results: None, search_busy: false, typing: HashMap::new(), last_typing: None, friend_note: String::new(), friend_notes: HashMap::new(), keyword_input: String::new(), group_name: String::new(), group_picks: Vec::new(), folder_name: String::new(), activity: None, permissions_for: None, denied: Vec::new(), last_chime: None, unread_direct: HashSet::new(), unread_channels: HashSet::new(),
             composer: text_editor::Content::new(), drafts: HashMap::new(), reply_to: None, sending: false, picker: None, confirm_delete: None,
             panel: None, dialog: None, dialog_value: String::new(), dialog_voice: false, dialog_channel: None,
-            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), window_size: start_size(), player_drag: None, tv_available: HashMap::new(), tv_shared: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
+            invite: None, invite_previews: HashMap::new(), invite_scan: Default::default(), waiting: None, emoji_open: false, manage_open: false, uploading: false, pending_file: None, ringtone_level: 0.0, presence: HashMap::new(), status_open: false, person_menu: None, watch_note: None, tv_sources: Vec::new(), tv_source: None, tv_channels: Vec::new(), tv_loading: false, tv_query: String::new(), tv_error: None, tv_xtream: false, tv_adding: false, tv_favorites_only: false, apps_open: false, tv_name: String::new(), tv_url: String::new(), tv_server: String::new(), tv_user: String::new(), tv_pass: Default::default(), screen_labels: HashMap::new(), window_size: start_size(), player_drag: None, pip: None, tv_available: HashMap::new(), tv_shared: false, screen_controls: None, screen_sharing: None, screen_views: HashMap::new(), screen_expanded: None, screen_volumes: HashMap::new(), screen_allocations: HashMap::new(), screen_uploading: Default::default(), screen_ended: Default::default(), screen_picker: None, screen_targets: Vec::new(), screen_deafened: false, ringtone: None, bans: None, confirm: None, busy: false,
             settings_open: false, tab: Tab::Profile, profile_name: String::new(), profile_username: String::new(), people_query: String::new(), friend_requests: Default::default(), mic_active: false, mic_until: None, passwords: Default::default(), show_passwords: false,
             sessions: None, passkeys: None, passkey_adding: false, passkey_name: String::new(), passkey_password: String::new(), passkey_removing: None,
             backup_kind: None, sync_password: String::new(), audio_devices: None, mic_level: None, testing: false,
@@ -716,6 +720,16 @@ impl App {
             list.push(Subscription::run_with(spec, screen::run).with(key).map(|(key, update)| Msg::ScreenUpdate(key, update)));
         }
         Subscription::batch(list)
+    }
+
+    /// Back from picture-in-picture to the full window, as it was.
+    fn leave_pip(&mut self) -> Task<Msg> {
+        let Some((_, back)) = self.pip.take() else { return Task::none() };
+        iced::window::latest().and_then(move |window| Task::batch([
+            iced::window::set_level(window, iced::window::Level::Normal),
+            iced::window::set_min_size(window, Some(iced::Size::new(980.0, 620.0))),
+            iced::window::resize(window, back),
+        ]))
     }
 
     /// The floating player's left, top and width: where it was put, kept inside the window.
@@ -1245,6 +1259,13 @@ impl App {
     }
 
     fn update(&mut self, message: Msg) -> Task<Msg> {
+        let task = self.handle(message);
+        // Picture-in-picture whose stream is gone (it ended, or the call or room was left): back to the full window.
+        if self.pip.as_ref().is_some_and(|(id, _)| !self.screen_views.contains_key(id)) { return Task::batch([task, self.leave_pip()]); }
+        task
+    }
+
+    fn handle(&mut self, message: Msg) -> Task<Msg> {
         // The community menu closes once anything in it, or anywhere you go next, is chosen.
         if matches!(message, Msg::OpenDialog(_) | Msg::AskConfirm(_) | Msg::ToggleMute(_) | Msg::RoomLock(..) | Msg::OpenChannel(_) | Msg::SetMode(_) | Msg::OpenCommunity(_) | Msg::OpenGroup(_) | Msg::ToggleMembers) { self.manage_open = false; }
         match message {
@@ -2064,6 +2085,7 @@ impl App {
                     screen::Update::Ready(controls) => { self.screen_targets.clear(); self.screen_controls = Some(controls); }
                     screen::Update::Sharing(info) => {
                         // When our TV (or screen) stops, its picture here goes too.
+                        if info.is_none() && self.pip.as_ref().is_some_and(|(pip, _)| pip.as_str() == self.me()) { self.screen_sharing = None; let me = self.me().to_owned(); self.forget_screen(&me); self.screen_labels.remove(&me); return self.leave_pip(); }
                         if info.is_none() { let me = self.me().to_owned(); self.forget_screen(&me); self.screen_labels.remove(&me); if self.screen_expanded.as_ref() == Some(&me) { self.screen_expanded = None; } }
                         self.screen_sharing = info;
                     }
@@ -2079,7 +2101,7 @@ impl App {
                     screen::Update::Label(id, label) => match label { Some(label) => { self.screen_labels.insert(id, label); } None => { self.screen_labels.remove(&id); } },
                     screen::Update::Notice(text) => self.toast(ToastKind::Plain, text),
                     screen::Update::SoundFailed => self.toast(ToastKind::Plain, "Sharing without sound: Windows could not capture that app's audio."),
-                    screen::Update::ViewerGone(id) => { self.forget_screen(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
+                    screen::Update::ViewerGone(id) => { if self.pip.as_ref().is_some_and(|(pip, _)| *pip == id) { self.forget_screen(&id); self.screen_labels.remove(&id); return self.leave_pip(); } self.forget_screen(&id); self.screen_labels.remove(&id); if self.screen_expanded.as_ref() == Some(&id) { self.screen_expanded = None; } }
                     screen::Update::Pictures => if let Some(controls) = &self.screen_controls {
                         // Upload each new frame first and show it only once it is on the GPU; until then the last frame stays.
                         // A frame still uploading holds back newer ones for that person (they stay in the mailbox, newest wins).
@@ -2253,6 +2275,21 @@ impl App {
                 self.settings.player = Some(if drag.resize { [x, y, width + dx] } else { [x + dx, y + dy, width] });
                 self.settings.player = Some(self.player_box());
             },
+            Msg::Pip(Some(id)) => {
+                if !self.screen_views.contains_key(&id) { return Task::none(); }
+                let back = self.pip.as_ref().map_or(self.window_size, |(_, size)| *size);
+                let (_, w, h) = &self.screen_views[&id];
+                let width = 480.0;
+                let size = iced::Size::new(width, (width * *h as f32 / (*w).max(1) as f32 + PLAYER_CAPTION).round());
+                self.pip = Some((id, back));
+                self.screen_expanded = None;
+                return iced::window::latest().and_then(move |window| Task::batch([
+                    iced::window::set_min_size(window, Some(iced::Size::new(320.0, 220.0))),
+                    iced::window::resize(window, size),
+                    iced::window::set_level(window, iced::window::Level::AlwaysOnTop),
+                ]));
+            }
+            Msg::Pip(None) => return self.leave_pip(),
             Msg::PlayerRelease => if self.player_drag.take().is_some() { store::save_settings(&self.settings); },
             Msg::TvPlay(index, share) => {
                 let Some(channel) = self.tv_channels.get(index).cloned() else { return Task::none() };
@@ -2279,7 +2316,8 @@ impl App {
             Msg::ScreenOpenPicker => return Task::perform(async { tokio::task::spawn_blocking(|| (screen::list_shareable(), screen_media::has_hardware_encoder())).await.unwrap_or_default() }, |(list, hardware)| Msg::ScreenSources(list, hardware)),
             Msg::ScreenSources(sources, hardware) => {
                 if sources.is_empty() { self.toast(ToastKind::Plain, "Nothing to share was found."); return Task::none(); }
-                self.screen_picker = Some(ScreenPicker { sources, selected: 0, height: 1080, hardware });
+                let tv_playing = self.screen_sharing.as_deref().is_some_and(|s| s.starts_with("TV"));
+                self.screen_picker = Some(ScreenPicker { sources, selected: 0, height: 1080, hardware, tv_playing });
             }
             Msg::ScreenClosePicker => self.screen_picker = None,
             Msg::ScreenSelect(index) => if let Some(p) = &mut self.screen_picker { p.selected = index; p.height = 1080; },
@@ -2721,6 +2759,7 @@ impl App {
                     Some(Msg::PlayerRelease)
                 } else { None }
             }
+            "pip" => Some(Msg::Pip(if value == "off" { None } else { self.screen_views.keys().next().cloned() })),
             "tvnext" => Some(Msg::TvStep(value.parse().unwrap_or(1))),
             "tvjoin" => self.tv_available.keys().next().cloned().map(Msg::TvJoin),
             "tvleave" => self.screen_labels.keys().find(|id| id.as_str() != self.me()).cloned().map(Msg::TvLeave),

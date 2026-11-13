@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Grip, LogOut, Maximize, Minimize, MoveDiagonal2, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
+import { Grip, LogOut, Maximize, Minimize, MoveDiagonal2, PictureInPicture2, ScreenShare, ScreenShareOff, Volume2 } from "lucide-react";
 import { applyScreenOutput, SCREEN_QUALITIES } from "../lib/useScreenShare";
 
 export function ScreenShareButton({ screen }) {
@@ -58,14 +58,19 @@ function RemoteScreen({ stream, name, deafened, label, height, expanded, onGrab,
         <span>{caption}</span>
       </span>
       {onLeave && (
-        <button className="icon-button" aria-label="Stop watching" title="Stop watching (you can join again)" onClick={onLeave}>
-          <LogOut size={16} />
+        <button className="secondary compact screen-leave" aria-label="Stop watching" title="Stop watching (you can join again)" onClick={onLeave}>
+          <LogOut size={14} /> Leave
         </button>
       )}
       <label className="screen-volume" title="Volume of this stream">
         <Volume2 size={15} />
         <input type="range" min="0" max="1" step="0.01" value={volume} aria-label={`Volume of ${name}'s screen`} onChange={(event) => setVolume(Number(event.target.value))} />
       </label>
+      {document.pictureInPictureEnabled && (
+        <button className="icon-button" aria-label="Picture-in-picture" title="Picture-in-picture: a small window on top of everything" onClick={() => (document.pictureInPictureElement === video.current ? document.exitPictureInPicture() : video.current.requestPictureInPicture()).catch(() => {})}>
+          <PictureInPicture2 size={16} />
+        </button>
+      )}
       <button className="icon-button" aria-label={expanded ? "Back to the small player" : "Fill the window"} title={expanded ? "Back to the small player" : "Fill the window"} onClick={onExpand}>
         {expanded ? <Minimize size={16} /> : <Maximize size={16} />}
       </button>

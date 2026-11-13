@@ -32,6 +32,8 @@ pub fn view(app: &App) -> E<'_> {
         Screen::Unlock => unlock(app),
         Screen::Main => workspace(app),
     } };
+    // Picture-in-picture: the window is just the player.
+    if let Some(pip) = pip_view(app) { return crate::wheel::browser_speed(iced::widget::Stack::new().width(FILL).height(FILL).push(pip).push(toasts(app)).into()); }
     let mut layers = iced::widget::Stack::new().width(FILL).height(FILL).push(page);
     if let Some(stage) = screen_stage(app) { layers = layers.push(stage); }
     if let Some(picker) = &app.screen_picker { layers = layers.push(screen_picker(picker)); }
@@ -216,7 +218,8 @@ fn tv_status(app: &App) -> String {
 }
 
 fn screen_button<'a>(app: &'a App) -> E<'a> {
-    let sharing = app.screen_sharing.is_some();
+    // Only a screen share lights this up; TV has its own place in the Apps menu.
+    let sharing = app.screen_sharing.is_some() && !tv_playing(app);
     call_btn(if sharing { Icon::ScreenShareOff } else { Icon::ScreenShare }, 18.0, app.screen_controls.is_some().then_some(if sharing { Msg::ScreenStop } else { Msg::ScreenOpenPicker }), sharing)
 }
 
@@ -236,7 +239,22 @@ fn screen_caption(app: &App, id: &str) -> String {
     }
 }
 
-/// Buttons for a TV tile: your own gets previous / channels / next; someone else's gets "stop watching".
+/// The window in picture-in-picture: one stream filling it, its caption and a way back.
+fn pip_view(app: &App) -> Option<E<'_>> {
+    use iced::widget::image;
+    let (id, _) = app.pip.as_ref()?;
+    let (handle, _, _) = app.screen_views.get(id)?;
+    let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
+    let caption = row![
+        text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).wrapping(text::Wrapping::None).width(FILL),
+        tv_controls(app, id),
+        screen_volume(app, id),
+        tooltip(icon_btn(Icon::Maximize, 16.0, Some(Msg::Pip(None)), false), tip("Back to Sonar"), tooltip::Position::Top),
+    ].spacing(8).align_y(Vertical::Center);
+    Some(container(column![image(handle.clone()).width(FILL).height(FILL), container(caption).height(crate::PLAYER_CAPTION).padding([0, 10]).align_y(Vertical::Center)]).width(FILL).height(FILL).style(t::fill(rgb(0x000000))).into())
+}
+
+/// Buttons for a TV tile: your own gets previous / channels / next; someone else's gets "Leave".
 fn tv_controls<'a>(app: &'a App, id: &str) -> E<'a> {
     let tip = |label: &'static str| container(text(label).size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0));
     if !app.screen_labels.contains_key(id) { return space().width(0).into(); }
@@ -247,7 +265,8 @@ fn tv_controls<'a>(app: &'a App, id: &str) -> E<'a> {
             tooltip(icon_btn(Icon::ChevronRight, 16.0, Some(Msg::TvStep(1)), false), tip("Next channel"), tooltip::Position::Top),
         ].spacing(2).into();
     }
-    tooltip(icon_btn(Icon::LogOut, 16.0, Some(Msg::TvLeave(id.to_owned())), false), tip("Stop watching (you can join again)"), tooltip::Position::Top).into()
+    let leave = button(row![t::icon(Icon::LogOut, 14.0, rgb(0xd0d7dc)), text("Leave").size(13).color(rgb(0xd0d7dc))].spacing(6).align_y(Vertical::Center)).padding([5, 9]).style(t::secondary()).on_press(Msg::TvLeave(id.to_owned()));
+    tooltip(leave, tip("Stop watching (you can join again)"), tooltip::Position::Top).into()
 }
 
 fn screen_stage(app: &App) -> Option<E<'_>> {
@@ -265,7 +284,8 @@ fn screen_stage(app: &App) -> Option<E<'_>> {
         let aspect = *h as f32 / (*w).max(1) as f32;
         let grab = mouse_area(container(row![t::icon(Icon::Grip, 14.0, rgb(0x6f7a84)), text(screen_caption(app, id)).size(13).color(rgb(0xb8bec2)).wrapping(text::Wrapping::None)].spacing(8).align_y(Vertical::Center)).width(FILL).height(30).align_y(Vertical::Center).clip(true))
             .on_press(Msg::PlayerGrab(false)).interaction(if moving { iced::mouse::Interaction::Grabbing } else { iced::mouse::Interaction::Grab });
-        let caption = row![grab, tv_controls(app, id), screen_volume(app, id), icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false), space().width(14)].spacing(8).align_y(Vertical::Center);
+        let pip = tooltip(icon_btn(Icon::Pip, 16.0, Some(Msg::Pip(Some(id.clone()))), false), container(text("Picture-in-picture: a small window on top of everything").size(13).color(rgb(0xd0d7dc))).padding([6, 10]).style(t::panel(rgb(0x1e2329), rgb(0x353e49), 6.0)), tooltip::Position::Top);
+        let caption = row![grab, tv_controls(app, id), screen_volume(app, id), pip, icon_btn(Icon::Maximize, 16.0, Some(Msg::ScreenExpand(Some(id.clone()))), false), space().width(14)].spacing(8).align_y(Vertical::Center);
         tiles = tiles.push(container(column![image(handle.clone()).width(FILL).height(width * aspect), container(caption).height(crate::PLAYER_CAPTION).padding([0, 10]).align_y(Vertical::Center)]).width(FILL).style(t::panel(rgb(0x121518), rgb(0x2a313a), 8.0)));
     }
     let grip = mouse_area(container(t::icon(Icon::ResizeCorner, 13.0, rgb(0x8c969d))).padding(5)).on_press(Msg::PlayerGrab(true)).interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
@@ -292,9 +312,12 @@ fn screen_picker<'a>(picker: &'a crate::ScreenPicker) -> E<'a> {
     }
     let sound = if chosen.is_some_and(|s| s.monitor) { "Shares all PC sound except Sonar." } else { "Shares only this app's sound." };
     let encoder = if picker.hardware { "Encoded on your graphics card." } else { "No graphics-card encoder was found, so sharing is limited to 1080p." };
+    // One share at a time per person for now: a screen share replaces the TV.
+    let tv_note: E = if picker.tv_playing { container(body("Sharing your screen stops Sonar TV. Only one share at a time for now.", 13.0, rgb(0xe3c08a), 1.6)).padding([8, 12]).width(FILL).style(t::panel(rgb(0x2a261c), rgb(0x4a4130), 8.0)).into() } else { space().height(0).into() };
     let content = column![
         modal_header(Icon::ScreenShare, 24.0, Msg::ScreenClosePicker),
         modal_title("Share your screen"),
+        tv_note,
         container(scroll_area(list)).max_height(300),
         section("RESOLUTION"),
         sizes,

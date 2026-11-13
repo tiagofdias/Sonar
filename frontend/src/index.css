@@ -2686,6 +2686,7 @@ p {
 .screen-grab > svg { flex-shrink: 0; color: #6f7a84; }
 .screen-grab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .screen-grab:active { cursor: grabbing; }
+.screen-leave { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; font-size: 13px; }
 .screen-resize { position: absolute; right: 0; bottom: 0; padding: 5px; color: #8c969d; cursor: nwse-resize; touch-action: none; display: grid; }
 .screen-share-menu {
   position: relative;
