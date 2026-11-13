@@ -6,7 +6,7 @@ import { LayoutGrid, MonitorPlay, Tv } from "lucide-react";
 const APPS = [
   { id: "watch", name: "Watch together", note: "YouTube in sync, with sponsor segments skipped", icon: MonitorPlay },
   // Sharing a TV channel starts from the desktop app (browsers can't open IPTV streams); web members watch it here.
-  { id: "tv", name: "Sonar TV", note: "Your IPTV channels at their original quality. Shared from the desktop app: click to get it.", icon: Tv },
+  { id: "tv", name: "Sonar TV", note: "Browsers can't open IPTV streams, so sharing starts in the desktop app (watching works here). Click to get it.", icon: Tv },
 ];
 
 // Says once when someone starts sharing TV, with a Join button; nothing opens until you choose.
