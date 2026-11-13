@@ -2648,18 +2648,15 @@ p {
 .call-notice.missed svg {
   color: #e8909f;
 }
+/* Shared screens and TV: a floating player, the same as in the desktop app. */
 .screen-stage {
   position: fixed;
-  right: 18px;
-  bottom: 18px;
   z-index: 40;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: min(520px, calc(100vw - 36px));
-  max-height: calc(100dvh - 36px);
-  overflow-y: auto;
 }
+.screen-stage.expanded { inset: 0; gap: 0; background: #000000; }
 .screen-tile {
   margin: 0;
   background: #121518;
@@ -2670,17 +2667,26 @@ p {
 .screen-tile video {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
   background: #000000;
 }
+.screen-tile.expanded { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 0; border-radius: 0; background: #000000; }
+.screen-tile.expanded video { flex: 1; min-height: 0; object-fit: contain; }
 .screen-tile figcaption {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
+  gap: 8px;
+  height: 42px;
+  padding: 0 24px 0 10px;
   font-size: 13px;
   color: #b8bec2;
 }
+.screen-tile.expanded figcaption { padding: 0 10px; background: #121518; }
+.screen-grab { flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 8px; cursor: grab; user-select: none; }
+.screen-tile.expanded .screen-grab { cursor: default; }
+.screen-grab > svg { flex-shrink: 0; color: #6f7a84; }
+.screen-grab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.screen-grab:active { cursor: grabbing; }
+.screen-resize { position: absolute; right: 0; bottom: 0; padding: 5px; color: #8c969d; cursor: nwse-resize; touch-action: none; display: grid; }
 .screen-share-menu {
   position: relative;
   display: inline-flex;
@@ -2710,10 +2716,6 @@ p {
 }
 .screen-share-options button:hover {
   background: #2a313a;
-}
-.screen-tile figcaption span {
-  flex: 1;
-  min-width: 0;
 }
 .screen-volume {
   display: inline-flex;
@@ -3133,16 +3135,6 @@ p {
 .watch-stage.chat:not(.empty) .watch-bar { height: 0; }
 .watch-stage.chat:not(.empty) .watch-actions { position: absolute; right: 0; bottom: 0; height: 32px; }
 .watch-stage.chat:not(.empty) .watch-controls { padding-right: 72px; }
-
-/* A TV share in theater view fills the conversation and hides the chat. */
-.conversation:has(> .screen-stage.theater) > .chat-top,
-.conversation:has(> .screen-stage.theater) > .retention-banner,
-.conversation:has(> .screen-stage.theater) > .community-content,
-.conversation:has(> .screen-stage.theater) > .message-scroll,
-.conversation:has(> .screen-stage.theater) > .composer-area { display: none; }
-.screen-stage.theater { position: static; width: auto; max-height: none; margin: 14px 33px 0; overflow: hidden; flex: 1 1 auto; min-height: 0; display: flex; }
-.screen-stage.theater .screen-tile { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.screen-stage.theater .screen-tile video { flex: 1; min-height: 0; max-height: none; width: 100%; aspect-ratio: auto; object-fit: contain; }
 
 /* Settings cards shared by Alerts & privacy (same layout as the desktop app). */
 .settings-slider input[type="range"] { width: 100%; height: 5px; accent-color: #d0d7dc; cursor: pointer; }

@@ -101,10 +101,21 @@ try {
   result = await page.evaluate((first) => {
     const video = document.querySelector(".screen-tile video");
     const quality = video.getVideoPlaybackQuality();
-    return { label: document.querySelector(".screen-tile figcaption span").textContent, size: `${video.videoWidth}x${video.videoHeight}`, framesIn8s: quality.totalVideoFrames - first, hasSound: video.srcObject?.getAudioTracks().length > 0, dropped: quality.droppedVideoFrames, theater: Boolean(document.querySelector(".screen-stage.theater")), chatHidden: !document.querySelector(".community-content")?.offsetParent };
+    return { label: document.querySelector(".screen-tile figcaption span").textContent, size: `${video.videoWidth}x${video.videoHeight}`, framesIn8s: quality.totalVideoFrames - first, hasSound: video.srcObject?.getAudioTracks().length > 0, dropped: quality.droppedVideoFrames, floating: getComputedStyle(document.querySelector(".screen-stage")).position === "fixed" };
   }, first);
   result.autoOpened = autoOpened;
   await page.screenshot({ path: join(work, "web.png") });
+  // The player moves by its caption and resizes from its corner, like the desktop app's.
+  const boxOf = () => page.evaluate(() => { const r = document.querySelector(".screen-stage").getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width)]; });
+  const start = await boxOf();
+  const grip = await page.locator(".screen-grab").first().boundingBox();
+  await page.mouse.move(grip.x + 20, grip.y + 10); await page.mouse.down(); await page.mouse.move(grip.x - 500, grip.y - 300, { steps: 8 }); await page.mouse.up();
+  const moved = await boxOf();
+  const corner = await page.locator(".screen-resize").boundingBox();
+  await page.mouse.move(corner.x + 6, corner.y + 6); await page.mouse.down(); await page.mouse.move(corner.x + 206, corner.y + 6, { steps: 8 }); await page.mouse.up();
+  const resized = await boxOf();
+  await page.screenshot({ path: join(work, "web-player-moved.png") });
+  result.player = { before: start, moved, resized, kept: await page.evaluate(() => localStorage.getItem("sonar.player")) };
   // Someone else joins the room, then starts watching: the first viewer's picture must not stall.
   await page.evaluate(() => {
     const video = document.querySelector(".screen-tile video");
@@ -144,4 +155,4 @@ console.log("screenshots:", work);
 desktop.kill();
 await browser.close();
 provider.close();
-process.exit(result.error || result.detail || result.addressSeenByServer || result.autoOpened || !result.canRejoin || !(result.afterSwitch?.framesIn5s > 0) || !(result.longestStallWhileOthersJoinedMs < 1000) || !result.endsWhenSharerLeaves ? 1 : 0);
+process.exit(result.error || result.detail || result.addressSeenByServer || result.autoOpened || !result.canRejoin || !(result.afterSwitch?.framesIn5s > 0) || !(result.longestStallWhileOthersJoinedMs < 1000) || !result.endsWhenSharerLeaves || !(result.player?.moved[0] < result.player?.before[0] && result.player?.resized[2] > result.player?.moved[2]) ? 1 : 0);
